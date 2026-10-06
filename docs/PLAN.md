@@ -6,15 +6,15 @@ The complete product is not finished at the first working provider milestone.
 
 1. **Subscription validation (working).** Official documentation, installed
    version checks, real conversations, model/effort discovery, no paid fallback.
-2. **Daily local slice.** Persistent projects/chats, streaming and cancellation,
+2. **Daily local slice (working).** Persistent projects/chats, streaming and cancellation,
    searchable history, review/comments/revisions, terminals, artifacts, approvals.
-3. **All providers and shared context.** Native continuation per provider,
+3. **All providers and shared context (verified).** Native continuation per provider,
    attributed cross-provider handoffs, on-demand history tools, visible subagents.
-4. **Reliability and context.** Restart/reconnect recovery, deduplicated actions,
+4. **Reliability and context (verified).** Restart/reconnect recovery, deduplicated actions,
    evidence-linked project notes, directional reference repositories.
-5. **Windows delivery and remote use.** Double-click launch, portable package,
+5. **Windows delivery and remote use (installed; device checks pending).** Double-click launch, portable package,
    authenticated encrypted remote browser access, responsive review and approvals.
-6. **Acceptance and dogfooding.** Real provider/device checks, setup/update/backup
+6. **Acceptance and dogfooding (physical device acceptance pending).** Real provider/device checks, setup/update/backup
    guide, prioritized backlog. No mock-only capability counts as complete.
 
 ## Architecture decisions
@@ -65,5 +65,18 @@ Never record credentials, account identifiers, or raw diagnostic transcripts in 
 - This machine's Codex Windows sandbox can fail during ACL setup. The agent can
   request approval for an unsandboxed command. The app does not silently disable
   sandboxing; each such request remains visible and requires approval.
-- Remaining: browser QA, native continuation/delegation/cancel tests, packaging,
-  private remote setup and physical laptop/iPhone checks, user documentation.
+- All three providers resumed native sessions, called scoped history tools and
+  completed one native subagent. Cancellation after streaming began passed for all
+  three. A real Cursor revision through the UI passed all six fixture tests.
+- Desktop and iPhone-sized Edge checks passed, including real ConPTY, review,
+  artifacts and reconnect. Screenshots were inspected. Phone tests are emulation.
+- A real Codex response survived an abrupt test-host exit as saved partial text;
+  restart marked it interrupted, prevented duplicate action submission, and an
+  explicit native continuation succeeded.
+- Reload-safe submission recovery passed in a real browser with a simulated
+  provider, including both an accepted-but-lost response and an unreceived request.
+- Windows package and desktop shortcut installed; private Tailscale HTTPS and
+  owner-bound pairing verified from the host. No new recurring service added.
+- Setup, update, backup, limits and prioritized dogfooding backlog are documented.
+- Remaining completion action: physical Windows laptop/iPhone validation. The
+  product owner cannot test the devices yet; do not mark the full goal complete.

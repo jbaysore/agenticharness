@@ -3,11 +3,11 @@
 Checked 2026-10-06 against the installed versions listed in PLAN.md. Recheck on
 provider upgrades and account/plan changes. These are local personal integrations.
 
-| Route | Supported interface | Billing evidence | Enforcement and limits |
-| --- | --- | --- | --- |
-| Codex / ChatGPT | Official `codex app-server`, JSON-RPC over stdio | `account/read.type=chatgpt`; `account/rateLimits/read.ordinaryUsageAllowed`; quota and credit fields | Reject API/gateway auth, unknown or depleted included usage, and available paid credits until a reliable no-credit path exists. Use standard speed and the live model catalog. |
-| Claude Code / Claude plan | Official unmodified `claude -p`, stream-json, native login | `claude auth status` reports claude.ai, firstParty and subscriptionType; account usage settings must have paid credits disabled | No `--bare` (it bypasses OAuth), API keys, gateway routes, fast mode, credit purchases, or budget flags misrepresented as subscription caps. Quota telemetry is only authoritative when supplied by the CLI. |
-| Cursor / Cursor plan | Official `agent acp`, JSON-RPC over stdio | Official browser login and account dashboard with on-demand usage disabled | Use native ACP model/config options; do not fabricate quota percentages or infer coverage from a model response. ACP itself does not document a billing-mode attestation. |
+| Route                     | Supported interface                                             | Billing evidence                                                                                                                               | Enforcement and limits                                                                                                                                                                                                             |
+| ------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex / ChatGPT           | Official `codex app-server`, JSON-RPC over stdio                | `account/read.type=chatgpt`; `account/rateLimits/read.ordinaryUsageAllowed`; quota and credit fields                                           | Reject API/gateway auth, unknown or depleted included usage, and available paid credits until a reliable no-credit path exists. Use standard speed and the live model catalog.                                                     |
+| Claude Code / Claude plan | Official Agent SDK controlling the unmodified CLI, native login | `claude auth status` reports claude.ai, firstParty and subscriptionType; native usage control independently confirms user-disabled extra usage | No `--bare` (it bypasses OAuth), API keys, gateway routes, fast mode, credit purchases, or budget flags misrepresented as subscription caps. Experimental native quota API is version-sensitive and fails closed when unavailable. |
+| Cursor / Cursor plan      | Official `agent acp`, JSON-RPC over stdio                       | Official browser login and account dashboard with on-demand usage disabled                                                                     | Use native ACP model/config options; do not fabricate quota percentages or infer coverage from a model response. ACP itself does not document a billing-mode attestation.                                                          |
 
 ## Sources
 
@@ -50,3 +50,21 @@ Paid-credit protection applies to native compaction/subagents as well as visible
 messages. Disable paid modes at the provider account as the final billing
 boundary. App-side polling alone cannot prevent a provider-side charge during an
 already-running turn if the account permits paid fallback.
+
+The installed Claude SDK is 0.3.292 with Claude Code 2.1.292. Its
+`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET` method reports native
+account quota and `extra_usage` settings without inference. This is actual
+provider telemetry, not a local usage estimate. Cursor 2026.10.01-e373342 supplies
+43 ACP model presets but does not expose separate effort/speed controls. Attempts
+to select an unadvertised standard-speed variant were rejected, so the app keeps
+the exact advertised catalog and disables fast/Auto presets.
+
+Cursor native task progress arrived as standard `tool_call`/`tool_call_update`
+events (`rawInput._toolName=task`), rather than the documented optional
+`cursor/task` notification. Both forms are supported. Native task IDs retain the
+delegation label through subsequent status updates that omit the tool name.
+
+Remote implementation follows [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
+and its [CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve).
+The app trusts only the explicitly configured owner identity supplied by that
+loopback proxy and also requires an app session. It does not enable Funnel.
