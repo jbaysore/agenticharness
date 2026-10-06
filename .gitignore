@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+.local/
+.env
+.env.*
+*.sqlite
+*.sqlite-*
+*.log
+coverage/
+playwright-report/
+test-results/
