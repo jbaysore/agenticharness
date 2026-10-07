@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { mkdir, copyFile } from "node:fs/promises";
+import { mkdir, copyFile, cp } from "node:fs/promises";
 await mkdir("dist", { recursive: true });
 await build({
   entryPoints: ["src/ui/app.jsx"],
@@ -12,4 +12,6 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
 });
 await copyFile("src/ui/index.html", "dist/index.html");
+await copyFile("src/ui/manifest.webmanifest", "dist/manifest.webmanifest");
+await cp("src/ui/icons", "dist/icons", { recursive: true });
 console.log("Built the browser client.");

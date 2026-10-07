@@ -14,6 +14,7 @@ $harnessShortcut.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
 $harnessShortcut.Arguments = '"' + (Join-Path $harnessDestination 'Launch Harness.vbs') + '"'
 $harnessShortcut.WorkingDirectory = $harnessDestination
 $harnessShortcut.Description = 'Open your subscription-backed coding workspace'
+$harnessShortcut.IconLocation = (Join-Path $harnessDestination 'dist\icons\harness.ico') + ',0'
 $harnessShortcut.Save()
 if (-not $NoLaunch) { Start-Process -FilePath $harnessShortcut.TargetPath -ArgumentList $harnessShortcut.Arguments -WindowStyle Hidden }
 Write-Output ('Installed Agentic Harness ' + $harnessVersion)

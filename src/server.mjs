@@ -536,22 +536,28 @@ export async function createHarness({
       if (method !== "GET" && method !== "HEAD")
         return json(res, 405, { error: "Method not allowed" });
       const assets = {
-        "/": "index.html",
-        "/app.js": "app.js",
-        "/app.css": "app.css",
+        "/": ["index.html", "text/html"],
+        "/app.js": ["app.js", "text/javascript"],
+        "/app.css": ["app.css", "text/css"],
+        "/favicon.ico": ["icons/harness.ico", "image/vnd.microsoft.icon"],
+        "/icons/harness.svg": ["icons/harness.svg", "image/svg+xml"],
+        "/icons/harness-192.png": ["icons/harness-192.png", "image/png"],
+        "/icons/harness-512.png": ["icons/harness-512.png", "image/png"],
+        "/icons/apple-touch-icon.png": [
+          "icons/apple-touch-icon.png",
+          "image/png",
+        ],
+        "/manifest.webmanifest": [
+          "manifest.webmanifest",
+          "application/manifest+json",
+        ],
       };
-      const asset = assets[path];
+      const asset = Object.hasOwn(assets, path) ? assets[path] : null;
       if (!asset) return json(res, 404, { error: "Not found" });
-      const content = await readFile(join(root, "dist", asset));
+      const [filename, contentType] = asset;
+      const content = await readFile(join(root, "dist", filename));
       res.setHeader("Cache-Control", "no-cache");
-      res.setHeader(
-        "Content-Type",
-        asset.endsWith(".js")
-          ? "text/javascript"
-          : asset.endsWith(".css")
-            ? "text/css"
-            : "text/html",
-      );
+      res.setHeader("Content-Type", contentType);
       res.end(content);
     } catch (error) {
       if (!res.headersSent) json(res, 400, { error: error.message });
