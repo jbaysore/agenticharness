@@ -20,7 +20,7 @@ try {
         canvas.width = canvas.height = size;
         const context = canvas.getContext("2d");
         if (opaque) {
-          context.fillStyle = "#141818";
+          context.fillStyle = "#141414";
           context.fillRect(0, 0, size, size);
         }
         context.drawImage(image, 0, 0, size, size);

@@ -7,6 +7,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 import { readPending, savePending } from "./outbox.mjs";
+import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
 
 async function api(path, body, method) {
   const response = await fetch(path, {
@@ -40,6 +41,8 @@ const paths = {
   stop: "M6 6h12v12H6Z",
   close: "m6 6 12 12M6 18 18 6",
   menu: "M4 6h16M4 12h16M4 18h16",
+  sidebar: "M3 4h18v16H3V4Zm6 0v16",
+  panel: "M3 4h18v16H3V4Zm12 0v16",
   refresh: "M20 10a8 8 0 1 0-1 7M20 4v6h-6",
   check: "m5 12 4 4 10-10",
   link: "m9 15 6-6M7 14l-2 2a3 3 0 0 0 4 4l4-4M11 8l4-4a3 3 0 0 1 4 4l-2 2",
@@ -130,11 +133,45 @@ function App() {
     [effort, setEffort] = useState(""),
     [draft, setDraft] = useState("");
   const [panel, setPanel] = useState("review"),
-    [showPanel, setShowPanel] = useState(() => window.innerWidth >= 1150),
+    [overlayPanel, setOverlayPanel] = useState(false),
     [sidebar, setSidebar] = useState(false),
     [modal, setModal] = useState(null),
     [online, setOnline] = useState(true),
     [busy, setBusy] = useState(false);
+  const {
+    layout,
+    setLayout,
+    mobile,
+    docked,
+    leftWidth,
+    rightWidth,
+    leftMax,
+    rightMax,
+  } = useSidebarLayout();
+  const sidebarVisible = mobile ? sidebar : layout.leftOpen;
+  const showPanel = docked ? layout.rightOpen : overlayPanel;
+  const setShowPanel = (open) => {
+    if (docked) setLayout((current) => ({ ...current, rightOpen: open }));
+    else setOverlayPanel(open);
+  };
+  const toggleSidebar = () => {
+    if (mobile) setSidebar((open) => !open);
+    else setLayout((current) => ({ ...current, leftOpen: !current.leftOpen }));
+  };
+  useEffect(() => {
+    setSidebar(false);
+    setOverlayPanel(false);
+  }, [mobile, docked]);
+  useEffect(() => {
+    const dismiss = (event) => {
+      if (event.key === "Escape") {
+        setSidebar(false);
+        setOverlayPanel(false);
+      }
+    };
+    window.addEventListener("keydown", dismiss);
+    return () => window.removeEventListener("keydown", dismiss);
+  }, []);
   const [search, setSearch] = useState(""),
     [results, setResults] = useState([]),
     [searchScope, setSearchScope] = useState("project");
@@ -443,14 +480,40 @@ function App() {
       className={
         "workspace " +
         (showPanel ? "with-panel " : "") +
-        (sidebar ? "sidebar-open" : "")
+        (sidebarVisible ? "sidebar-open" : "sidebar-collapsed")
       }
+      style={{
+        "--sidebar-width": `${leftWidth}px`,
+        "--panel-width": `${rightWidth}px`,
+      }}
     >
-      <aside className="sidebar">
+      {mobile && sidebar && (
+        <button
+          className="sidebar-backdrop"
+          aria-label="Dismiss sidebar"
+          onClick={() => setSidebar(false)}
+        />
+      )}
+      <aside
+        className="sidebar"
+        id="project-sidebar"
+        aria-label="Projects and conversations"
+        hidden={!sidebarVisible}
+      >
         <div className="brand">
           <Mark />
           <span>Harness</span>
           <span className="version">LOCAL</span>
+          <button
+            className="icon-button sidebar-close"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+            aria-controls="project-sidebar"
+            aria-expanded={sidebarVisible}
+            onClick={toggleSidebar}
+          >
+            <Icon name="sidebar" size={17} />
+          </button>
         </div>
         <button className="new-chat" onClick={action(newChat)}>
           <Icon name="plus" />
@@ -539,15 +602,28 @@ function App() {
             </span>
           </div>
         </div>
+        <ResizeHandle
+          side="left"
+          controls="project-sidebar"
+          width={leftWidth}
+          min={220}
+          max={leftMax}
+          onResize={(leftWidth) =>
+            setLayout((current) => ({ ...current, leftWidth }))
+          }
+        />
       </aside>
       <main className="chat-main">
         <header className="topbar">
           <button
-            className="icon-button mobile-menu"
-            aria-label="Show sidebar"
-            onClick={() => setSidebar(!sidebar)}
+            className="icon-button"
+            aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+            title={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+            aria-controls="project-sidebar"
+            aria-expanded={sidebarVisible}
+            onClick={toggleSidebar}
           >
-            <Icon name="menu" />
+            <Icon name="sidebar" />
           </button>
           <div className="breadcrumbs">
             <span>{project?.name ?? "Your workspace"}</span>
@@ -557,9 +633,12 @@ function App() {
           <button
             className={"icon-button " + (showPanel ? "active" : "")}
             aria-label="Toggle work panel"
+            title={showPanel ? "Collapse work panel" : "Show work panel"}
+            aria-controls="work-panel"
+            aria-expanded={showPanel}
             onClick={() => setShowPanel(!showPanel)}
           >
-            <Icon name="review" />
+            <Icon name="panel" />
           </button>
         </header>
         {!online && (
@@ -828,7 +907,19 @@ function App() {
         </div>
       </main>
       {showPanel && (
-        <aside className="work-panel">
+        <aside className="work-panel" id="work-panel" aria-label="Work panel">
+          {!mobile && (
+            <ResizeHandle
+              side="right"
+              controls="work-panel"
+              width={rightWidth}
+              min={320}
+              max={rightMax}
+              onResize={(rightWidth) =>
+                setLayout((current) => ({ ...current, rightWidth }))
+              }
+            />
+          )}
           <header className="panel-tabs">
             {[
               ["review", "review", "Review"],
@@ -849,6 +940,9 @@ function App() {
             <button
               className="icon-button panel-close"
               aria-label="Close work panel"
+              title="Collapse work panel"
+              aria-controls="work-panel"
+              aria-expanded={showPanel}
               onClick={() => setShowPanel(false)}
             >
               <Icon name="close" size={16} />
@@ -1762,9 +1856,9 @@ function TerminalPane({ project, report }) {
         fontFamily: "Cascadia Code, Consolas, monospace",
         fontSize: 12,
         theme: {
-          background: "#101414",
-          foreground: "#d4ddda",
-          cursor: "#a4dfbc",
+          background: "#101010",
+          foreground: "#dedede",
+          cursor: "#eeeeee",
         },
         cursorBlink: true,
         scrollback: 5000,

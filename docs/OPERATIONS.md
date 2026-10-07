@@ -28,6 +28,14 @@ and linescience-personal. Only linescience-personal lists linescience as an
 upstream reference. The reverse relationship is absent. Add more folders with
 the **+** beside Projects. Each folder retains its own Git state.
 
+Drag the inside edge of either sidebar to change its width. You can also focus
+the edge with Tab and use the left/right arrows (Shift for larger steps), Home
+or End for the smallest/largest width, or double-click to reset. The sidebar
+buttons in the conversation header hide or reopen each side; each sidebar also
+has its own collapse button. Desktop widths and visibility are remembered in
+this browser. On smaller screens the work panel opens over the conversation,
+and on phones the project sidebar does too. Escape dismisses these overlays.
+
 ## Sign-in and subscription boundaries
 
 The app uses the official native executables already installed for your Windows

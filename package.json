@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:layout": "npm run build && node scripts/layout-acceptance.mjs",
     "probe:codex": "node scripts/probe-codex.mjs",
     "build:icons": "node scripts/build-icons.mjs",
     "build": "node scripts/build.mjs",
