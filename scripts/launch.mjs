@@ -8,17 +8,43 @@ const dataDir =
   process.env.HARNESS_DATA_DIR ??
   join(process.env.LOCALAPPDATA, "AgenticHarness");
 await mkdir(dataDir, { recursive: true });
+let lastHealthError;
 async function running() {
   try {
     const r = JSON.parse(await readFile(join(dataDir, "runtime.json"), "utf8"));
-    const h = await fetch(r.origin + "/health", {
+    const response = await fetch(r.origin + "/health", {
       signal: AbortSignal.timeout(1200),
-    }).then((r) => r.json());
-    return h.app === "Agentic Harness" && h.instanceId === r.instanceId
-      ? r
-      : null;
-  } catch {
+    });
+    if (!response.ok)
+      throw new Error(`Health check returned HTTP ${response.status}`);
+    const h = await response.json();
+    if (h.app !== "Agentic Harness" || h.instanceId !== r.instanceId)
+      throw new Error("The running host does not match the saved runtime file");
+    lastHealthError = null;
+    return r;
+  } catch (error) {
+    lastHealthError = error.cause?.code ?? error.code ?? error.message;
     return null;
+  }
+}
+async function startupError(path, offset) {
+  const file = await open(path, "r");
+  try {
+    const { size } = await file.stat();
+    const start = Math.max(offset, size - 8192);
+    const buffer = Buffer.alloc(Math.max(0, size - start));
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+    const lines = buffer
+      .subarray(0, bytesRead)
+      .toString("utf8")
+      .trim()
+      .split(/\r?\n/);
+    return (
+      lines.find((line) => /^(?:\w*Error:|Error \[)/.test(line)) ??
+      lines.filter(Boolean).at(-1)
+    );
+  } finally {
+    await file.close();
   }
 }
 try {
@@ -56,8 +82,11 @@ try {
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
-    const out = await open(join(dataDir, "host.log"), "a"),
-      err = await open(join(dataDir, "host-errors.log"), "a");
+    const errorLog = join(dataDir, "host-errors.log"),
+      out = await open(join(dataDir, "host.log"), "a"),
+      err = await open(errorLog, "a"),
+      errorOffset = (await err.stat()).size;
+    let startupFailure;
     const child = spawn(process.execPath, [join(root, "src", "server.mjs")], {
       cwd: root,
       detached: true,
@@ -77,6 +106,12 @@ try {
           : {}),
       },
     });
+    child.once("error", (error) => {
+      startupFailure = `Harness could not start its host: ${error.message}.`;
+    });
+    child.once("exit", (code, signal) => {
+      startupFailure = `Harness host exited during startup (${signal ?? `code ${code}`}).`;
+    });
     child.unref();
     await out.close();
     await err.close();
@@ -84,11 +119,24 @@ try {
     while (!runtime && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 250));
       runtime = await running();
+      if (!runtime && startupFailure) break;
     }
-    if (!runtime)
-      throw new Error(
-        "Harness did not start. See " + join(dataDir, "host-errors.log"),
+    if (!runtime) {
+      const detail = await startupError(errorLog, errorOffset).catch(
+        () => null,
       );
+      throw new Error(
+        [
+          startupFailure ??
+            "Harness did not respond before the startup deadline.",
+          detail ??
+            (lastHealthError && `Last health check: ${lastHealthError}.`),
+          `See ${errorLog}`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+    }
   }
   if (process.argv.includes("--no-browser")) {
     console.log("Harness host ready at " + runtime.origin);

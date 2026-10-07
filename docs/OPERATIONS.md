@@ -8,6 +8,15 @@ under `%LOCALAPPDATA%\AgenticHarness`. Closing the app window leaves the host an
 ongoing work running. The host starts when you launch the app; it is not a Windows
 service and does not currently start automatically when you sign in.
 
+Verify installed-app launches through the actual Windows desktop shortcut.
+Packaged development tools can redirect `%LOCALAPPDATA%` into their own private
+storage; starting the host there can create a separate runtime and database from
+the ones Windows Explorer sees. A desktop launch can then encounter an occupied
+port even though its runtime file is missing. Preserve the existing database and
+configuration before consolidating those folders, and restart the idle host from
+Explorer. The launcher reports an early host exit with the new host error instead
+of waiting for a generic startup timeout; earlier log entries are excluded.
+
 Pick a project in the sidebar, then choose an agent and model in the composer.
 The picker comes from the connected native integrations. Supported effort choices
 change with the model. Cursor currently provides complete presets, so its separate
