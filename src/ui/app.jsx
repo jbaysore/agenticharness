@@ -7,6 +7,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 import { readPending, savePending } from "./outbox.mjs";
+import { providerStatusLabel } from "./status.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
 
 async function api(path, body, method) {
@@ -676,11 +677,7 @@ function App() {
                           (!p.connected || p.blockReason ? "warning" : "")
                         }
                       />
-                      {p.blockReason
-                        ? "Setup needed"
-                        : p.connected
-                          ? "Connected"
-                          : "Checking…"}
+                      {providerStatusLabel(p)}
                     </span>
                   </button>
                 ))}
