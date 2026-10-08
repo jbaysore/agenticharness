@@ -23,6 +23,16 @@ export async function cursorAuth() {
       .digest("hex"),
   };
 }
+export function cursorClientCapabilities() {
+  return {
+    fs: { readTextFile: false, writeTextFile: false },
+    terminal: false,
+    session: { configOptions: { boolean: {} } },
+    // Without this Cursor-specific capability, ACP collapses each model to one
+    // default variant. Composer and Grok then arrive only as Fast presets.
+    _meta: { parameterizedModelPicker: true },
+  };
+}
 export async function openCursor(cwd) {
   const c = cursorCommand();
   if (!c.command) throw new Error("Cursor CLI is not installed");
@@ -33,11 +43,7 @@ export async function openCursor(cwd) {
   try {
     const init = await rpc.call("initialize", {
       protocolVersion: 1,
-      clientCapabilities: {
-        fs: { readTextFile: false, writeTextFile: false },
-        terminal: false,
-        session: { configOptions: { boolean: {} } },
-      },
+      clientCapabilities: cursorClientCapabilities(),
       clientInfo: { name: "agentic-harness", version: "0.1.0" },
     });
     if (!init.authMethods?.some((m) => m.id === "cursor_login"))
@@ -52,19 +58,80 @@ export async function openCursor(cwd) {
   }
 }
 export function cursorModels(session) {
-  return (session.models?.availableModels ?? []).map((m) => ({
-    id: m.modelId,
-    name: m.name,
-    description: m.modelId,
-    efforts: [],
-    defaultEffort: null,
-    isDefault: /claude-sonnet-5-5/.test(m.modelId),
-    billing: /fast=true/.test(m.modelId)
-      ? "Unavailable: ACP only exposes this fast preset"
-      : "Included budget · on-demand must be disabled",
-    disabled: /fast=true/.test(m.modelId) || m.modelId.startsWith("default"),
-    nativeSubagents: true,
-  }));
+  const advertised = session.models?.availableModels ?? [];
+  const fromConfig =
+    session.configOptions?.find((option) => option.id === "model")?.options ??
+    [];
+  const source = advertised.length
+    ? advertised.map((model) => ({ id: model.modelId, name: model.name }))
+    : fromConfig.map((option) => ({ id: option.value, name: option.name }));
+  return source.map((model) => {
+    const fastOnly = /fast=true/.test(model.id);
+    const auto = model.id.startsWith("default");
+    return {
+      id: model.id,
+      name: model.name,
+      description: model.id,
+      efforts: [],
+      defaultEffort: null,
+      isDefault: /claude-sonnet-5-5/.test(model.id),
+      billing: fastOnly
+        ? "Unavailable: ACP only exposes this fast preset"
+        : auto
+          ? "Unavailable: Auto can change the model during a turn"
+          : "Included budget · standard speed · on-demand must be disabled",
+      disabled: fastOnly || auto,
+      nativeSubagents: true,
+    };
+  });
+}
+export function cursorSpeedFollowUp(configOptions) {
+  const fast = configOptions?.find((option) => option.id === "fast");
+  if (!fast || fast.currentValue === "false") return null;
+  if (!fast.options?.some((option) => option.value === "false"))
+    return { error: "Cursor only offers a fast preset for this model" };
+  return { configId: "fast", value: "false" };
+}
+export function cursorConfigDrift(configOptions, requestedId) {
+  const chosen = configOptions?.find(
+    (option) => option.id === "model" || option.category === "model",
+  )?.currentValue;
+  if (chosen && chosen !== requestedId) return "model";
+  if (
+    configOptions?.find((option) => option.id === "fast")?.currentValue ===
+    "true"
+  )
+    return "fast";
+  return null;
+}
+export async function configureCursorModel(rpc, sessionId, modelId) {
+  let configured = await rpc.call("session/set_config_option", {
+    sessionId,
+    configId: "model",
+    value: modelId,
+  });
+  if (
+    configured.configOptions?.find((option) => option.id === "model")
+      ?.currentValue !== modelId
+  )
+    throw new Error("Cursor did not confirm the requested model");
+  const followUp = cursorSpeedFollowUp(configured.configOptions);
+  if (followUp?.error) throw new Error(followUp.error);
+  if (followUp) {
+    configured = await rpc.call("session/set_config_option", {
+      sessionId,
+      configId: followUp.configId,
+      value: followUp.value,
+    });
+    if (
+      configured.configOptions?.find((option) => option.id === "model")
+        ?.currentValue !== modelId ||
+      configured.configOptions?.find((option) => option.id === "fast")
+        ?.currentValue !== "false"
+    )
+      throw new Error("Cursor did not confirm standard speed");
+  }
+  return configured;
 }
 export function cursorWorkKind(update, nativeTasks) {
   if (
@@ -111,7 +178,7 @@ export async function inspectCursor(cwd, confirmation) {
         usage: false,
         historyTools: true,
       },
-      note: "Only the exact presets advertised by ACP are selectable. Separate effort/speed controls are not exposed by this installed ACP version.",
+      note: "Auto stays unavailable. Models that offer Fast are pinned to standard speed, and a turn stops if Fast turns back on. Effort stays at the provider default.",
     };
   } finally {
     rpc.close();
@@ -224,14 +291,17 @@ export async function runCursor(ctx) {
           item: update,
         });
       if (update.sessionUpdate === "config_option_update") {
-        const chosen = update.configOptions?.find(
-          (c) => c.category === "model",
-        )?.currentValue;
-        if (chosen && chosen !== ctx.model) {
+        const drift = cursorConfigDrift(update.configOptions, ctx.model);
+        if (drift) {
           ctx.emit("work", {
             kind: "model-change",
-            model: chosen,
-            reason: "Provider changed the selected model; stopped for review.",
+            model:
+              update.configOptions?.find((c) => c.id === "model")
+                ?.currentValue ?? ctx.model,
+            reason:
+              drift === "fast"
+                ? "Provider turned Fast on; stopped for review."
+                : "Provider changed the selected model; stopped for review.",
           });
           cancel();
         }
@@ -258,16 +328,7 @@ export async function runCursor(ctx) {
       throw new Error(
         "Choose an available standard Cursor preset from the live ACP catalog",
       );
-    const configured = await rpc.call("session/set_config_option", {
-      sessionId,
-      configId: "model",
-      value: ctx.model,
-    });
-    if (
-      configured.configOptions?.find((c) => c.id === "model")?.currentValue !==
-      ctx.model
-    )
-      throw new Error("Cursor did not confirm the requested model");
+    await configureCursorModel(rpc, sessionId, ctx.model);
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");
     live = true;
