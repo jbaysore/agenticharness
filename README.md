@@ -30,10 +30,10 @@ laptop/iPhone validation is pending. See [daily-use instructions](docs/OPERATION
 - Codex must report ChatGPT login, included usage available and no paid credits.
 - Claude Code must report Claude sign-in, current quota and user-disabled extra
   usage. Fast mode and direct API routes are disabled.
-- Cursor must use native login. Confirm **on-demand usage off** in its dashboard;
-  the app binds confirmation to the account for 24 hours. ACP supplies no reliable
-  quota meter. Auto is omitted from the picker. Models that offer Fast are pinned
-  to standard speed. A daily on-demand confirmation is required before a turn.
+- Cursor must use native login. Confirm **on-demand usage off** in its dashboard
+  once. The app keeps that confirmation for the signed-in account. ACP supplies no
+  reliable quota meter. Auto is omitted from the picker. Models that offer Fast
+  are pinned to standard speed.
 
 Connection checks and live catalogs adapt to plan changes. Unknown or exhausted
 quota stops Codex/Claude. Cursor's account-level disabled on-demand setting is the

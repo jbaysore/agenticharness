@@ -25,19 +25,13 @@ export function checkCodexBilling(account, usage) {
   return null;
 }
 
-export function checkAccountConfirmation(
-  confirmation,
-  fingerprint,
-  now = Date.now(),
-) {
+export function checkAccountConfirmation(confirmation, fingerprint) {
   if (
     !confirmation ||
     confirmation.fingerprint !== fingerprint ||
     confirmation.disabled !== true
   )
     return "Verify paid usage is disabled in the provider account settings.";
-  if (now - confirmation.verifiedAt > 24 * 60 * 60 * 1000)
-    return "Recheck the provider paid-usage setting. The previous verification is over 24 hours old.";
   return null;
 }
 

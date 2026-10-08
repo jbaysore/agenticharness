@@ -1120,8 +1120,8 @@ function App() {
                       I’ve verified on-demand usage is off
                     </button>
                     <small>
-                      Account verification expires after 24 hours. Model
-                      responses are not billing proof.
+                      This confirmation stays with the signed-in Cursor account.
+                      Model responses are not billing proof.
                     </small>
                   </div>
                 )}

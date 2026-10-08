@@ -100,11 +100,18 @@ test("Claude requires explicit user-disabled extra usage, not an empty credit ba
   u.rate_limits.extra_usage.is_enabled = true;
   assert.match(checkClaudeBilling(auth, u), /could not verify/);
 });
-test("account confirmation expires and cannot transfer to another account", () => {
+test("account confirmation stays with the account and does not expire", () => {
   const c = { fingerprint: "account-a", disabled: true, verifiedAt: 1000 };
-  assert.equal(checkAccountConfirmation(c, "account-a", 2000), null);
-  assert.match(checkAccountConfirmation(c, "account-b", 2000), /Verify/);
-  assert.match(checkAccountConfirmation(c, "account-a", 86402000), /Recheck/);
+  assert.equal(checkAccountConfirmation(c, "account-a"), null);
+  assert.equal(
+    checkAccountConfirmation(c, "account-a", Date.now() + 10 * 86400000),
+    null,
+  );
+  assert.match(checkAccountConfirmation(c, "account-b"), /Verify/);
+  assert.match(
+    checkAccountConfirmation({ ...c, disabled: false }, "account-a"),
+    /Verify/,
+  );
 });
 test("provider children cannot inherit API credentials, gateways or node injection", () => {
   const env = subscriptionEnvironment({

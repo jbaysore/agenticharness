@@ -16,9 +16,9 @@
    approval-backed recovery explicit while the native sandbox issue remains.
    Track the node-pty AttachConsole shutdown warning too; keep the verified
    system-console cleanup until the library fixes its helper race.
-4. Replace Cursor's daily dashboard confirmation when ACP exposes authoritative
+4. Replace Cursor's manual on-demand confirmation when ACP exposes authoritative
    billing and quota information. Until then keep the account-level on-demand-off
-   boundary and honest unavailable meter.
+   boundary and honest unavailable meter. The saved confirmation does not expire.
 5. Add optional start-at-login, a tray indicator, and a signed installer/updater.
    No startup service or recurring service cost is required by this release.
 6. Extend the tested reload-safe outbox to explicit queued drafts across browser

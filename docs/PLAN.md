@@ -41,8 +41,8 @@ The complete product is not finished at the first working provider milestone.
   login confirmed. Preserve the existing cursor-agent directory and worker lock.
 - Product owner confirmed Claude usage credits and Cursor on-demand usage are off.
   Claude's native usage response independently confirms user-disabled extra usage.
-  Cursor ACP has no authoritative billing meter; its account-bound confirmation
-  expires after 24 hours and must be renewed in the app.
+  Cursor ACP has no authoritative billing meter; the account-bound confirmation
+  does not expire and must be repeated only after the signed-in account changes.
 - Existing Tailscale installation is signed in; use a new private HTTPS port,
   preserving existing Serve/Funnel services. Device testing is still pending.
 

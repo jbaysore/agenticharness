@@ -53,10 +53,11 @@ extract or relay subscription tokens. Account/model probes do not submit prompts
   The usage control is experimental and version-sensitive: a future incompatible
   version will block work rather than infer billing safety.
 - **Cursor:** use the official Cursor CLI browser sign-in and disable on-demand
-  usage in the account dashboard. Confirm that setting in Connections & usage.
-  The confirmation is tied to the account and expires after 24 hours. ACP exposes
-  no authoritative quota meter or paid-mode attestation, so the dashboard setting
-  remains the required protection. A model reply is not billing proof.
+  usage in the account dashboard. Confirm that setting once in Connections & usage.
+  The confirmation stays with that account and does not expire. Confirm again only
+  after signing in to a different Cursor account. ACP exposes no authoritative
+  quota meter or paid-mode attestation, so the dashboard setting remains the
+  required protection. A model reply is not billing proof.
 
 Use **Refresh** in Connections & usage after a login or plan change. The app never
 automatically buys credits, supplies an inference API key, or retries a failed
