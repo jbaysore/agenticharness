@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createHarness } from "../src/server.mjs";
 import { request } from "node:http";
@@ -28,44 +28,69 @@ const proxyFetch = (url, options = {}) =>
     req.end(options.body);
   });
 
-test("HTTPS proxy requires the configured owner identity, in addition to pairing", async () => {
+test("remote origin requires the owner's Cloudflare Access token, in addition to pairing", async () => {
   const dir = await mkdtemp(join(tmpdir(), "harness-remote-"));
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    }),
+    stranger = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+  const token = (claims, key = privateKey) => {
+    const body = [{ alg: "RS256", kid: "key-1" }, claims]
+      .map((part) => Buffer.from(JSON.stringify(part)).toString("base64url"))
+      .join(".");
+    return (
+      body +
+      "." +
+      sign("RSA-SHA256", Buffer.from(body), key).toString("base64url")
+    );
+  };
+  const owner = {
+    iss: "https://team.cloudflareaccess.example",
+    aud: ["harness-audience"],
+    email: "Owner@example.test",
+    exp: Math.floor(Date.now() / 1000) + 300,
+  };
   const app = await createHarness({
     dataDir: dir,
     port: 0,
     startProviders: false,
-    publicOrigin: "https://test.tail.example:9443",
+    publicOrigin: "https://harness.example.test",
     remoteIdentityHash: createHash("sha256")
       .update("owner@example.test")
       .digest("hex"),
+    access: {
+      teamDomain: "team.cloudflareaccess.example",
+      audience: "harness-audience",
+    },
+    accessKeys: async () => [
+      { ...publicKey.export({ format: "jwk" }), kid: "key-1" },
+    ],
   });
   try {
-    const headers = { Host: "test.tail.example:9443" };
+    const headers = { Host: "harness.example.test" },
+      status = async (assertion) =>
+        (
+          await proxyFetch(app.runtime.origin + "/api/state", {
+            headers: assertion
+              ? { ...headers, "Cf-Access-Jwt-Assertion": assertion }
+              : // A spoofed proxy identity header must not count as signed in.
+                { ...headers, "Tailscale-User-Login": "owner@example.test" },
+          })
+        ).status;
+    assert.equal(await status(), 403);
+    assert.equal(await status(token(owner, stranger)), 403);
     assert.equal(
-      (await proxyFetch(app.runtime.origin + "/api/state", { headers })).status,
+      await status(token({ ...owner, email: "other@example.test" })),
       403,
     );
-    assert.equal(
-      (
-        await proxyFetch(app.runtime.origin + "/api/state", {
-          headers: { ...headers, "Tailscale-User-Login": "other@example.test" },
-        })
-      ).status,
-      403,
-    );
-    assert.equal(
-      (
-        await proxyFetch(app.runtime.origin + "/api/state", {
-          headers: { ...headers, "Tailscale-User-Login": "owner@example.test" },
-        })
-      ).status,
-      401,
-    );
+    assert.equal(await status(token({ ...owner, aud: ["another-app"] })), 403);
+    assert.equal(await status(token({ ...owner, exp: owner.exp - 600 })), 403);
+    assert.equal(await status(token(owner)), 401);
     const result = await proxyFetch(app.runtime.origin + "/api/pair", {
       method: "POST",
       headers: {
         ...headers,
-        "Tailscale-User-Login": "owner@example.test",
+        "Cf-Access-Jwt-Assertion": token(owner),
         "X-Harness-Client": "1",
         "Content-Type": "application/json",
       },

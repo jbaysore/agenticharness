@@ -2,11 +2,13 @@ import { createServer } from "node:http";
 import { readFile, mkdir, writeFile, stat } from "node:fs/promises";
 import { resolve, join, basename, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { randomBytes, randomUUID, createHash } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { Store } from "./core/store.mjs";
 import { Controller } from "./core/controller.mjs";
 import { Authentication, safeOrigin, readJson } from "./security/http.mjs";
+import { accessVerifier } from "./security/access.mjs";
 import {
   projectPath,
   repositoryState,
@@ -27,6 +29,19 @@ export async function createHarness({
   port = Number(process.env.HARNESS_PORT ?? 47831),
   publicOrigin = process.env.HARNESS_PUBLIC_ORIGIN ?? null,
   remoteIdentityHash = process.env.HARNESS_REMOTE_IDENTITY_HASH ?? null,
+  access = process.env.HARNESS_ACCESS_TEAM_DOMAIN
+    ? {
+        teamDomain: process.env.HARNESS_ACCESS_TEAM_DOMAIN,
+        audience: process.env.HARNESS_ACCESS_AUDIENCE,
+      }
+    : null,
+  accessKeys,
+  tunnel = process.env.HARNESS_TUNNEL_CONFIG
+    ? {
+        exe: process.env.HARNESS_TUNNEL_EXE,
+        config: process.env.HARNESS_TUNNEL_CONFIG,
+      }
+    : null,
   startProviders = true,
   seedProject = process.env.HARNESS_INITIAL_PROJECT,
 } = {}) {
@@ -41,6 +56,10 @@ export async function createHarness({
       throw new Error("Remote origin must be an HTTPS origin without a path");
     publicOrigin = url.origin;
   }
+  const ownerSignedIn =
+    access?.teamDomain && access.audience && remoteIdentityHash
+      ? accessVerifier({ ...access, emailHash: remoteIdentityHash }, accessKeys)
+      : null;
   await mkdir(dataDir, { recursive: true });
   await mkdir(join(dataDir, "connection-probe"), { recursive: true });
   const store = new Store(join(dataDir, "workspace.sqlite"));
@@ -90,17 +109,10 @@ export async function createHarness({
           error: "Unrecognized host or cross-site request",
         });
       if (publicOrigin && req.headers.host === new URL(publicOrigin).host) {
-        const identity = req.headers["tailscale-user-login"];
-        if (
-          !remoteIdentityHash ||
-          !identity ||
-          createHash("sha256")
-            .update(String(identity).toLowerCase())
-            .digest("hex") !== remoteIdentityHash
-        )
+        if (!(await ownerSignedIn?.(req.headers["cf-access-jwt-assertion"])))
           return json(res, 403, {
             error:
-              "Use Tailscale signed in to the Windows host owner’s account.",
+              "Sign in through Cloudflare Access as the Windows host owner.",
           });
       }
       const url = new URL(req.url, localOrigin),
@@ -604,9 +616,26 @@ export async function createHarness({
     mode: 0o600,
   });
   if (startProviders) controller.refreshProviders().catch(() => {});
-  let closing;
+  let closing, tunnelProcess, tunnelRetry;
+  // The tunnel only exists while this host does; requests are still checked above.
+  const runTunnel = () => {
+    tunnelProcess = spawn(
+      tunnel.exe,
+      ["tunnel", "--no-autoupdate", "--config", tunnel.config, "run"],
+      { windowsHide: true, stdio: "ignore" },
+    );
+    tunnelProcess.on("error", (error) =>
+      console.error("Remote tunnel could not start: " + error.message),
+    );
+    tunnelProcess.on("exit", () => {
+      if (!closing) tunnelRetry = setTimeout(runTunnel, 5000);
+    });
+  };
+  if (tunnel && publicOrigin && ownerSignedIn) runTunnel();
   close = () =>
     (closing ??= (async () => {
+      clearTimeout(tunnelRetry);
+      tunnelProcess?.kill();
       await controller.close();
       await terminals.closeAll();
       for (const client of clients) client.end();

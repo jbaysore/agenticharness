@@ -124,6 +124,18 @@ try {
         ...(config.remoteIdentityHash
           ? { HARNESS_REMOTE_IDENTITY_HASH: config.remoteIdentityHash }
           : {}),
+        ...(config.access
+          ? {
+              HARNESS_ACCESS_TEAM_DOMAIN: config.access.teamDomain,
+              HARNESS_ACCESS_AUDIENCE: config.access.audience,
+            }
+          : {}),
+        ...(config.tunnel
+          ? {
+              HARNESS_TUNNEL_EXE: config.tunnel.exe,
+              HARNESS_TUNNEL_CONFIG: config.tunnel.config,
+            }
+          : {}),
         ...(config.initialProject
           ? { HARNESS_INITIAL_PROJECT: config.initialProject }
           : {}),

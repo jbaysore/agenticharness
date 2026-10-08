@@ -20,8 +20,8 @@ the window leaves work running. The host binds to `127.0.0.1:47831`.
 Real editing, test execution and handoff across all three agents pass. The app
 includes streaming chat, native sessions, shared history search, review comments,
 revision requests, file artifacts, decisions, approvals, and PowerShell terminals.
-Private HTTPS remote access is configured and verified from the host. Physical
-laptop/iPhone validation is pending. See [daily-use instructions](docs/OPERATIONS.md),
+Remote access runs through a Cloudflare Tunnel behind Cloudflare Access; real
+endpoint and physical laptop/iPhone validation are pending. See [daily-use instructions](docs/OPERATIONS.md),
 [acceptance evidence](docs/ACCEPTANCE.md), [the delivery plan](docs/PLAN.md), and
 [integration evidence](docs/INTEGRATIONS.md).
 

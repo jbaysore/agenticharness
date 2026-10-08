@@ -136,13 +136,29 @@ verified. Allow about five seconds for that fallback when stopping the host.
 
 ## Private laptop and iPhone access
 
-The host remains bound to loopback. Tailscale Serve provides private HTTPS on a
-separate port, without modifying the pre-existing services or enabling Funnel.
-The app additionally requires the owner's Tailscale identity and browser pairing.
+The host remains bound to loopback. A Cloudflare Tunnel, started and stopped with
+the host, publishes it at an HTTPS hostname on the owner's domain. Cloudflare
+Access requires the owner to sign in before any request reaches this PC. The app
+then verifies the signed Access token on every remote request (issuer, application
+audience, expiry and owner email) and additionally requires browser pairing. No
+app is needed on the remote device.
+
+One-time setup on the delivery PC:
+
+1. Install the connector: `winget install Cloudflare.cloudflared`.
+2. Run `cloudflared tunnel login` and choose the domain in the browser.
+3. In the Cloudflare Zero Trust dashboard, add a self-hosted Access application
+   for the chosen hostname, with one Allow policy that includes only the owner's
+   email. Copy its **Application Audience (AUD) Tag**.
+4. Run `node scripts/remote-setup.mjs --hostname <hostname> --team <team name>
+--audience <AUD tag> --email <owner email>`, then restart the host.
+
+Setup creates the tunnel and its DNS record, and refuses to replace an existing
+record. Only a hash of the owner email is stored.
 
 The address is shown in **Connections & usage → Remote access** on the delivery
-PC. Keep Tailscale connected to the same account on both remote devices. Open that
-address in the laptop browser or iPhone Safari. Generate a separate one-time code
+PC. Open that address in the laptop browser or iPhone Safari and sign in through
+Cloudflare Access. Generate a separate one-time code
 with **Pair another browser** for each browser. Codes expire after 10 minutes;
 paired browser sessions expire after seven days. On iPhone, optionally add the
 page to the Home Screen using Safari's Share menu.
@@ -159,11 +175,11 @@ is automatically resubmitted. An interrupted turn is never automatically re-exec
 current one. Relaunch the desktop shortcut to pair locally again. Revocation is
 useful after losing a device. Provider account logins are not affected.
 
-No new paid remote service or recurring charge was added. The implementation uses
-the Tailscale installation and account that were already configured on this PC.
-Physical Windows-laptop and iPhone checks remain pending because the product owner
-could not test the devices during setup. Desktop HTTPS and responsive emulation
-passed; those results do not substitute for physical device tests.
+The only recurring cost is the owner's domain registration; the Cloudflare
+Tunnel and Access plans used are free. The Cloudflare endpoint has not yet been
+verified end to end from this host, and physical Windows-laptop and iPhone checks
+remain pending. Automated tests cover token validation with locally generated keys;
+those results do not substitute for real endpoint or device tests.
 
 ## Back up and restore
 

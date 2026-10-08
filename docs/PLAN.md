@@ -43,8 +43,9 @@ The complete product is not finished at the first working provider milestone.
   Claude's native usage response independently confirms user-disabled extra usage.
   Cursor ACP has no authoritative billing meter; the account-bound confirmation
   does not expire and must be repeated only after the signed-in account changes.
-- Existing Tailscale installation is signed in; use a new private HTTPS port,
-  preserving existing Serve/Funnel services. Device testing is still pending.
+- Remote access uses a Cloudflare Tunnel and Cloudflare Access on the owner's
+  domain; existing Tailscale Serve/Funnel services belong to other projects and
+  are left alone. Real endpoint and device testing are still pending.
 
 ## Validation accounting
 
@@ -75,8 +76,9 @@ Never record credentials, account identifiers, or raw diagnostic transcripts in 
   explicit native continuation succeeded.
 - Reload-safe submission recovery passed in a real browser with a simulated
   provider, including both an accepted-but-lost response and an unreceived request.
-- Windows package and desktop shortcut installed; private Tailscale HTTPS and
-  owner-bound pairing verified from the host. No new recurring service added.
+- Windows package and desktop shortcut installed. Remote access later moved from
+  Tailscale Serve to Cloudflare Tunnel and Access (2026-10-08); that endpoint is
+  not yet verified from the host.
 - Setup, update, backup, limits and prioritized dogfooding backlog are documented.
 - Remaining completion action: physical Windows laptop/iPhone validation. The
   product owner cannot test the devices yet; do not mark the full goal complete.
