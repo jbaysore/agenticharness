@@ -18,6 +18,7 @@ import { cursorAuth } from "./providers/cursor.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
 import { APP_VERSION } from "./core/version.mjs";
+import { importLocalHistory } from "./core/import-history.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export async function createHarness({
@@ -478,6 +479,15 @@ export async function createHarness({
               .all(url.searchParams.get("chatId"))
               .map((e) => ({ ...e, payload: JSON.parse(e.payload) })),
           );
+        if (path === "/api/history/import" && method === "POST") {
+          const result = await importLocalHistory(store, {
+            cursorRoot: join(homedir(), ".cursor", "projects"),
+            codexRoot: join(homedir(), ".codex"),
+            claudeRoot: join(homedir(), ".claude", "projects"),
+            importedPath: join(dataDir, "imported"),
+          });
+          return json(res, 200, result);
+        }
         if (path === "/api/export" && method === "GET") {
           const data = {
             version: 1,

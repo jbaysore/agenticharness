@@ -35,8 +35,9 @@
    Current comments target new-side lines and preserve their reviewed diff hash.
 10. Add image/PDF artifact previews and pinned file versions. Current artifacts
     reference live files and the browser previews bounded text only.
-11. Add supported provider-history import and JSON restore, preserving origin.
-    SQLite restore already covers app-owned state; native imports remain optional.
+11. Add JSON restore for an exported Harness history file. Local Cursor, Codex,
+    and Claude transcript import is available and keeps the provider label without
+    resuming those native sessions. SQLite restore already covers app-owned state.
 12. Improve long-history paging with per-message offsets and explicit handoff
     truncation notices. Add deterministic repository evidence freshness checks.
 

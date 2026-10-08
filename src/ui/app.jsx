@@ -1190,6 +1190,26 @@ function App() {
             >
               Back up workspace
             </button>
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={action(async () => {
+                setBusy(true);
+                try {
+                  const result = await api("/api/history/import", {});
+                  await refresh();
+                  setError(
+                    result.imported
+                      ? `Imported ${result.imported} conversations from Cursor, Codex, and Claude.`
+                      : "No new local conversations to import.",
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              })}
+            >
+              {busy ? "Importing…" : "Import local conversations"}
+            </button>
             <a className="export-link" href="/api/export" download>
               Export conversation history ↓
             </a>

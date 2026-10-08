@@ -106,9 +106,10 @@ export class Store {
     model = "",
     effort = null,
     scope = "project",
+    createdAt,
   }) {
     const id = randomUUID(),
-      now = this.now();
+      now = createdAt || this.now();
     this.db
       .prepare(
         "INSERT INTO conversations(id,project_id,title,provider,model,effort,scope,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -153,6 +154,7 @@ export class Store {
     provider = null,
     model = null,
     content = "",
+    createdAt,
   }) {
     this.db
       .prepare(
@@ -166,10 +168,15 @@ export class Store {
         provider,
         model,
         content,
-        this.now(),
+        createdAt || this.now(),
       );
     this.updateConversation(conversationId, {});
     return id;
+  }
+  stampConversation(id, createdAt, updatedAt) {
+    this.db
+      .prepare("UPDATE conversations SET created_at=?, updated_at=? WHERE id=?")
+      .run(createdAt, updatedAt, id);
   }
   appendMessage(id, delta) {
     this.db

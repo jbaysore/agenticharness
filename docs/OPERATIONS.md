@@ -104,7 +104,11 @@ recent messages, saved decisions and review comments. Earlier messages remain
 searchable. Switching back can resume that provider's own native session and add
 the intervening handoff. Codex/Claude/Cursor session IDs are never interchanged.
 Very long handoffs are bounded, so ask an agent to read linked older sources when
-needed. Existing conversation import from provider apps is not in this release.
+needed. **Import local conversations** in Connections & usage copies Cursor,
+Codex, and Claude transcripts already stored on this PC. A chat lands in the
+matching project when its original folder is known, and otherwise under
+Imported history. Imported chats keep their provider label and are not resumed
+as native sessions. Running the import again skips transcripts already copied.
 
 ## Review, files, decisions and terminal
 
@@ -171,8 +175,9 @@ up app history and metadata, not project code or provider-owned native session
 files. Continue using Git and your normal file backups for those.
 
 **Export conversation history** downloads readable JSON including messages,
-run outcomes, work events, comments, notes and artifact references. JSON import
-is not implemented; use a SQLite snapshot for restoration.
+run outcomes, work events, comments, notes and artifact references. Restoring
+that JSON file is not implemented; use a SQLite snapshot for a full workspace
+restore. Local provider transcripts are copied with **Import local conversations**.
 
 To restore: stop active work and the host, preserve the existing data folder as a
 rollback copy, then put the chosen SQLite snapshot at
