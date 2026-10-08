@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createServer } from "node:http";
 
@@ -49,6 +49,7 @@ async function fixture(port = 0) {
     );
   return {
     data,
+    root,
     launch,
     async close() {
       await launch("--stop");
@@ -73,6 +74,49 @@ test("launcher starts an isolated host and reuses its saved runtime", async () =
     const health = await fetch(first.origin + "/health").then((r) => r.json());
     assert.equal(health.instanceId, first.instanceId);
   } finally {
+    await app.close();
+  }
+});
+
+test("supervise keeps the launcher alive until the host stops", async () => {
+  const app = await fixture();
+  let output = "";
+  const child = spawn(
+    process.execPath,
+    [join(app.root, "scripts", "launch.mjs"), "--supervise"],
+    {
+      env: {
+        ...process.env,
+        HARNESS_DATA_DIR: app.data,
+        HARNESS_PORT: "0",
+      },
+      windowsHide: true,
+    },
+  );
+  child.stdout.on("data", (chunk) => {
+    output += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk;
+  });
+  try {
+    const readyAt = Date.now() + 8000;
+    while (!output.includes("Harness host ready") && Date.now() < readyAt) {
+      if (child.exitCode !== null) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.match(output, /Harness host ready/);
+    assert.equal(child.exitCode, null);
+    await app.launch("--stop");
+    const exited = await new Promise((resolve) => {
+      if (child.exitCode !== null) resolve(child.exitCode);
+      else child.once("exit", resolve);
+      setTimeout(() => resolve("timeout"), 8000);
+    });
+    assert.equal(exited, 0);
+    assert.match(output, /Harness host stopped/);
+  } finally {
+    child.kill();
     await app.close();
   }
 });

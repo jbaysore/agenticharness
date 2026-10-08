@@ -138,6 +138,18 @@ try {
       );
     }
   }
+  if (process.argv.includes("--supervise")) {
+    console.log("Harness host ready at " + runtime.origin);
+    // Hub treats a launcher that exits as a failed start, so stay attached while the host is healthy.
+    let misses = 0;
+    while (misses < 2) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if (await running()) misses = 0;
+      else misses += 1;
+    }
+    console.log("Harness host stopped.");
+    process.exit(0);
+  }
   if (process.argv.includes("--no-browser")) {
     console.log("Harness host ready at " + runtime.origin);
     process.exit(0);
@@ -186,7 +198,10 @@ try {
   );
   console.error(error.message);
   process.exitCode = 1;
-  if (!process.argv.includes("--no-browser")) {
+  const headless =
+    process.argv.includes("--no-browser") ||
+    process.argv.includes("--supervise");
+  if (!headless) {
     const child = spawn("notepad.exe", [join(dataDir, "launcher-errors.log")], {
       detached: true,
       stdio: "ignore",
