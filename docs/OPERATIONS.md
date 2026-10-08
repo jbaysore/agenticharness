@@ -18,7 +18,8 @@ Explorer. The launcher reports an early host exit with the new host error instea
 of waiting for a generic startup timeout; earlier log entries are excluded.
 
 Pick a project in the sidebar, then choose an agent and model in the composer.
-The picker comes from the connected native integrations. Supported effort choices
+The picker comes from the connected native integrations. No model or effort is
+selected until you choose one. Supported effort choices
 change with the model. Cursor's effort control stays disabled and uses each model's
 provider default. Composer, Grok, and the other advertised models are selectable
 at standard speed. Auto is omitted from the picker. Assistant messages identify the route

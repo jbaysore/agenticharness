@@ -346,19 +346,17 @@ function App() {
     project = state.projects.find((p) => p.id === selectedProject);
   useEffect(() => {
     if (!connected?.models?.length) return;
-    if (!connected.models.some((m) => m.id === model && !m.disabled)) {
-      const m =
-        connected.models.find((m) => m.isDefault && !m.disabled) ??
-        connected.models.find((m) => !m.disabled);
-      if (m) {
-        setModel(m.id);
-        setEffort(m.defaultEffort ?? "");
-      }
+    const available = connected.models.some(
+      (m) => m.id === model && !m.disabled,
+    );
+    if (model && !available) {
+      setModel("");
+      setEffort("");
     }
-  }, [provider, state.providers]);
+  }, [provider, model, connected]);
   useEffect(() => {
-    if (selectedModel && !selectedModel.efforts.includes(effort))
-      setEffort(selectedModel.defaultEffort ?? "");
+    if (selectedModel && effort && !selectedModel.efforts.includes(effort))
+      setEffort("");
   }, [model]);
   useEffect(() => {
     if (bottom.current && chat?.activeRun)
@@ -380,7 +378,14 @@ function App() {
   }
   async function sendMessage(override) {
     const text = typeof override === "string" ? override : draft;
-    if (!text.trim() || busy || chat?.activeRun) return;
+    if (
+      !text.trim() ||
+      busy ||
+      chat?.activeRun ||
+      !model ||
+      (selectedModel?.efforts?.length && !effort)
+    )
+      return;
     setBusy(true);
     try {
       let c = chat;
@@ -799,14 +804,20 @@ function App() {
                 <span className={"provider-dot " + provider} />
                 <select
                   aria-label="Agent and model"
-                  value={provider + "|" + model}
+                  value={model ? provider + "|" + model : ""}
                   onChange={(e) => {
+                    if (!e.target.value) {
+                      setModel("");
+                      setEffort("");
+                      return;
+                    }
                     const [p, ...m] = e.target.value.split("|");
                     setProvider(p);
                     setModel(m.join("|"));
                     setEffort("");
                   }}
                 >
+                  <option value="">Choose a model</option>
                   {state.providers.map((p) => (
                     <optgroup label={p.name + " · " + p.route} key={p.id}>
                       {p.models?.map((m) => (
@@ -830,15 +841,16 @@ function App() {
                 onChange={(e) => setEffort(e.target.value)}
                 disabled={!selectedModel?.efforts?.length}
               >
-                {!selectedModel?.efforts?.length ? (
-                  <option value="">Provider preset</option>
-                ) : (
-                  selectedModel.efforts.map((e) => (
-                    <option key={e} value={e}>
-                      {e[0].toUpperCase() + e.slice(1)}
-                    </option>
-                  ))
-                )}
+                <option value="">
+                  {selectedModel?.efforts?.length
+                    ? "Choose effort"
+                    : "Provider preset"}
+                </option>
+                {selectedModel?.efforts?.map((e) => (
+                  <option key={e} value={e}>
+                    {e[0].toUpperCase() + e.slice(1)}
+                  </option>
+                ))}
               </select>
               <span className="composer-spacer" />
               {chat?.activeRun ? (
@@ -861,6 +873,7 @@ function App() {
                     !draft.trim() ||
                     !project ||
                     !model ||
+                    (selectedModel?.efforts?.length && !effort) ||
                     !!connected?.blockReason
                   }
                 >

@@ -88,7 +88,11 @@ export class Controller extends EventEmitter {
     });
     const abort = new AbortController();
     this.active.set(chatId, { run, abort });
-    this.store.updateConversation(chatId, { effort: effort || null });
+    this.store.updateConversation(chatId, {
+      provider,
+      model,
+      effort: effort || null,
+    });
     this.event(chatId, run.id, "run", { status: "starting", provider, model });
     const task = this.execute(run, text.trim(), effort, abort).catch(
       (error) => {

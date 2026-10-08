@@ -75,7 +75,7 @@ export function cursorModels(session) {
         description: model.id,
         efforts: [],
         defaultEffort: null,
-        isDefault: /claude-sonnet-5-5/.test(model.id),
+        isDefault: false,
         billing: fastOnly
           ? "Unavailable: ACP only exposes this fast preset"
           : "Included budget · standard speed · on-demand must be disabled",
