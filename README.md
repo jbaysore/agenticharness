@@ -32,8 +32,8 @@ laptop/iPhone validation is pending. See [daily-use instructions](docs/OPERATION
   usage. Fast mode and direct API routes are disabled.
 - Cursor must use native login. Confirm **on-demand usage off** in its dashboard;
   the app binds confirmation to the account for 24 hours. ACP supplies no reliable
-  quota meter. Auto stays unavailable. Models that offer Fast are pinned to
-  standard speed.
+  quota meter. Auto is omitted from the picker. Models that offer Fast are pinned
+  to standard speed. A daily on-demand confirmation is required before a turn.
 
 Connection checks and live catalogs adapt to plan changes. Unknown or exhausted
 quota stops Codex/Claude. Cursor's account-level disabled on-demand setting is the

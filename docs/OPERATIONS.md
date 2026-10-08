@@ -21,7 +21,7 @@ Pick a project in the sidebar, then choose an agent and model in the composer.
 The picker comes from the connected native integrations. Supported effort choices
 change with the model. Cursor's effort control stays disabled and uses each model's
 provider default. Composer, Grok, and the other advertised models are selectable
-at standard speed; Auto stays unavailable. Assistant messages identify the route
+at standard speed. Auto is omitted from the picker. Assistant messages identify the route
 and model; new Claude responses resolve aliases from native initialization events.
 
 Three projects are configured on the delivery PC: Agentic Harness, linescience,

@@ -75,7 +75,7 @@ test("Cursor native models stay selectable when ACP returns bare ids", () => {
   assert.equal(byId["grok-4.7"].disabled, false);
   assert.equal(byId["claude-sonnet-5-5"].disabled, false);
   assert.equal(byId["claude-sonnet-5-5"].isDefault, true);
-  assert.equal(byId.default.disabled, true);
+  assert.equal(byId.default, undefined);
   assert.equal(byId["composer-2.5[fast=true]"].disabled, true);
 });
 

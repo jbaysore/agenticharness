@@ -7,7 +7,7 @@ provider upgrades and account/plan changes. These are local personal integration
 | ------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Codex / ChatGPT           | Official `codex app-server`, JSON-RPC over stdio                | `account/read.type=chatgpt`; `account/rateLimits/read.ordinaryUsageAllowed`; quota and credit fields                                           | Reject API/gateway auth, unknown or depleted included usage, and available paid credits until a reliable no-credit path exists. Use standard speed and the live model catalog.                                                     |
 | Claude Code / Claude plan | Official Agent SDK controlling the unmodified CLI, native login | `claude auth status` reports claude.ai, firstParty and subscriptionType; native usage control independently confirms user-disabled extra usage | No `--bare` (it bypasses OAuth), API keys, gateway routes, fast mode, credit purchases, or budget flags misrepresented as subscription caps. Experimental native quota API is version-sensitive and fails closed when unavailable. |
-| Cursor / Cursor plan      | Official `agent acp`, JSON-RPC over stdio                       | Official browser login and account dashboard with on-demand usage disabled                                                                     | Advertise parameterized model selection, then force `fast=false` when that option exists. Auto and exploded fast-only presets stay unavailable. Do not fabricate quota percentages or infer coverage from a model response. ACP itself does not document a billing-mode attestation. |
+| Cursor / Cursor plan      | Official `agent acp`, JSON-RPC over stdio                       | Official browser login and account dashboard with on-demand usage disabled                                                                     | Advertise parameterized model selection, then force `fast=false` when that option exists. Omit Auto and keep exploded fast-only presets unavailable. Do not fabricate quota percentages or infer coverage from a model response. ACP itself does not document a billing-mode attestation. |
 
 ## Sources
 
@@ -57,8 +57,9 @@ account quota and `extra_usage` settings without inference. This is actual
 provider telemetry, not a local usage estimate. Cursor 2026.10.01-e373342 returns
 bare model ids, including Composer and Grok, when the client advertises
 `parameterizedModelPicker`. Those models default the new session to Fast, so the
-app sets `fast=false` and stops unless Cursor confirms standard speed. Exploded
-fast-only presets and Auto remain disabled. Effort stays at the provider default.
+app sets `fast=false` and stops unless Cursor confirms standard speed. Auto is
+omitted from the picker. Exploded fast-only presets remain disabled. Effort stays
+at the provider default.
 
 Cursor native task progress arrived as standard `tool_call`/`tool_call_update`
 events (`rawInput._toolName=task`), rather than the documented optional

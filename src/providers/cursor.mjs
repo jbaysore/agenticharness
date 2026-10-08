@@ -65,25 +65,24 @@ export function cursorModels(session) {
   const source = advertised.length
     ? advertised.map((model) => ({ id: model.modelId, name: model.name }))
     : fromConfig.map((option) => ({ id: option.value, name: option.name }));
-  return source.map((model) => {
-    const fastOnly = /fast=true/.test(model.id);
-    const auto = model.id.startsWith("default");
-    return {
-      id: model.id,
-      name: model.name,
-      description: model.id,
-      efforts: [],
-      defaultEffort: null,
-      isDefault: /claude-sonnet-5-5/.test(model.id),
-      billing: fastOnly
-        ? "Unavailable: ACP only exposes this fast preset"
-        : auto
-          ? "Unavailable: Auto can change the model during a turn"
+  return source
+    .filter((model) => !model.id.startsWith("default"))
+    .map((model) => {
+      const fastOnly = /fast=true/.test(model.id);
+      return {
+        id: model.id,
+        name: model.name,
+        description: model.id,
+        efforts: [],
+        defaultEffort: null,
+        isDefault: /claude-sonnet-5-5/.test(model.id),
+        billing: fastOnly
+          ? "Unavailable: ACP only exposes this fast preset"
           : "Included budget · standard speed · on-demand must be disabled",
-      disabled: fastOnly || auto,
-      nativeSubagents: true,
-    };
-  });
+        disabled: fastOnly,
+        nativeSubagents: true,
+      };
+    });
 }
 export function cursorSpeedFollowUp(configOptions) {
   const fast = configOptions?.find((option) => option.id === "fast");
@@ -178,7 +177,7 @@ export async function inspectCursor(cwd, confirmation) {
         usage: false,
         historyTools: true,
       },
-      note: "Auto stays unavailable. Models that offer Fast are pinned to standard speed, and a turn stops if Fast turns back on. Effort stays at the provider default.",
+      note: "Auto is omitted. Models that offer Fast are pinned to standard speed, and a turn stops if Fast turns back on. Effort stays at the provider default.",
     };
   } finally {
     rpc.close();
