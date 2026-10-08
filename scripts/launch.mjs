@@ -4,6 +4,29 @@ import { spawn } from "node:child_process";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+function ensureTaskbarShortcut() {
+  const script = join(root, "scripts", "taskbar-shortcut.ps1");
+  if (process.platform !== "win32" || !existsSync(script))
+    return Promise.resolve();
+  return new Promise((resolvePromise) => {
+    const child = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        script,
+        "-Root",
+        root,
+      ],
+      { windowsHide: true, stdio: "ignore" },
+    );
+    child.on("exit", () => resolvePromise());
+    child.on("error", () => resolvePromise());
+  });
+}
+const taskbarShortcut = ensureTaskbarShortcut();
 const dataDir =
   process.env.HARNESS_DATA_DIR ??
   join(process.env.LOCALAPPDATA, "AgenticHarness");
@@ -162,6 +185,7 @@ try {
   if (!response.ok)
     throw new Error("The host refused the local launch capability.");
   const { url } = await response.json();
+  await taskbarShortcut;
   const edge = [
     join(
       process.env["ProgramFiles(x86)"] ?? "",

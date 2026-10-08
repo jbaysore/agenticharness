@@ -2,7 +2,11 @@
 
 ## Launch and first task
 
-Use **Agentic Harness** on the Windows desktop. The installed app and its bundled
+Use **Agentic Harness** on the Windows desktop or Start menu. Pin that shortcut,
+or right-click the open Harness window and choose **Pin to taskbar**. The window
+is an Edge app, and its taskbar identity is separate from the Edge browser only
+when that shortcut is present. Pinning the window before the shortcut exists pins
+Edge instead. The installed app and its bundled
 runtime are under `%LOCALAPPDATA%\Programs\AgenticHarness\0.1.1`. Data is separate,
 under `%LOCALAPPDATA%\AgenticHarness`. Closing the app window leaves the host and
 ongoing work running. The host starts when you launch the app; it is not a Windows
