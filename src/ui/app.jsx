@@ -8,6 +8,7 @@ import { api } from "./api.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
 import { ChatRow } from "./chat-row.jsx";
+import { RulesModal } from "./rules-modal.jsx";
 import {
   activeChats,
   attentionCount,
@@ -249,9 +250,14 @@ function App() {
       if (e.type === "providers")
         setState((s) => ({ ...s, providers: e.payload.providers }));
       if (
-        ["projects", "chat", "run", "approval", "approval-resolved"].includes(
-          e.type,
-        )
+        [
+          "projects",
+          "chat",
+          "run",
+          "approval",
+          "approval-resolved",
+          "rules",
+        ].includes(e.type)
       )
         refresh().catch(report);
       if (e.type.startsWith("terminal-"))
@@ -611,6 +617,13 @@ function App() {
                   .length
               }
               /3
+            </span>
+          </button>
+          <button className="sidebar-action" onClick={() => setModal("rules")}>
+            <Icon name="rules" />
+            <span>Agent rules</span>
+            <span className="connection-count">
+              {state.rules?.delegate.enabled ? "On" : ""}
             </span>
           </button>
           <div className="host-status">
@@ -1042,6 +1055,15 @@ function App() {
             </button>
           </section>
         </Modal>
+      )}
+      {modal === "rules" && state.rules && (
+        <RulesModal
+          rules={state.rules}
+          providers={state.providers}
+          delegation={state.delegation ?? {}}
+          onSaved={refresh}
+          onClose={() => setModal(null)}
+        />
       )}
       {modal === "search" && (
         <Modal title="Search conversations" wide onClose={() => setModal(null)}>
