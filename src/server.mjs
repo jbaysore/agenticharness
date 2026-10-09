@@ -21,6 +21,12 @@ import { Terminals } from "./core/terminals.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
 import { APP_VERSION } from "./core/version.mjs";
 import { importLocalHistory } from "./core/import-history.mjs";
+import {
+  delegationStats,
+  describeRules,
+  readRules,
+  saveRules,
+} from "./core/rules.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export async function createHarness({
@@ -209,7 +215,18 @@ export async function createHarness({
             terminals: terminals.list(),
             remoteOrigin: publicOrigin,
             version: APP_VERSION,
+            rules: describeRules(readRules(store), controller.providers),
+            delegation: delegationStats(store),
           });
+        if (path === "/api/rules" && method === "PUT") {
+          const rules = saveRules(
+            store,
+            await readJson(req),
+            controller.providers,
+          );
+          controller.event(null, null, "rules", {});
+          return json(res, 200, describeRules(rules, controller.providers));
+        }
         if (path === "/api/providers/refresh" && method === "POST")
           return json(res, 200, {
             providers: await controller.refreshProviders(),

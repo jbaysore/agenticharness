@@ -154,3 +154,89 @@ test("a chat can be renamed, archived and marked read, and each change is announ
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("agent rules are saved through the API, validated, and announced", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-http-")),
+    app = await createHarness({ dataDir: dir, port: 0, startProviders: false });
+  const url = app.runtime.origin;
+  try {
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Harness-Client": "1",
+    };
+    const paired = await fetch(url + "/api/pair", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ code: app.auth.pairing() }),
+    });
+    headers.cookie = paired.headers.get("set-cookie").split(";")[0];
+    const call = async (path, body, method = "GET") => {
+      const response = await fetch(url + path, {
+        method,
+        headers,
+        body: body && JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    app.controller.providers = [
+      {
+        id: "claude",
+        name: "Claude Code",
+        connected: true,
+        models: [{ id: "haiku", name: "Haiku", efforts: [] }],
+      },
+    ];
+    const initial = (await call("/api/state")).body;
+    assert.deepEqual(initial.rules, {
+      instructions: "",
+      delegate: { enabled: false, workers: [] },
+    });
+    assert.deepEqual(initial.delegation, {});
+    const announced = [];
+    app.controller.on("event", (e) => announced.push(e.type));
+    const rejected = await call(
+      "/api/rules",
+      { delegate: { enabled: true, workers: [] } },
+      "PUT",
+    );
+    assert.equal(rejected.status, 400);
+    assert.match(rejected.body.error, /Choose a worker model/);
+    assert.deepEqual(announced, []);
+    const saved = await call(
+      "/api/rules",
+      {
+        instructions: "Keep answers short.",
+        delegate: {
+          enabled: true,
+          workers: [{ provider: "claude", model: "haiku" }],
+        },
+      },
+      "PUT",
+    );
+    assert.equal(saved.status, 200);
+    assert.deepEqual(announced, ["rules"]);
+    const { rules } = (await call("/api/state")).body;
+    assert.equal(rules.instructions, "Keep answers short.");
+    assert.deepEqual(rules.delegate.workers, [
+      {
+        provider: "claude",
+        model: "haiku",
+        effort: null,
+        name: "Claude Code · Haiku",
+        available: true,
+        reason: null,
+      },
+    ]);
+    app.controller.providers[0].blockReason = "Out of usage.";
+    assert.deepEqual(
+      (await call("/api/state")).body.rules.delegate.workers.map((w) => [
+        w.available,
+        w.reason,
+      ]),
+      [[false, "Out of usage."]],
+    );
+  } finally {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
