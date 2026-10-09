@@ -5,7 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Store } from "../src/core/store.mjs";
-import { historyCall, handoffContext } from "../src/core/history.mjs";
+import {
+  historyCall,
+  handoffContext,
+  historyTools,
+  workspaceNotice,
+  workspacePeers,
+} from "../src/core/history.mjs";
+import { pathsOverlap } from "../src/core/repository.mjs";
 
 test("committed partial messages survive restart; pending work and approvals become interrupted, never replayed", async () => {
   const directory = await mkdtemp(join(tmpdir(), "harness-store-")),
@@ -183,6 +190,64 @@ test("upstream reference is directional and never grants write access", () => {
   db.addReference(down.id, { path: up.path, name: up.name, writable: true });
   assert.equal(db.project(down.id).repositories[0].writable, false);
   assert.equal(db.project(up.id).repositories.length, 0);
+  db.close();
+});
+test("workspace peers are the other active chats in the same or a nested folder", () => {
+  assert.equal(pathsOverlap("C:\\work\\repo", "C:\\work\\repo"), true);
+  assert.equal(pathsOverlap("C:\\work\\repo", "C:\\work\\repo\\pkg"), true);
+  assert.equal(pathsOverlap("C:\\work\\repo\\pkg", "C:\\work\\repo"), true);
+  assert.equal(pathsOverlap("C:\\work\\repo", "C:\\work\\repo-two"), false);
+  assert.equal(pathsOverlap("C:\\work\\repo", "D:\\work\\repo"), false);
+  const db = new Store(":memory:"),
+    repo = db.addProject("Repo", "C:\\work\\repo"),
+    apart = db.addProject("Apart", "C:\\work\\apart");
+  const mine = db.createConversation({ projectId: repo.id, title: "Mine" }),
+    busy = db.createConversation({ projectId: repo.id, title: "Busy" }),
+    secret = db.createConversation({ projectId: repo.id, title: "Private" }),
+    idle = db.createConversation({ projectId: repo.id, title: "Idle" }),
+    far = db.createConversation({ projectId: apart.id, title: "Far" });
+  db.updateConversation(secret.id, { scope: "none" });
+  const run = (chat, text) =>
+    db.createRun({
+      conversationId: chat.id,
+      actionId: "peer-run-" + chat.title,
+      provider: "claude",
+      model: "m",
+      text,
+    });
+  run(mine, "My own task");
+  run(busy, "Rework   the\nparser " + "x".repeat(400));
+  run(secret, "Confidential request");
+  run(far, "Elsewhere");
+  db.setRun(run(idle, "Finished already").id, "completed");
+  const peers = workspacePeers(db, mine.id);
+  assert.deepEqual(
+    peers.map((p) => p.title),
+    ["Busy", "Private"],
+  );
+  assert.equal(peers[0].request.length, 300);
+  assert.equal(peers[1].request, null);
+  assert.equal(peers[0].source, `harness://conversation/${busy.id}`);
+  assert.deepEqual(historyCall(db, mine.id, "workspace_activity", {}), peers);
+  assert.deepEqual(workspacePeers(db, far.id), []);
+  assert.ok(historyTools.some((t) => t.name === "workspace_activity"));
+
+  assert.equal(workspaceNotice([], [{ status: " M", file: "a.js" }]), "");
+  const changes = Array.from({ length: 45 }, (_, i) => ({
+    status: " M",
+    file: `src/file-${i}.js`,
+  }));
+  const notice = workspaceNotice(peers, changes);
+  assert.match(notice, /2 other chats are working in this repository/);
+  assert.match(notice, /"Busy" \(claude, started .*\): Rework the parser x/);
+  assert.match(notice, /"Private" \(claude, started [^)]*\)\n/);
+  assert.doesNotMatch(notice, /Confidential/);
+  assert.match(notice, /- M src\/file-39\.js\n- and 5 more/);
+  assert.match(notice, /commit by explicit path/);
+  assert.doesNotMatch(
+    workspaceNotice(peers.slice(0, 1), null),
+    /uncommitted changes/,
+  );
   db.close();
 });
 test("a chat summary follows its newest turn: running, needs approval, unread, failed", () => {

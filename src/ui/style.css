@@ -998,6 +998,16 @@ small {
 .keyboard-hint {
   margin-left: auto;
 }
+.composer-footer .workspace-peers {
+  color: #bdbdbd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.notice.workspace-peers {
+  margin: 0 14px 10px;
+}
 .billing-notice {
   padding: 9px 3px 12px;
   display: flex;

@@ -35,6 +35,20 @@ export function activeChats(conversations) {
         b.updated_at.localeCompare(a.updated_at),
     );
 }
+// Other chats with a turn in progress in the same project as this one.
+export function workspacePeers(conversations, projectId, chatId) {
+  return conversations.filter(
+    (c) =>
+      c.project_id === projectId &&
+      c.id !== chatId &&
+      ["running", "needs-approval"].includes(c.status),
+  );
+}
+export function workspacePeersLabel(peers) {
+  return peers.length
+    ? `${peers.length} other ${peers.length === 1 ? "chat" : "chats"} working in this project`
+    : "";
+}
 export function attentionCount(conversations) {
   return activeChats(conversations).filter((c) => chatMarker(c) !== "running")
     .length;

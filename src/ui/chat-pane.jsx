@@ -3,7 +3,12 @@ import { api } from "./api.mjs";
 import { Icon, Markdown, Approval } from "./components.jsx";
 import { readPending, savePending } from "./outbox.mjs";
 import { readDraft, saveDraft } from "./drafts.mjs";
-import { chatMarker, chatMarkerLabel, providerStatusLabel } from "./status.mjs";
+import {
+  chatMarker,
+  chatMarkerLabel,
+  providerStatusLabel,
+  workspacePeersLabel,
+} from "./status.mjs";
 
 export function ChatPane({
   ref,
@@ -12,6 +17,7 @@ export function ChatPane({
   providers,
   focused,
   solo,
+  peers,
   selection,
   onSelection,
   onFocus,
@@ -424,6 +430,18 @@ export function ChatPane({
             <Icon name="check" size={12} />
             Subscription only
           </span>
+          {peers.length > 0 && (
+            <span
+              className="workspace-peers"
+              title={
+                "Also working here: " +
+                peers.map((c) => c.title).join(", ") +
+                ". Each agent is told about the others and to commit only its own files."
+              }
+            >
+              {workspacePeersLabel(peers)}
+            </span>
+          )}
           {chat ? (
             <label>
               History{" "}

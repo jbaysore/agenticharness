@@ -177,6 +177,19 @@ export async function runClaude(ctx) {
           ],
         }),
       ),
+      tool(
+        "workspace_activity",
+        "List the other Harness chats working in this repository right now. Call it before committing.",
+        {},
+        async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(await ctx.history("workspace_activity", {})),
+            },
+          ],
+        }),
+      ),
     ],
   });
   const q = query({

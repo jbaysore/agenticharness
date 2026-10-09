@@ -14,6 +14,14 @@ export async function git(root, args) {
   });
   return result.stdout;
 }
+// Two folders share a workspace when they are the same or one holds the other.
+export function pathsOverlap(a, b) {
+  const holds = (outer, inner) => {
+    const path = relative(outer, inner);
+    return path !== ".." && !path.startsWith(".." + sep) && !isAbsolute(path);
+  };
+  return holds(a, b) || holds(b, a);
+}
 export async function projectPath(path) {
   if (!isAbsolute(path)) throw new Error("Choose an absolute project path");
   const resolved = await realpath(path);

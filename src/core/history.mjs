@@ -1,3 +1,5 @@
+import { pathsOverlap } from "./repository.mjs";
+
 export const historyTools = [
   {
     name: "history_search",
@@ -34,11 +36,83 @@ export const historyTools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "workspace_activity",
+    description:
+      "List the other Harness chats working in this repository right now and what each was asked to do. Call it before committing or running Git commands that could touch files other than your own.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
 ];
+
+// Sent with every notice as well as the standing instructions, because a
+// resumed native session may not re-read its instructions.
+const sharedWorkspaceRules =
+  "change only the files your task needs; stage and commit by explicit path, never with git add -A, git add . or git commit -a; do not stash, reset, restore, clean, rebase, or check out or switch branches; leave changes you did not make exactly as they are and say that you saw them; call workspace_activity and check git status again immediately before committing. These rules take priority over any project instruction to commit everything.";
+
+// Other chats with a turn in progress in the same folder, or one nested in it.
+// A chat that keeps its history to itself is named without its request.
+export function workspacePeers(store, conversationId) {
+  const chat = store.conversation(conversationId),
+    project = chat && store.project(chat.project_id);
+  if (!project) return [];
+  return store
+    .activeRuns()
+    .filter((run) => run.conversation_id !== conversationId)
+    .map((run) => {
+      const peer = store.conversation(run.conversation_id),
+        home = peer && store.project(peer.project_id);
+      return (
+        !!home &&
+        pathsOverlap(project.path, home.path) && {
+          conversationId: peer.id,
+          title: peer.title,
+          provider: run.provider,
+          repository: home.path,
+          startedAt: run.created_at,
+          waitingForApproval: run.status === "waiting",
+          request:
+            peer.scope === "none"
+              ? null
+              : store.runRequest(run.id).slice(0, 300),
+          source: `harness://conversation/${peer.id}`,
+        }
+      );
+    })
+    .filter(Boolean);
+}
+
+export function workspaceNotice(peers, changes) {
+  if (!peers.length) return "";
+  const listed = changes?.slice(0, 40) ?? [];
+  return [
+    `Workspace notice from Agentic Harness: ${peers.length === 1 ? "another chat is" : peers.length + " other chats are"} working in this repository right now.`,
+    ...peers.map(
+      (p) =>
+        `- "${p.title}" (${p.provider}, started ${p.startedAt})${p.request ? ": " + p.request.replace(/\s+/g, " ") : ""}`,
+    ),
+    ...(listed.length
+      ? [
+          "These files already had uncommitted changes before this turn began. Treat them as someone else's work unless you changed them yourself in an earlier turn of this conversation:",
+          ...listed.map((c) => `- ${c.status.trim()} ${c.file}`),
+          ...(changes.length > listed.length
+            ? [`- and ${changes.length - listed.length} more`]
+            : []),
+        ]
+      : []),
+    `While they are working: ${sharedWorkspaceRules}`,
+    "Other chats can start or finish during your turn, and the host cannot tell you who made an edit while turns overlap.",
+  ].join("\n");
+}
 
 export function historyCall(store, conversationId, name, args) {
   const chat = store.conversation(conversationId);
   if (!chat) throw new Error("Conversation not found");
+  if (name === "workspace_activity")
+    return workspacePeers(store, conversationId);
   if (name === "project_notes")
     return store
       .notes(chat.project_id)
@@ -114,5 +188,5 @@ export function handoffContext(store, chat, provider) {
 }
 
 export function agentInstructions(project, chat) {
-  return `This is the user's personal Agentic Harness workspace. Use only the current subscription integration for all AI work, including summaries and subagents. Never use inference API keys, paid overages, credit purchases, or other paid inference routes. Stop on subscription limits.\nApp conversation: harness://conversation/${chat.id}. Shared history scope: ${chat.scope}. Search and read history on demand; don't load the entire archive. Preserve source links. Native sessions from other providers are not interchangeable.\nPrimary writable repository: ${project.path}.\nUpstream references (read-only, one-way; never modify unless the user explicitly changes scope): ${project.repositories.map((r) => `${r.name}: ${r.path}`).join("; ") || "none"}. Consult project instructions. Keep each repository's Git state distinct. Report verification results accurately.`;
+  return `This is the user's personal Agentic Harness workspace. Use only the current subscription integration for all AI work, including summaries and subagents. Never use inference API keys, paid overages, credit purchases, or other paid inference routes. Stop on subscription limits.\nApp conversation: harness://conversation/${chat.id}. Shared history scope: ${chat.scope}. Search and read history on demand; don't load the entire archive. Preserve source links. Native sessions from other providers are not interchangeable.\nPrimary writable repository: ${project.path}.\nUpstream references (read-only, one-way; never modify unless the user explicitly changes scope): ${project.repositories.map((r) => `${r.name}: ${r.path}`).join("; ") || "none"}. Consult project instructions. Keep each repository's Git state distinct. Report verification results accurately.\nShared workspace: other Harness chats may be working in this same folder at the same time. A turn begins with a workspace notice when one already is, and one can start later, so always call workspace_activity before you commit. Whenever a notice or workspace_activity reports another chat: ${sharedWorkspaceRules}`;
 }

@@ -4,7 +4,14 @@ import { fileURLToPath } from "node:url";
 import { inspectCodex, runCodex } from "../providers/codex.mjs";
 import { inspectClaude, runClaude } from "../providers/claude.mjs";
 import { inspectCursor, runCursor } from "../providers/cursor.mjs";
-import { agentInstructions, handoffContext, historyCall } from "./history.mjs";
+import {
+  agentInstructions,
+  handoffContext,
+  historyCall,
+  workspaceNotice,
+  workspacePeers,
+} from "./history.mjs";
+import { repositoryState } from "./repository.mjs";
 
 export class Controller extends EventEmitter {
   constructor(store, { probePath, bridgeUrl }) {
@@ -16,6 +23,7 @@ export class Controller extends EventEmitter {
     this.active = new Map();
     this.approvalWaiters = new Map();
     this.bridgeTokens = new Map();
+    this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
     store.recover();
   }
   event(chatId, runId, type, payload) {
@@ -163,6 +171,27 @@ export class Controller extends EventEmitter {
         scope: chat.scope,
         source: `harness://conversation/${chat.id}`,
       });
+    // Chats sharing this folder are told about each other on every turn.
+    const peers = workspacePeers(this.store, chat.id),
+      notice = workspaceNotice(
+        peers,
+        peers.length
+          ? await repositoryState(project.path).then(
+              (state) => state.changes,
+              () => null,
+            )
+          : null,
+      );
+    if (notice)
+      this.event(chat.id, run.id, "work", {
+        kind: "workspace-notice",
+        item: {
+          title: "Shared workspace notice",
+          description: `${peers.length} other ${peers.length === 1 ? "chat" : "chats"} working here: ${peers.map((p) => p.title).join(", ")}`,
+          text: notice,
+        },
+        sources: peers.map((p) => p.source),
+      });
     const ctx = {
       project,
       chat,
@@ -170,7 +199,7 @@ export class Controller extends EventEmitter {
       model: run.model,
       effort,
       session,
-      handoff,
+      handoff: [notice, handoff].filter(Boolean).join("\n\n"),
       instructions: agentInstructions(project, chat),
       signal: abort.signal,
       emit,
@@ -219,11 +248,7 @@ export class Controller extends EventEmitter {
         provider: run.provider,
         model: run.model,
       });
-      const result = await {
-        codex: runCodex,
-        claude: runClaude,
-        cursor: runCursor,
-      }[run.provider](ctx);
+      const result = await this.runners[run.provider](ctx);
       status = abort.signal.aborted
         ? "cancelled"
         : ["completed", "cancelled", "interrupted"].includes(result.status)

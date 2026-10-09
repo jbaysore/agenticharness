@@ -129,6 +129,12 @@ try {
     "Working on: second task.",
   );
   await expect(page.locator(".working-indicator")).toHaveCount(2);
+  await expect(pane("Alpha").locator(".workspace-peers")).toHaveText(
+    "1 other chat working in this project",
+  );
+  await expect(page.locator(".work-panel .workspace-peers")).toContainText(
+    "Alpha",
+  );
   await expect(pane("Alpha").getByLabel("Agent and model")).toHaveValue(
     "codex|fixture",
   );

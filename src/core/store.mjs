@@ -279,6 +279,22 @@ export class Store {
       )
       .get(conversationId);
   }
+  activeRuns() {
+    return this.db
+      .prepare(
+        "SELECT * FROM runs WHERE status IN ('running','starting','waiting') ORDER BY created_at, rowid",
+      )
+      .all();
+  }
+  runRequest(runId) {
+    return (
+      this.db
+        .prepare(
+          "SELECT content FROM messages WHERE run_id=? AND role='user' ORDER BY rowid LIMIT 1",
+        )
+        .get(runId)?.content ?? ""
+    );
+  }
   createRun({ conversationId, actionId, provider, model, text }) {
     this.db.exec("BEGIN IMMEDIATE");
     try {

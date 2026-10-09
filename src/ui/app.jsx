@@ -8,7 +8,12 @@ import { api } from "./api.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
 import { ChatRow } from "./chat-row.jsx";
-import { activeChats, attentionCount } from "./status.mjs";
+import {
+  activeChats,
+  attentionCount,
+  workspacePeers,
+  workspacePeersLabel,
+} from "./status.mjs";
 import { readAllPending } from "./outbox.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
 import {
@@ -700,6 +705,11 @@ function App() {
               providers={state.providers}
               focused={p.key === current.key}
               solo={view.panes.length === 1}
+              peers={workspacePeers(
+                state.conversations,
+                paneProject(p)?.id,
+                p.chatId,
+              )}
               selection={selection.current}
               onSelection={(chosen) => {
                 if (p.key === view.focused) selection.current = chosen;
@@ -771,6 +781,7 @@ function App() {
               panel={panel}
               project={project}
               chat={chat}
+              peers={workspacePeers(state.conversations, project.id, chat?.id)}
               onRevision={(text) => paneRefs.current[current.key]?.send(text)}
               onChatRefresh={() => chat && reload(chat.id)}
               report={report}
@@ -1100,6 +1111,7 @@ function WorkspacePanel({
   panel,
   project,
   chat,
+  peers,
   onRevision,
   onChatRefresh,
   report,
@@ -1282,6 +1294,12 @@ function WorkspacePanel({
         <span>⑂ {state?.branch ?? "Repository"}</span>
         <span>{state?.changes?.length ?? 0} changed</span>
       </div>
+      {peers.length > 0 && (
+        <p className="notice workspace-peers">
+          {workspacePeersLabel(peers)}: {peers.map((c) => c.title).join(", ")}.
+          These changes may belong to more than one chat.
+        </p>
+      )}
       {problem && <p className="notice">{problem}</p>}
       {panel === "review" ? (
         <>
