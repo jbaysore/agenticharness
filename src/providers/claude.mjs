@@ -58,7 +58,7 @@ export async function claudeAuth() {
   });
   return JSON.parse(result.stdout);
 }
-async function usageOf(q) {
+export async function usageOf(q) {
   const fn = q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
   if (typeof fn !== "function") return null;
   try {
