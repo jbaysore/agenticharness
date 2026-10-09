@@ -1,5 +1,9 @@
-// Read-only runs the host starts on a chat's behalf. A worker searches, lists
-// and reads files, then answers in text; it never joins the chat's native session.
+// Runs the host starts on a chat's behalf, on a model the user chose. A worker
+// never joins the chat's native session; it gets one task and answers in text.
+//   inline: answers from material given in the task, with no tools
+//   search: may search, list and read files in the project
+//   edit:   may read the project and change exactly one named file
+import { resolve } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AsyncQueue } from "../core/queue.mjs";
 import { checkCodexBilling } from "../security/billing.mjs";
@@ -11,8 +15,13 @@ import {
 } from "./claude.mjs";
 import { checkCodexRoute, openCodex } from "./codex.mjs";
 
-export const workerPrompt =
-  "You are a read-only repository worker for another coding agent. Use only tools that search, list and read files. Never create, change or delete files, run builds or tests, or use the network. Answer the task directly and briefly: give file paths with line numbers and short excerpts that support the answer. If you cannot find something, say what you searched. Do not ask questions.";
+export const workerPrompts = {
+  inline:
+    "You answer one request from another coding agent using only the material in the message. Do not use tools. Quote file content verbatim with its line numbers; never paraphrase code or invent lines. Include whole logical blocks rather than fragments. If the material does not contain the answer, say so plainly. Do not ask questions.",
+  search:
+    "You are a read-only repository worker for another coding agent. Use only tools that search, list and read files. Never create, change or delete files, run builds or tests, or use the network. Answer the task directly and briefly: give file paths with line numbers and short excerpts that support the answer. If you cannot find something, say what you searched. Do not ask questions.",
+  edit: "You make one change to one file for another coding agent. Read the file, apply exactly the requested change with your editing tool, and change nothing else in that file or any other. Do not run commands. Reply with one sentence saying what you changed, or why you could not.",
+};
 
 // The provider cannot run included-usage work right now. The caller falls back
 // to another worker and refreshes provider status.
@@ -20,8 +29,34 @@ export class WorkerUnavailable extends Error {
   unavailable = true;
 }
 const cancelled = () => new Error("The delegated task was cancelled");
+const samePath = (cwd, a, b) =>
+  typeof a === "string" &&
+  resolve(cwd, a).toLowerCase() === resolve(cwd, b).toLowerCase();
 
-export async function runClaudeWorker({ cwd, model, effort, task, signal }) {
+// An edit worker may change the one file it was given and nothing else.
+export function allowsClaudeTool(name, input, cwd, editPath) {
+  return (
+    !!editPath && name === "Edit" && samePath(cwd, input?.file_path, editPath)
+  );
+}
+export function allowsCodexChange(changes, cwd, editPath) {
+  return (
+    !!editPath &&
+    Array.isArray(changes) &&
+    changes.length > 0 &&
+    changes.every((change) => samePath(cwd, change.path, editPath))
+  );
+}
+
+export async function runClaudeWorker({
+  cwd,
+  model,
+  effort,
+  task,
+  signal,
+  mode = "search",
+  editPath,
+}) {
   const input = new AsyncQueue();
   const q = query({
     prompt: input,
@@ -29,16 +64,26 @@ export async function runClaudeWorker({ cwd, model, effort, task, signal }) {
       ...claudeOptions(cwd),
       model,
       effort: effort || undefined,
-      // A short prompt of its own keeps a delegation's fixed cost small.
-      systemPrompt: workerPrompt,
-      tools: ["Read", "Grep", "Glob"],
+      // A short prompt of its own keeps a hand-off's fixed cost small.
+      systemPrompt: workerPrompts[mode],
+      tools: {
+        inline: [],
+        search: ["Read", "Grep", "Glob"],
+        edit: ["Read", "Edit"],
+      }[mode],
       includePartialMessages: false,
       persistSession: false,
-      maxTurns: 40,
-      canUseTool: async () => ({
-        behavior: "deny",
-        message: "This worker is read-only.",
-      }),
+      maxTurns: mode === "inline" ? 2 : 40,
+      canUseTool: async (name, args) =>
+        mode === "edit" && allowsClaudeTool(name, args, cwd, editPath)
+          ? { behavior: "allow", updatedInput: args }
+          : {
+              behavior: "deny",
+              message:
+                mode === "edit"
+                  ? "This worker may only edit the one file it was given."
+                  : "This worker is read-only.",
+            },
     },
   });
   const stop = () => q.interrupt().catch(() => q.close());
@@ -67,18 +112,21 @@ export async function runClaudeWorker({ cwd, model, effort, task, signal }) {
         throw new Error(
           event.errors?.join("\n") || "The worker ended without an answer",
         );
+      const used = Object.values(event.modelUsage ?? {});
       return {
         text: event.result,
         model: Object.keys(event.modelUsage ?? {})[0] ?? model,
-        tokens: Object.values(event.modelUsage ?? {}).reduce(
-          (sum, u) =>
-            sum +
-            u.inputTokens +
-            u.outputTokens +
-            u.cacheReadInputTokens +
-            u.cacheCreationInputTokens,
-          0,
-        ),
+        usage: {
+          input: used.reduce(
+            (sum, u) =>
+              sum +
+              u.inputTokens +
+              u.cacheReadInputTokens +
+              u.cacheCreationInputTokens,
+            0,
+          ),
+          output: used.reduce((sum, u) => sum + u.outputTokens, 0),
+        },
       };
     }
     throw new Error("The worker ended without an answer");
@@ -89,15 +137,24 @@ export async function runClaudeWorker({ cwd, model, effort, task, signal }) {
   }
 }
 
-export async function runCodexWorker({ cwd, model, effort, task, signal }) {
+export async function runCodexWorker({
+  cwd,
+  model,
+  effort,
+  task,
+  signal,
+  mode = "search",
+  editPath,
+}) {
   const rpc = await openCodex(cwd);
   let threadId,
     turnId,
     text = "",
-    tokens = 0,
+    usage = { input: 0, output: 0 },
     finished = false,
     resolveDone,
     rejectDone;
+  const proposed = new Map();
   const done = new Promise((resolve, reject) => {
     resolveDone = resolve;
     rejectDone = reject;
@@ -114,20 +171,34 @@ export async function runCodexWorker({ cwd, model, effort, task, signal }) {
   rpc.on("closed", (error) => {
     if (!finished) rejectDone(error ?? cancelled());
   });
-  // Nothing a read-only worker does should need approval; anything that asks is refused.
+  // The only approval a worker is ever given is an edit worker's change to
+  // its one file. Commands and every other request are refused.
   rpc.on("request", (message) => {
     if (rpc.closed) return;
-    if (/requestApproval$/.test(message.method))
+    if (message.method === "item/fileChange/requestApproval")
+      rpc.respond(message.id, {
+        decision:
+          mode === "edit" &&
+          allowsCodexChange(proposed.get(message.params?.itemId), cwd, editPath)
+            ? "accept"
+            : "decline",
+      });
+    else if (/requestApproval$/.test(message.method))
       rpc.respond(message.id, { decision: "decline" });
     else rpc.reject(message.id);
   });
   rpc.on("notification", ({ method, params: p }) => {
     if (p?.threadId && threadId && p.threadId !== threadId) return;
     if (method === "turn/started") turnId = p.turn.id;
+    if (method === "item/started" && p.item?.type === "fileChange")
+      proposed.set(p.item.id, p.item.changes);
     if (method === "item/completed" && p.item?.type === "agentMessage")
       text = p.item.text;
-    if (method === "thread/tokenUsage/updated")
-      tokens = p.tokenUsage?.total?.totalTokens ?? tokens;
+    if (method === "thread/tokenUsage/updated" && p.tokenUsage?.total)
+      usage = {
+        input: p.tokenUsage.total.inputTokens,
+        output: p.tokenUsage.total.outputTokens,
+      };
     if (method === "turn/completed") {
       finished = true;
       resolveDone(p.turn);
@@ -149,9 +220,11 @@ export async function runCodexWorker({ cwd, model, effort, task, signal }) {
       model,
       modelProvider: "openai",
       serviceTier: "default",
-      approvalPolicy: "never",
-      sandbox: "read-only",
-      developerInstructions: workerPrompt,
+      // An edit worker asks before every change, so the host can refuse any
+      // that is not to its one file. The others cannot write at all.
+      approvalPolicy: mode === "edit" ? "untrusted" : "never",
+      sandbox: mode === "edit" ? "workspace-write" : "read-only",
+      developerInstructions: workerPrompts[mode],
       config: {
         model_provider: "openai",
         forced_login_method: "chatgpt",
@@ -177,7 +250,7 @@ export async function runCodexWorker({ cwd, model, effort, task, signal }) {
       throw new Error(
         turn.error?.message ?? "The worker ended without an answer",
       );
-    return { text, model, tokens };
+    return { text, model, usage };
   } finally {
     finished = true;
     signal.removeEventListener("abort", stop);

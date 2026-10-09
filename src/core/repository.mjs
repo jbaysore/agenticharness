@@ -1,7 +1,15 @@
-import { realpath, readFile, stat } from "node:fs/promises";
+import {
+  realpath,
+  readFile,
+  stat,
+  mkdtemp,
+  writeFile,
+  rm,
+} from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve, relative, isAbsolute, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { resolve, relative, isAbsolute, sep, join } from "node:path";
 import { createHash } from "node:crypto";
 
 const exec = promisify(execFile);
@@ -63,6 +71,49 @@ export async function readRepositoryFile(root, file) {
     content: bytes.toString("utf8"),
     modifiedAt: info.mtime.toISOString(),
   };
+}
+// A repository-relative path, whether the caller gave one or an absolute path
+// inside the repository.
+export function relativePath(root, file) {
+  return typeof file === "string" && isAbsolute(file)
+    ? relative(root, file)
+    : file;
+}
+// What changed in one file since `before`, as a unified diff. Used to show a
+// chat exactly what a worker's edit did, whatever else is uncommitted.
+export async function changeDiff(root, file, before) {
+  const directory = await mkdtemp(join(tmpdir(), "harness-diff-")),
+    earlier = join(directory, "before");
+  try {
+    await writeFile(earlier, before);
+    const diff = await exec(
+      "git",
+      [
+        "--no-pager",
+        "diff",
+        "--no-index",
+        "--no-color",
+        "-U2",
+        "--",
+        earlier,
+        await safeFile(root, file),
+      ],
+      { windowsHide: true, maxBuffer: 8 * 1024 * 1024, timeout: 20000 },
+    ).then(
+      () => "",
+      // Exit code 1 is how git reports that the two files differ.
+      (error) => {
+        if (error.code === 1) return error.stdout;
+        throw error;
+      },
+    );
+    return diff
+      .split("\n")
+      .filter((line) => !/^(diff --git|index |--- |\+\+\+ )/.test(line))
+      .join("\n");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 export async function repositoryState(root) {
   const [status, branch, head, files] = await Promise.all([

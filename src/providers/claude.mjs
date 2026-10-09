@@ -131,6 +131,27 @@ export async function inspectClaude(cwd) {
     q.close();
   }
 }
+// The delegation tools' inputs, as the SDK wants them. The same tools reach
+// Codex through their JSON schemas in core/delegation.mjs.
+const delegationShapes = {
+  delegate_read: {
+    paths: z.array(z.string()),
+    question: z.string(),
+    purpose: z.enum(["read", "extract", "triage", "summarise"]),
+  },
+  delegate_locate: { query: z.string() },
+  delegate_edit: {
+    path: z.string(),
+    instruction: z.string(),
+    lines: z.number().int(),
+    have_read: z.boolean().optional(),
+  },
+  delegate_run: { command: z.string(), want: z.string().optional() },
+  delegate_draft: {
+    kind: z.enum(["commit", "changelog"]),
+    staged: z.boolean().optional(),
+  },
+};
 export async function runClaude(ctx) {
   const input = new AsyncQueue();
   let currentId = "initial";
@@ -190,14 +211,14 @@ export async function runClaude(ctx) {
           ],
         }),
       ),
-      // Offered only on turns where the user's rules name a worker that can run.
+      // Offered only on turns where the user's rules allow a hand-off.
       ...(ctx.tools ?? [])
-        .filter((t) => t.name === "delegate_task")
+        .filter((t) => delegationShapes[t.name])
         .map((t) =>
           tool(
             t.name,
             t.description,
-            { task: z.string(), report: z.string().optional() },
+            delegationShapes[t.name],
             async (args) => ({
               content: [
                 {

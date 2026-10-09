@@ -183,14 +183,21 @@ test("agent rules are saved through the API, validated, and announced", async ()
         id: "claude",
         name: "Claude Code",
         connected: true,
-        models: [{ id: "haiku", name: "Haiku", efforts: [] }],
+        models: [
+          {
+            id: "haiku",
+            name: "Haiku",
+            efforts: [],
+            resolvedModel: "claude-haiku-5-5",
+          },
+        ],
       },
     ];
     const initial = (await call("/api/state")).body;
-    assert.deepEqual(initial.rules, {
-      instructions: "",
-      delegate: { enabled: false, workers: [] },
-    });
+    assert.equal(initial.rules.instructions, "");
+    assert.equal(initial.rules.delegate.enabled, false);
+    assert.deepEqual(initial.rules.delegate.workers, []);
+    assert.equal(initial.rules.delegate.actions.edit, true);
     assert.deepEqual(initial.delegation, {});
     const announced = [];
     app.controller.on("event", (e) => announced.push(e.type));
@@ -209,6 +216,7 @@ test("agent rules are saved through the API, validated, and announced", async ()
         delegate: {
           enabled: true,
           workers: [{ provider: "claude", model: "haiku" }],
+          actions: { draft: false },
         },
       },
       "PUT",
@@ -223,10 +231,13 @@ test("agent rules are saved through the API, validated, and announced", async ()
         model: "haiku",
         effort: null,
         name: "Claude Code · Haiku",
+        priced: true,
         available: true,
         reason: null,
       },
     ]);
+    assert.equal(rules.delegate.actions.draft, false);
+    assert.equal(rules.delegate.actions.run, true);
     app.controller.providers[0].blockReason = "Out of usage.";
     assert.deepEqual(
       (await call("/api/state")).body.rules.delegate.workers.map((w) => [

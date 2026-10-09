@@ -1,7 +1,18 @@
 // Harness-wide rules the user sets once and every agent receives.
+import {
+  ACTION_NAMES,
+  READ_PURPOSES,
+  draftLimit,
+  editThreshold,
+  estimate,
+  measure,
+  offeredTools,
+} from "./delegation.mjs";
+import { priceOf } from "./prices.mjs";
+
 const RULES_KEY = "agent-rules",
-  STATS_KEY = "delegation-stats";
-// Providers the host can run as a read-only worker, and whose chats can delegate.
+  STATS_KEY = "delegation-runs";
+// Providers the host can run as a worker, and whose chats can delegate.
 export const WORKER_PROVIDERS = ["claude", "codex"];
 const MAX_INSTRUCTIONS = 8000,
   MAX_WORKERS = 2,
@@ -13,6 +24,11 @@ const catalogModel = (worker, providers) =>
   providers
     .find((p) => p.id === worker.provider)
     ?.models?.find((m) => m.id === worker.model);
+// Every action is allowed unless the user has switched it off.
+const actionsFrom = (saved) =>
+  Object.fromEntries(
+    ACTION_NAMES.map((name) => [name, saved?.[name] !== false]),
+  );
 
 export function workerName(worker, providers) {
   const provider = providers.find((p) => p.id === worker.provider),
@@ -32,6 +48,7 @@ export function readRules(store) {
       typeof saved.instructions === "string" ? saved.instructions : "",
     delegate: {
       enabled: saved.delegate?.enabled === true,
+      actions: actionsFrom(saved.delegate?.actions),
       workers: workers
         .filter(
           (w) =>
@@ -79,7 +96,14 @@ export function saveRules(store, input, providers) {
   const enabled = input.delegate?.enabled === true;
   if (enabled && !workers.length)
     throw new Error("Choose a worker model before turning this rule on");
-  const rules = { instructions, delegate: { enabled, workers } };
+  const rules = {
+    instructions,
+    delegate: {
+      enabled,
+      actions: actionsFrom(input.delegate?.actions),
+      workers,
+    },
+  };
   store.setting(RULES_KEY, rules);
   return rules;
 }
@@ -113,30 +137,45 @@ export function describeRules(rules, providers) {
       workers: rules.delegate.workers.map((w) => ({
         ...w,
         name: workerName(w, providers),
+        priced: !!priceOf(providers, w),
         ...workerAvailability(w, providers),
       })),
     },
   };
 }
 
-// The measured token cost of recent delegations, per worker model.
-export function recordDelegation(store, worker, tokens) {
-  if (!Number.isFinite(tokens) || tokens <= 0) return;
+// What each worker actually used on recent runs of each action. The estimate
+// for the next run is drawn from these, so it improves without any model
+// spending tokens on it.
+export function recordRun(store, worker, action, sample) {
   const all = store.setting(STATS_KEY) ?? {},
-    key = workerKey(worker);
-  all[key] = [...(Array.isArray(all[key]) ? all[key] : []), tokens].slice(
+    key = `${workerKey(worker)}|${action}`;
+  all[key] = [...(Array.isArray(all[key]) ? all[key] : []), sample].slice(
     -KEPT_RUNS,
   );
   store.setting(STATS_KEY, all);
 }
+export function measuredRuns(store, worker, action) {
+  const runs = (store.setting(STATS_KEY) ?? {})[
+    `${workerKey(worker)}|${action}`
+  ];
+  return measure(Array.isArray(runs) ? runs : []);
+}
+// Per worker model, for the settings screen: how many hand-offs and their size.
 export function delegationStats(store) {
+  const byWorker = {};
+  for (const [key, runs] of Object.entries(store.setting(STATS_KEY) ?? {})) {
+    if (!Array.isArray(runs)) continue;
+    const worker = key.slice(0, key.lastIndexOf("|"));
+    (byWorker[worker] ??= []).push(...runs.map((r) => r.input + r.output));
+  }
   return Object.fromEntries(
-    Object.entries(store.setting(STATS_KEY) ?? {})
-      .filter(([, runs]) => Array.isArray(runs) && runs.length)
-      .map(([key, runs]) => {
-        const sorted = [...runs].sort((a, b) => a - b);
+    Object.entries(byWorker)
+      .filter(([, totals]) => totals.length)
+      .map(([worker, totals]) => {
+        const sorted = totals.sort((a, b) => a - b);
         return [
-          key,
+          worker,
           {
             count: sorted.length,
             median: sorted[Math.floor((sorted.length - 1) / 2)],
@@ -147,23 +186,20 @@ export function delegationStats(store) {
   );
 }
 
-export const delegateTool = {
-  name: "delegate_task",
-  description:
-    "Hand a self-contained, read-only task (searching, listing or reading files in this repository) to the user's low-cost worker model and get back its written answer. The worker cannot change anything and does not see this conversation, so state the whole task and what to report.",
-  inputSchema: {
-    type: "object",
-    properties: { task: { type: "string" }, report: { type: "string" } },
-    required: ["task"],
-    additionalProperties: false,
-  },
-};
-
-// Which workers this turn may use, in order, and why any configured one is
-// left out. A chat already running on the worker model has nothing cheaper to
-// hand work to, and Cursor chats are not covered.
-export function planWorkers(rules, providers, run) {
-  const { enabled, workers } = rules.delegate,
+// What this turn may hand off, to which workers in which order, and why any
+// configured worker is left out. Nothing is offered to Cursor chats, to a chat
+// already on the worker model, or where a price needed for the comparison is
+// unknown. An action that could never come out cheaper for this pairing is not
+// offered at all, so the agent never spends a call on it.
+export function planDelegation(rules, providers, run, store) {
+  const none = (note = null, skipped = []) => ({
+      workers: [],
+      skipped,
+      note,
+      tools: [],
+      actions: {},
+    }),
+    { enabled, workers, actions } = rules.delegate,
     onModel = (w) => w.provider === run.provider && w.model === run.model;
   if (
     !enabled ||
@@ -171,33 +207,82 @@ export function planWorkers(rules, providers, run) {
     !WORKER_PROVIDERS.includes(run.provider) ||
     onModel(workers[0])
   )
-    return { workers: [], skipped: [] };
+    return none();
+  const mainPrice = priceOf(providers, run);
+  if (!mainPrice)
+    return none(
+      `No list price is known for ${workerName(run, providers)}, so the cost of handing work off cannot be compared. This chat does its own work.`,
+    );
   const usable = [],
     skipped = [];
   for (const worker of workers.filter((w) => !onModel(w))) {
-    const { available, reason } = workerAvailability(worker, providers);
-    if (available) usable.push(worker);
-    else skipped.push({ worker, reason });
+    const { available, reason } = workerAvailability(worker, providers),
+      price = priceOf(providers, worker);
+    if (!available) skipped.push({ worker, reason });
+    else if (!price)
+      skipped.push({ worker, reason: "No list price is known for it." });
+    else if (price.input >= mainPrice.input)
+      skipped.push({
+        worker,
+        reason: "It is not cheaper than this chat's model.",
+      });
+    else usable.push({ ...worker, price });
   }
-  return { workers: usable, skipped };
+  if (!usable.length) return none(null, skipped);
+  const prices = { main: mainPrice, worker: usable[0].price },
+    measured = (action) => measuredRuns(store, usable[0], action),
+    editFrom = editThreshold(prices, measured("edit")),
+    draftUpTo = draftLimit(prices, measured("draft")),
+    offered = {
+      ...actions,
+      locate:
+        actions.locate &&
+        estimate({ action: "locate" }, prices, measured("locate")).cheaper,
+      edit: actions.edit && editFrom !== null,
+      draft: actions.draft && draftUpTo > 0,
+    };
+  return {
+    workers: usable,
+    skipped,
+    note: null,
+    mainPrice,
+    actions: offered,
+    tools: offeredTools(offered),
+    editFrom,
+    draftUpTo,
+  };
 }
 
-export function rulesInstructions(rules, worker, providers, stats) {
+const PURPOSE_TEXT = {
+  read: "the part of a file that matters to a question",
+  extract: "values pulled out into a list",
+  triage: "a set of files or lines sorted by relevance",
+  summarise: "a summary for orientation",
+};
+export function rulesInstructions(rules, plan, providers, shell) {
   const parts = [];
   if (rules.instructions.trim())
     parts.push(
       "Standing instructions from the user for every agent in this workspace:\n" +
         rules.instructions.trim(),
     );
-  if (worker) {
-    const cost = stats[workerKey(worker)],
-      count = (n) => n.toLocaleString("en-US");
+  if (plan.tools.length) {
+    const { actions } = plan,
+      purposes = READ_PURPOSES.filter((p) => actions[p]),
+      lines = [
+        purposes.length &&
+          `- delegate_read (purpose ${purposes.join(", ")}): when you need an answer from files rather than their full text: ${purposes.map((p) => PURPOSE_TEXT[p]).join("; ")}. Small files come back as raw text.`,
+        actions.locate &&
+          "- delegate_locate: to find where something lives when you do not already know the file.",
+        actions.edit &&
+          `- delegate_edit: one mechanical change to one file that you can state exactly in a sentence and that touches about ${plan.editFrom} or more lines. Review the diff it returns. Make smaller edits yourself.`,
+        actions.run &&
+          `- delegate_run: a command whose output may be long, such as tests, a build or a linter. It runs in ${shell}. You get the output, or its relevant lines verbatim when it is long.`,
+        actions.draft &&
+          `- delegate_draft: a commit message or changelog entry for the uncommitted diff, when that diff is under about ${plan.draftUpTo.toLocaleString("en-US")} tokens. Read the draft before using it.`,
+      ].filter(Boolean);
     parts.push(
-      `Cost rule set by the user: a low-cost worker (${workerName(worker, providers)}) is available through the delegate_task tool. It can search, list and read files in this repository, cannot change anything, does not see this conversation, and returns a written answer. ${
-        cost
-          ? `Recent delegations have cost about ${count(cost.median)} tokens on that cheaper model, and never less than ${count(cost.min)}.`
-          : "Each delegation has a small fixed overhead on that cheaper model."
-      } Delegate when you expect a search or exploration to cost more than that in your own context: finding where something lives, surveying how a pattern is used, or reading several files to answer one question. Do the work yourself when one or two direct lookups will do, or when you need the file contents in your own context to edit them. Give the worker a complete, specific task and say what to report (paths, line numbers, short excerpts). Use delegate_task rather than your own built-in subagents for this kind of work. If delegate_task reports that no worker is available, do the task yourself.`,
+      `Cost rule set by the user. A low-cost worker (${workerName(plan.workers[0], providers)}) can take certain work off your model. On every call the host compares the measured cost of the worker, including your reading of its result, with the cost of you doing the work, and uses whichever is cheaper. Do not estimate costs yourself: use these tools for these actions instead of your own tools.\n${lines.join("\n")}\nKeep on your own model: anything that must be exhaustive or prove absence (every usage, nothing calls this), changes across several files, configuration or infrastructure, new code or tests, multi-step terminal work, planning, debugging and final review. A worker's "not found" is not proof that something does not exist. Read a file yourself before you edit it. When a tool says it declined or that no worker is available, do that task yourself. Use these tools rather than your own built-in subagents.`,
     );
   }
   return parts.length ? "\n" + parts.join("\n") : "";

@@ -4,8 +4,10 @@ import { Store } from "../src/core/store.mjs";
 import {
   delegationStats,
   describeRules,
+  measuredRuns,
+  planDelegation,
   readRules,
-  recordDelegation,
+  recordRun,
   saveRules,
   workerAvailability,
 } from "../src/core/rules.mjs";
@@ -37,24 +39,40 @@ const providers = () => [
     models: [{ id: "composer", name: "Composer", efforts: [] }],
   },
 ];
-const haiku = { provider: "claude", model: "haiku", effort: null },
+const allActions = {
+    read: true,
+    extract: true,
+    triage: true,
+    summarise: true,
+    locate: true,
+    edit: true,
+    run: true,
+    draft: true,
+  },
+  haiku = { provider: "claude", model: "haiku", effort: null },
   mini = { provider: "codex", model: "mini", effort: "low" };
 
 test("nothing is chosen until the user chooses, and a saved choice is kept", () => {
   const store = new Store(":memory:");
   assert.deepEqual(readRules(store), {
     instructions: "",
-    delegate: { enabled: false, workers: [] },
+    delegate: { enabled: false, actions: allActions, workers: [] },
   });
   const saved = saveRules(
     store,
     {
       instructions: "Prefer small diffs.",
-      delegate: { enabled: true, workers: [haiku, { ...mini, extra: 1 }] },
+      delegate: {
+        enabled: true,
+        workers: [haiku, { ...mini, extra: 1 }],
+        // Every action is allowed unless it is switched off; unknown names are ignored.
+        actions: { edit: false, run: "no", teleport: true },
+      },
     },
     providers(),
   );
   assert.deepEqual(saved.delegate.workers, [haiku, mini]);
+  assert.deepEqual(saved.delegate.actions, { ...allActions, edit: false });
   assert.deepEqual(readRules(store), saved);
   store.close();
 });
@@ -132,22 +150,121 @@ test("a worker is available exactly when its provider could run a turn", () => {
   store.close();
 });
 
-test("delegation cost is remembered per worker model over the last twenty runs", () => {
+test("each worker's real runs are remembered per action, the last twenty of each", () => {
   const store = new Store(":memory:");
   assert.deepEqual(delegationStats(store), {});
-  for (const tokens of [900, 300, 600]) recordDelegation(store, haiku, tokens);
-  recordDelegation(store, mini, 5000);
-  recordDelegation(store, mini, 0);
-  recordDelegation(store, mini, NaN);
+  assert.equal(measuredRuns(store, haiku, "read").count, 0);
+  for (const [input, output] of [
+    [10_400, 500],
+    [10_200, 100],
+    [10_900, 300],
+  ])
+    recordRun(store, haiku, "read", { input, output, content: 10_000 });
+  recordRun(store, haiku, "locate", { input: 9000, output: 700, content: 0 });
+  recordRun(store, mini, "read", { input: 4000, output: 1000, content: 3000 });
+  assert.deepEqual(measuredRuns(store, haiku, "read"), {
+    count: 3,
+    extraInput: 400,
+    output: 300,
+    share: 0.03,
+  });
+  assert.equal(measuredRuns(store, haiku, "locate").share, null);
+  assert.equal(measuredRuns(store, mini, "locate").count, 0);
+  // The settings screen shows one line per worker model across its actions.
   assert.deepEqual(delegationStats(store), {
-    "claude|haiku": { count: 3, median: 600, min: 300 },
+    "claude|haiku": { count: 4, median: 10_300, min: 9700 },
     "codex|mini": { count: 1, median: 5000, min: 5000 },
   });
-  for (let i = 0; i < 30; i++) recordDelegation(store, haiku, 1000 + i);
-  assert.deepEqual(delegationStats(store)["claude|haiku"], {
-    count: 20,
-    median: 1019,
-    min: 1010,
+  for (let i = 0; i < 30; i++)
+    recordRun(store, haiku, "read", { input: 1000 + i, output: 0, content: 0 });
+  assert.equal(measuredRuns(store, haiku, "read").count, 20);
+  assert.equal(measuredRuns(store, haiku, "read").extraInput, 1019);
+  store.close();
+});
+
+test("a turn is offered only what can come out cheaper for its model and worker", () => {
+  const store = new Store(":memory:"),
+    list = [
+      {
+        id: "claude",
+        name: "Claude Code",
+        connected: true,
+        models: [
+          { id: "opus", name: "Opus", resolvedModel: "claude-opus-5-5" },
+          { id: "old", name: "Haiku 4.5", resolvedModel: "claude-haiku-4-5" },
+          { id: "new", name: "Haiku 5.5", resolvedModel: "claude-haiku-5-5" },
+        ],
+      },
+      {
+        id: "codex",
+        name: "Codex",
+        connected: true,
+        models: [
+          { id: "gpt-6.1-sol", name: "Sol" },
+          { id: "gpt-6-luna", name: "Luna" },
+          { id: "gpt-5.6-terra", name: "Terra" },
+        ],
+      },
+    ],
+    plan = (worker, provider, model) => {
+      saveRules(
+        store,
+        {
+          delegate: {
+            enabled: true,
+            workers: [{ provider: "claude", model: worker }],
+          },
+        },
+        list,
+      );
+      const p = planDelegation(
+        readRules(store),
+        list,
+        { provider, model },
+        store,
+      );
+      return {
+        tools: p.tools.map((t) => t.name.replace("delegate_", "")),
+        editFrom: p.editFrom,
+        draftUpTo: p.draftUpTo,
+        skipped: p.skipped.map((s) => s.reason),
+        note: p.note,
+      };
+    };
+  // A worker forty times cheaper than the chat's model: everything is offered.
+  assert.deepEqual(plan("new", "claude", "opus"), {
+    tools: ["read", "locate", "edit", "run", "draft"],
+    editFrom: 17,
+    draftUpTo: 8000,
+    skipped: [],
+    note: null,
   });
+  // Haiku 4.5 under Opus: drafts can never pay, and only very large edits do.
+  assert.deepEqual(plan("old", "claude", "opus").tools, [
+    "read",
+    "locate",
+    "edit",
+    "run",
+  ]);
+  assert.equal(plan("old", "claude", "opus").editFrom, 95);
+  // Haiku 4.5 under Sol: a search, an edit and a draft all cost more than doing them.
+  assert.deepEqual(plan("old", "codex", "gpt-6.1-sol").tools, ["read", "run"]);
+  // A worker that costs as much as the chat's model is not a saving at all.
+  assert.deepEqual(plan("new", "codex", "gpt-6-luna"), {
+    tools: [],
+    editFrom: undefined,
+    draftUpTo: undefined,
+    skipped: ["It is not cheaper than this chat's model."],
+    note: null,
+  });
+  assert.match(
+    plan("new", "codex", "gpt-5.6-terra").note,
+    /No list price is known for Codex · Terra/,
+  );
+  // An unpriced worker cannot be compared either.
+  list[0].models.push({ id: "mystery", name: "Mystery" });
+  assert.deepEqual(plan("mystery", "claude", "opus").skipped, [
+    "No list price is known for it.",
+  ]);
   store.close();
 });
