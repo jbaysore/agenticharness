@@ -332,8 +332,27 @@ export async function createHarness({
               fields.scope = body.scope;
               fields.sessions = {};
             }
-            return json(res, 200, store.updateConversation(id, fields));
+            if (body.archived !== undefined) {
+              if (controller.active.has(id))
+                throw new Error("Stop the turn before archiving this chat");
+              store.setArchived(id, body.archived === true);
+            }
+            const chat = store.updateConversation(id, fields);
+            controller.event(id, null, "chat", chat);
+            return json(res, 200, chat);
           }
+        }
+        if (
+          (match = path.match(/^\/api\/chats\/([^/]+)\/read$/)) &&
+          method === "POST"
+        ) {
+          const chat = store.conversation(match[1]);
+          if (!chat) return json(res, 404, { error: "Conversation not found" });
+          if (chat.unread) {
+            store.markRead(chat.id);
+            controller.event(chat.id, null, "chat", { read: true });
+          }
+          return json(res, 200, { ok: true });
         }
         if (
           (match = path.match(/^\/api\/chats\/([^/]+)\/messages$/)) &&

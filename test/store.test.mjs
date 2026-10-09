@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Store } from "../src/core/store.mjs";
 import { historyCall, handoffContext } from "../src/core/history.mjs";
 
@@ -183,4 +184,93 @@ test("upstream reference is directional and never grants write access", () => {
   assert.equal(db.project(down.id).repositories[0].writable, false);
   assert.equal(db.project(up.id).repositories.length, 0);
   db.close();
+});
+test("a chat summary follows its newest turn: running, needs approval, unread, failed", () => {
+  const db = new Store(":memory:"),
+    p = db.addProject("P", "C:\\p"),
+    c = db.createConversation({ projectId: p.id });
+  const summary = () => {
+    const { status, unread } = db.conversations().find((x) => x.id === c.id);
+    return { status, unread };
+  };
+  assert.deepEqual(summary(), { status: "idle", unread: false });
+  const run = db.createRun({
+    conversationId: c.id,
+    actionId: "summary-action-1",
+    provider: "codex",
+    model: "m",
+    text: "a",
+  });
+  assert.deepEqual(summary(), { status: "running", unread: false });
+  db.addApproval(c.id, run.id, "codex", { command: "write" });
+  db.setRun(run.id, "waiting");
+  assert.deepEqual(summary(), { status: "needs-approval", unread: false });
+  db.expireApprovals(run.id);
+  db.setRun(run.id, "completed");
+  assert.deepEqual(summary(), { status: "idle", unread: true });
+  assert.equal(db.conversationSnapshot(c.id).unread, true);
+  db.db
+    .prepare("UPDATE conversations SET read_at=? WHERE id=?")
+    .run("9999-01-01T00:00:00.000Z", c.id);
+  assert.deepEqual(summary(), { status: "idle", unread: false });
+  db.db.prepare("UPDATE conversations SET read_at=NULL WHERE id=?").run(c.id);
+  const failed = db.createRun({
+    conversationId: c.id,
+    actionId: "summary-action-2",
+    provider: "claude",
+    model: "m",
+    text: "b",
+  });
+  db.setRun(failed.id, "failed", null, "Out of usage");
+  assert.deepEqual(summary(), { status: "failed", unread: true });
+  assert.equal(db.conversation(c.id).last_error, "Out of usage");
+  db.close();
+});
+test("marking read and archiving leave the conversation order alone", () => {
+  const db = new Store(":memory:"),
+    p = db.addProject("P", "C:\\p"),
+    older = db.createConversation({ projectId: p.id }),
+    newer = db.createConversation({ projectId: p.id });
+  db.stampConversation(
+    older.id,
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z",
+  );
+  db.markRead(older.id);
+  db.setArchived(older.id, true);
+  const [first, second] = db.conversations();
+  assert.equal(first.id, newer.id);
+  assert.equal(second.updated_at, "2026-01-01T00:00:00.000Z");
+  assert.ok(second.archived_at);
+  assert.ok(second.read_at);
+  db.setArchived(older.id, false);
+  assert.equal(db.conversation(older.id).archived_at, null);
+  db.close();
+});
+test("an existing workspace gains the chat columns with its history already read", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "harness-migrate-")),
+    path = join(directory, "db.sqlite"),
+    old = new DatabaseSync(path);
+  old.exec(`
+    CREATE TABLE projects(id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, repositories TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL);
+    CREATE TABLE conversations(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, effort TEXT, scope TEXT NOT NULL DEFAULT 'project', sessions TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE runs(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), action_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, native_turn_id TEXT, created_at TEXT NOT NULL, ended_at TEXT);
+    INSERT INTO projects VALUES('p','P','C:\\p','[]','2026-01-01T00:00:00.000Z');
+    INSERT INTO conversations VALUES('c','p','Earlier work','codex','m',NULL,'project','{}','2026-01-01T00:00:00.000Z','2026-01-02T00:00:00.000Z');
+    INSERT INTO runs VALUES('r','c','old-action','codex','m','completed',NULL,'2026-01-01T00:00:00.000Z','2026-01-01T00:05:00.000Z');
+  `);
+  old.close();
+  let db = new Store(path);
+  const chat = db.conversation("c");
+  assert.equal(chat.read_at, "2026-01-02T00:00:00.000Z");
+  assert.equal(chat.archived_at, null);
+  assert.deepEqual(
+    { status: chat.status, unread: chat.unread },
+    { status: "idle", unread: false },
+  );
+  db.close();
+  db = new Store(path);
+  assert.equal(db.conversation("c").read_at, "2026-01-02T00:00:00.000Z");
+  db.close();
+  await rm(directory, { recursive: true, force: true });
 });

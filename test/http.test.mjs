@@ -83,3 +83,74 @@ test("real local HTTP server requires pairing, enforces same-origin writes, and 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a chat can be renamed, archived and marked read, and each change is announced", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-http-")),
+    app = await createHarness({ dataDir: dir, port: 0, startProviders: false });
+  const url = app.runtime.origin;
+  try {
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Harness-Client": "1",
+    };
+    const paired = await fetch(url + "/api/pair", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ code: app.auth.pairing() }),
+    });
+    headers.cookie = paired.headers.get("set-cookie").split(";")[0];
+    const call = async (path, body, method = "POST") => {
+      const response = await fetch(url + path, {
+        method,
+        headers,
+        body: body && JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const project = app.store.addProject("Test project", dir),
+      chat = app.store.createConversation({ projectId: project.id });
+    const run = app.store.createRun({
+      conversationId: chat.id,
+      actionId: "finished-elsewhere-1",
+      provider: "codex",
+      model: "m",
+      text: "hello",
+    });
+    app.store.setRun(run.id, "completed");
+    const listed = async () =>
+      (await call("/api/state", undefined, "GET")).body.conversations[0];
+    assert.equal((await listed()).unread, true);
+    const announced = [];
+    app.controller.on("event", (e) => announced.push(e.type));
+    assert.equal((await call(`/api/chats/${chat.id}/read`, {})).status, 200);
+    assert.equal((await listed()).unread, false);
+    await call(`/api/chats/${chat.id}/read`, {});
+    assert.deepEqual(announced, ["chat"]);
+    const renamed = await call(
+      `/api/chats/${chat.id}`,
+      { title: "Renamed", archived: true },
+      "PATCH",
+    );
+    assert.equal(renamed.body.title, "Renamed");
+    assert.ok(renamed.body.archived_at);
+    assert.deepEqual(announced, ["chat", "chat"]);
+    app.controller.active.set(chat.id, { abort: new AbortController() });
+    const busy = await call(
+      `/api/chats/${chat.id}`,
+      { archived: false },
+      "PATCH",
+    );
+    assert.equal(busy.status, 400);
+    assert.match(busy.body.error, /Stop the turn/);
+    app.controller.active.delete(chat.id);
+    assert.equal(
+      (await call(`/api/chats/${chat.id}`, { archived: false }, "PATCH")).body
+        .archived_at,
+      null,
+    );
+    assert.equal((await call("/api/chats/missing/read", {})).status, 404);
+  } finally {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

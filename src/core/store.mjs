@@ -3,6 +3,34 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+// A chat's newest run is its only possible active one: createRun refuses a second.
+const summary = `SELECT c.*, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
+  (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals
+  FROM conversations c LEFT JOIN runs l ON l.rowid=(SELECT r.rowid FROM runs r WHERE r.conversation_id=c.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)`;
+
+export function chatStatus(row) {
+  const active = ["starting", "running", "waiting"].includes(row.last_status);
+  return {
+    status: active
+      ? row.pending_approvals > 0 || row.last_status === "waiting"
+        ? "needs-approval"
+        : "running"
+      : ["failed", "interrupted"].includes(row.last_status)
+        ? row.last_status
+        : "idle",
+    unread:
+      !active && !!row.last_ended_at && row.last_ended_at > (row.read_at ?? ""),
+  };
+}
+
+function summarize({ last_status, last_ended_at, pending_approvals, ...c }) {
+  return {
+    ...c,
+    sessions: JSON.parse(c.sessions),
+    ...chatStatus({ ...c, last_status, last_ended_at, pending_approvals }),
+  };
+}
+
 export class Store {
   constructor(path) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
@@ -25,14 +53,24 @@ export class Store {
       CREATE TABLE IF NOT EXISTS comments(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), repository TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, body TEXT NOT NULL, revision TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT NOT NULL, file TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS runs_conversation ON runs(conversation_id,created_at);
+      CREATE INDEX IF NOT EXISTS approvals_conversation ON approvals(conversation_id,status);
     `);
-    if (
-      !this.db
-        .prepare("PRAGMA table_info(runs)")
+    const columns = (table) =>
+      this.db
+        .prepare(`PRAGMA table_info(${table})`)
         .all()
-        .some((c) => c.name === "error")
-    )
+        .map((c) => c.name);
+    if (!columns("runs").includes("error"))
       this.db.exec("ALTER TABLE runs ADD COLUMN error TEXT");
+    const conversation = columns("conversations");
+    if (!conversation.includes("archived_at"))
+      this.db.exec("ALTER TABLE conversations ADD COLUMN archived_at TEXT");
+    // Existing history starts out read; only later turns can mark a chat unread.
+    if (!conversation.includes("read_at"))
+      this.db.exec(
+        "ALTER TABLE conversations ADD COLUMN read_at TEXT; UPDATE conversations SET read_at=updated_at",
+      );
   }
 
   close() {
@@ -91,13 +129,23 @@ export class Store {
   }
   conversations() {
     return this.db
-      .prepare("SELECT * FROM conversations ORDER BY updated_at DESC")
+      .prepare(`${summary} ORDER BY c.updated_at DESC`)
       .all()
-      .map((c) => ({ ...c, sessions: JSON.parse(c.sessions) }));
+      .map(summarize);
   }
   conversation(id) {
-    const c = this.db.prepare("SELECT * FROM conversations WHERE id=?").get(id);
-    return c && { ...c, sessions: JSON.parse(c.sessions) };
+    const c = this.db.prepare(`${summary} WHERE c.id=?`).get(id);
+    return c && summarize(c);
+  }
+  markRead(id) {
+    this.db
+      .prepare("UPDATE conversations SET read_at=? WHERE id=?")
+      .run(this.now(), id);
+  }
+  setArchived(id, archived) {
+    this.db
+      .prepare("UPDATE conversations SET archived_at=? WHERE id=?")
+      .run(archived ? this.now() : null, id);
   }
   createConversation({
     projectId,

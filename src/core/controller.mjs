@@ -88,6 +88,7 @@ export class Controller extends EventEmitter {
     });
     const abort = new AbortController();
     this.active.set(chatId, { run, abort });
+    if (chat.archived_at) this.store.setArchived(chatId, false);
     this.store.updateConversation(chatId, {
       provider,
       model,
@@ -142,6 +143,7 @@ export class Controller extends EventEmitter {
       }
       if (type === "nativeTurn")
         this.store.setRun(run.id, "running", payload.id);
+      if (type === "usage") payload = { ...payload, provider: run.provider };
       this.event(chat.id, run.id, type, payload);
     };
     const messages = this.store.messages(chat.id);
