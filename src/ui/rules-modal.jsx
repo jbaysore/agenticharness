@@ -8,6 +8,20 @@ import {
   workerKey,
   workerName,
 } from "../core/rules.mjs";
+import { ACTIONS, ACTION_NAMES } from "../core/delegation.mjs";
+import { PRICES_AS_OF, priceOf } from "../core/prices.mjs";
+
+// A worker can take work only if its provider can run and its price is known.
+const standing = (worker, providers) => {
+  const status = workerAvailability(worker, providers);
+  return status.available && !priceOf(providers, worker)
+    ? {
+        available: false,
+        reason:
+          "No list price is known for this model, so its cost cannot be compared and it is never used.",
+      }
+    : status;
+};
 
 const parse = (value) => {
   const cut = value.indexOf("|");
@@ -20,16 +34,16 @@ const tokens = (n) => n.toLocaleString("en-US");
 // Where a search would go right now, given which providers can run.
 export function delegationRoute(enabled, workers, providers) {
   if (!workers.length) return "Choose a worker model to turn this on.";
-  if (!enabled) return "Off. Each chat does its own searching.";
+  if (!enabled) return "Off. Each chat does its own work.";
   const [primary, fallback] = workers.map((worker) => ({
     name: workerName(worker, providers),
-    ...workerAvailability(worker, providers),
+    ...standing(worker, providers),
   }));
   const why = (w) => `${w.name}: ${w.reason.replace(/\.?$/, ".")}`;
-  if (primary.available) return `Searches go to ${primary.name}.`;
+  if (primary.available) return `Hand-offs go to ${primary.name}.`;
   if (fallback?.available)
-    return `Searches go to ${fallback.name}. ${why(primary)}`;
-  return `No worker is available; chats will search for themselves. ${[
+    return `Hand-offs go to ${fallback.name}. ${why(primary)}`;
+  return `No worker is available; chats will do their own work. ${[
     primary,
     fallback,
   ]
@@ -44,7 +58,7 @@ function WorkerPicker({ label, empty, worker, exclude, providers, onChange }) {
       .find((p) => p.id === worker?.provider)
       ?.models?.find((m) => m.id === worker.model),
     provider = providers.find((p) => p.id === worker?.provider),
-    status = worker && workerAvailability(worker, providers);
+    status = worker && standing(worker, providers);
   return (
     <div className="rule-worker">
       <label>
@@ -119,6 +133,7 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
     [enabled, setEnabled] = useState(rules.delegate.enabled),
     [primary, setPrimary] = useState(rules.delegate.workers[0] ?? null),
     [fallback, setFallback] = useState(rules.delegate.workers[1] ?? null),
+    [actions, setActions] = useState(rules.delegate.actions),
     [saving, setSaving] = useState(false),
     [notice, setNotice] = useState(null);
   const workers = [primary, primary && fallback].filter(Boolean);
@@ -132,6 +147,7 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
           instructions,
           delegate: {
             enabled: enabled && !!primary,
+            actions,
             workers: workers.map(({ provider, model, effort }) => ({
               provider,
               model,
@@ -177,11 +193,11 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
         </section>
         <section className="connection">
           <header>
-            <h3>Hand off searches to a cheaper model</h3>
+            <h3>Hand off work to a cheaper model</h3>
             <label className="rule-toggle">
               <input
                 type="checkbox"
-                aria-label="Hand off searches to a cheaper model"
+                aria-label="Hand off work to a cheaper model"
                 checked={enabled && !!primary}
                 disabled={!primary}
                 onChange={(e) => setEnabled(e.target.checked)}
@@ -190,10 +206,12 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
             </label>
           </header>
           <p>
-            A chat can give a read-only task, such as finding where something
-            lives, to the worker model below instead of doing it on its own
-            model. It is told what a hand-off has cost and uses one only when it
-            expects that to be cheaper than searching itself.
+            A chat can give the kinds of work ticked below to the worker model
+            instead of doing them on its own model. Harness decides each time:
+            it compares the cost of starting the worker, the worker&rsquo;s
+            tokens and the chat reading the result with the cost of the chat
+            doing the work, and uses the worker only when that is cheaper. No
+            model spends tokens on the estimate.
           </p>
           <WorkerPicker
             label="Worker model"
@@ -225,6 +243,21 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
               stop both.
             </p>
           )}
+          <fieldset className="rule-actions">
+            <legend>What may be handed off</legend>
+            {ACTION_NAMES.map((name) => (
+              <label key={name}>
+                <input
+                  type="checkbox"
+                  checked={actions[name] !== false}
+                  onChange={(e) =>
+                    setActions({ ...actions, [name]: e.target.checked })
+                  }
+                />
+                {ACTIONS[name].label}
+              </label>
+            ))}
+          </fieldset>
           <p className="rule-route" role="status">
             {delegationRoute(enabled, workers, providers)}
           </p>
@@ -241,11 +274,14 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
             );
           })}
           <p className="muted small">
-            Applies to Claude Code and Codex chats; Cursor chats are not
-            covered. A chat already on the worker model does the work itself. A
-            worker spends its own provider&rsquo;s included usage, so a Codex
-            chat with a Claude worker uses Claude usage for its searches. When
-            no worker can run, the chat searches for itself.
+            Costs are compared at list prices as of {PRICES_AS_OF}, and a model
+            without a known price is never used. Small jobs are never handed
+            off. An edit comes back as a diff for the chat to review, and a
+            command runs only after you approve it. Applies to Claude Code and
+            Codex chats; Cursor chats are not covered. A worker spends its own
+            provider&rsquo;s included usage, so a Codex chat with a Claude
+            worker uses Claude usage. When no worker can run, the chat does its
+            own work.
           </p>
         </section>
         {notice && (
