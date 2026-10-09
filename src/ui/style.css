@@ -385,21 +385,129 @@ small {
   background: #242424;
 }
 .chat-row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
   width: calc(100% - 17px);
   margin-left: 17px;
-  text-align: left;
-  padding: 9px 10px;
+  padding-right: 9px;
   font-size: 11px;
   color: #8c8c8c;
   border-radius: 6px;
 }
-.chat-row span:last-child {
+.active-list .chat-row {
+  width: 100%;
+  margin-left: 0;
+}
+.chat-open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 9px 0 9px 10px;
+}
+.chat-open span:last-child {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.chat-row:hover,
+.chat-row:focus-within {
+  background: #202020;
+}
+.chat-row.archived {
+  font-style: italic;
+  opacity: 0.75;
+}
+.chat-detail {
+  max-width: 38%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: #737373;
+  flex-shrink: 0;
+}
+/* Neutral markers told apart by shape: a pulse works, a dot is new, "!" needs you, "×" stopped. */
+.chat-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f5f5f5;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.chat-marker.marker-running {
+  width: 6px;
+  height: 6px;
+  background: #bdbdbd;
+  animation: pulse 1.7s infinite;
+}
+.chat-marker.marker-approval,
+.chat-marker.marker-failed {
+  width: 14px;
+  height: 14px;
+}
+.chat-marker.marker-approval {
+  color: #181818;
+}
+.chat-marker.marker-approval::after {
+  content: "!";
+}
+.chat-marker.marker-failed {
+  background: none;
+  border: 1px solid #a3a3a3;
+  color: #d4d4d4;
+}
+.chat-marker.marker-failed::after {
+  content: "×";
+}
+.row-actions {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  padding-left: 14px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, transparent, #202020 14px);
+  opacity: 0;
+  pointer-events: none;
+}
+.chat-row:hover .row-actions,
+.chat-row:focus-within .row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.chat-row.selected .row-actions {
+  background: linear-gradient(90deg, transparent, #2c2c2c 14px);
+}
+.row-actions .icon-button {
+  width: 23px;
+  height: 23px;
+}
+.chat-row.renaming input {
+  flex: 1;
+  min-width: 0;
+  margin: 3px 0 3px 3px;
+  padding: 5px 7px;
+  font-size: 11px;
+}
+.archived-toggle {
+  width: calc(100% - 17px);
+  margin-left: 17px;
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 10px;
+  color: #737373;
 }
 .chat-row.selected {
   color: #d4d4d4;

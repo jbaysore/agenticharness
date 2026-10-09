@@ -7,6 +7,8 @@ import "./style.css";
 import { api } from "./api.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
+import { ChatRow } from "./chat-row.jsx";
+import { activeChats, attentionCount } from "./status.mjs";
 import { readAllPending } from "./outbox.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
 import {
@@ -37,6 +39,7 @@ function App() {
   const [chats, setChats] = useState({}),
     [view, setView] = useState(() => initialPanes()),
     [selectedProject, setSelectedProject] = useState(""),
+    [showArchived, setShowArchived] = useState(false),
     [windowVisible, setWindowVisible] = useState(
       () => document.visibilityState === "visible",
     );
@@ -340,8 +343,45 @@ function App() {
     window.addEventListener("keydown", jump);
     return () => window.removeEventListener("keydown", jump);
   }, [shown.map((p) => p.key).join(",")]);
+  // The taskbar shows how many chats are waiting while the window is in the background.
+  const active = activeChats(state.conversations),
+    attention = attentionCount(state.conversations);
+  useEffect(() => {
+    document.title =
+      (attention ? `(${attention}) ` : "") + "Harness — Your coding workspace";
+  }, [attention]);
   const emptyPane = (projectId) =>
     setView((v) => openInFocused(v, null, projectId));
+  async function archiveChat(c, archived) {
+    await api("/api/chats/" + c.id, { archived }, "PATCH");
+    if (archived)
+      setView((v) => {
+        const open = v.panes.find((p) => p.chatId === c.id);
+        return open ? closePane(v, open.key, selectedProject) : v;
+      });
+    await refresh();
+  }
+  const chatRow = (c, detail) => (
+    <ChatRow
+      key={c.id}
+      chat={c}
+      detail={detail}
+      placement={
+        c.id === chat?.id ? "selected" : openIds.includes(c.id) ? "open" : ""
+      }
+      canSplit={
+        !mobile &&
+        !!current.chatId &&
+        !openIds.includes(c.id) &&
+        view.panes.length < paneLimit
+      }
+      onOpen={(beside) => action(() => openChat(c.id, beside))()}
+      onRename={(title) =>
+        action(() => api("/api/chats/" + c.id, { title }, "PATCH"))()
+      }
+      onArchive={(archived) => action(() => archiveChat(c, archived))()}
+    />
+  );
   async function newChat(beside = false) {
     const target = state.projects.find((p) => p.id === selectedProject);
     if (!target) {
@@ -480,6 +520,19 @@ function App() {
           <Icon name="search" />
           Search conversations
         </button>
+        {active.length > 0 && (
+          <>
+            <div className="section-label">ACTIVE</div>
+            <div className="active-list" aria-label="Active chats">
+              {active.map((c) =>
+                chatRow(
+                  c,
+                  state.projects.find((p) => p.id === c.project_id)?.name,
+                ),
+              )}
+            </div>
+          </>
+        )}
         <div className="section-label">
           PROJECTS
           <button
@@ -491,56 +544,49 @@ function App() {
           </button>
         </div>
         <div className="project-list">
-          {state.projects.map((p) => (
-            <div key={p.id}>
-              <button
-                className={
-                  "project-row " + (p.id === selectedProject ? "selected" : "")
-                }
-                onClick={() => {
-                  setSelectedProject(p.id);
-                  emptyPane(p.id);
-                  setSidebar(false);
-                }}
-              >
-                <Icon name="folder" />
-                <span>{p.name}</span>
-                <small>
-                  {
-                    state.conversations.filter((c) => c.project_id === p.id)
-                      .length
+          {state.projects.map((p) => {
+            const mine = state.conversations.filter(
+                (c) => c.project_id === p.id,
+              ),
+              archived = mine.filter((c) => c.archived_at);
+            return (
+              <div key={p.id}>
+                <button
+                  className={
+                    "project-row " +
+                    (p.id === selectedProject ? "selected" : "")
                   }
-                </small>
-              </button>
-              {p.id === selectedProject &&
-                state.conversations
-                  .filter((c) => c.project_id === p.id)
-                  .map((c) => (
-                    <button
-                      key={c.id}
-                      className={
-                        "chat-row " +
-                        (c.id === chat?.id
-                          ? "selected"
-                          : openIds.includes(c.id)
-                            ? "open"
-                            : "")
-                      }
-                      title="Ctrl-click to open beside the current chat"
-                      onClick={(e) =>
-                        action(() => openChat(c.id, e.ctrlKey || e.metaKey))()
-                      }
-                      onAuxClick={(e) => {
-                        if (e.button === 1)
-                          action(() => openChat(c.id, true))();
-                      }}
-                    >
-                      <span className={"provider-dot " + c.provider} />
-                      <span>{c.title}</span>
-                    </button>
-                  ))}
-            </div>
-          ))}
+                  onClick={() => {
+                    setSelectedProject(p.id);
+                    // Browsing another project never closes a chat that is open.
+                    if (!current.chatId) emptyPane(p.id);
+                    setSidebar(false);
+                  }}
+                >
+                  <Icon name="folder" />
+                  <span>{p.name}</span>
+                  <small>{mine.length - archived.length}</small>
+                </button>
+                {p.id === selectedProject && (
+                  <>
+                    {mine.filter((c) => !c.archived_at).map((c) => chatRow(c))}
+                    {archived.length > 0 && (
+                      <button
+                        className="archived-toggle"
+                        aria-expanded={showArchived}
+                        onClick={() => setShowArchived(!showArchived)}
+                      >
+                        {showArchived
+                          ? "Hide archived"
+                          : `Show archived (${archived.length})`}
+                      </button>
+                    )}
+                    {showArchived && archived.map((c) => chatRow(c))}
+                  </>
+                )}
+              </div>
+            );
+          })}
           {!state.projects.length && (
             <p className="sidebar-hint">
               Add a folder to begin. Your code stays on this computer.
@@ -1075,21 +1121,29 @@ function WorkspacePanel({
     [reference, setReference] = useState(""),
     [showReference, setShowReference] = useState(false);
   const query = "projectId=" + project.id + "&repo=" + encodeURIComponent(repo);
+  // The panel follows the focused chat, so an answer for the repository it
+  // just left must not overwrite the one it is showing now.
+  const wanted = useRef(query);
+  wanted.current = query;
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setState(await api("/api/repository?" + query));
+      const next = await api("/api/repository?" + query);
+      if (wanted.current !== query) return;
+      setState(next);
       setProblem("");
     } catch (e) {
-      setProblem(e.message);
+      if (wanted.current === query) setProblem(e.message);
     } finally {
-      setLoading(false);
+      if (wanted.current === query) setLoading(false);
     }
   }, [query]);
   useEffect(() => {
     setSelectedFile("");
     setDiff(null);
     setFile(null);
+    setState(null);
+    setProblem("");
     refresh();
   }, [query]);
   useEffect(() => {

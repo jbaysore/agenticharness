@@ -3,7 +3,7 @@ import { api } from "./api.mjs";
 import { Icon, Markdown, Approval } from "./components.jsx";
 import { readPending, savePending } from "./outbox.mjs";
 import { readDraft, saveDraft } from "./drafts.mjs";
-import { providerStatusLabel } from "./status.mjs";
+import { chatMarker, chatMarkerLabel, providerStatusLabel } from "./status.mjs";
 
 export function ChatPane({
   ref,
@@ -160,7 +160,8 @@ export function ChatPane({
     e.preventDefault();
     onOpenChat(id, e.ctrlKey || e.metaKey, url.hash.slice(1));
   };
-  const title = chat?.title ?? "New conversation";
+  const title = chat?.title ?? "New conversation",
+    marker = chatMarker(chat);
   return (
     <section
       className={"chat-pane" + (focused ? " focused" : "")}
@@ -172,6 +173,13 @@ export function ChatPane({
         <header className="pane-header">
           <span className={"provider-dot " + (chat?.provider ?? provider)} />
           <strong title={title}>{title}</strong>
+          {["approval", "running"].includes(marker) && (
+            <span
+              className={"chat-marker marker-" + marker}
+              role="img"
+              aria-label={chatMarkerLabel(marker)}
+            />
+          )}
           {project && <span>{project.name}</span>}
           <button
             className="icon-button"
