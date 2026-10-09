@@ -87,48 +87,101 @@ the start of each turn, in every project. Changes apply to the next turn.
 
 - **Instructions for every agent** is free text given to Codex, Claude Code and
   Cursor chats as written.
-- **Hand off searches to a cheaper model** lets a chat give a read-only task,
-  such as finding where something lives, to a worker model you choose instead of
-  doing it on its own model. Pick the worker, optionally a fallback worker, and
+- **Hand off work to a cheaper model** lets a chat give certain kinds of work to
+  a worker model you choose instead of doing them on its own model. Pick the
+  worker, optionally a fallback worker, tick the kinds of work you allow, and
   switch the rule on. Nothing is selected until you choose.
 
-How the hand-off works:
+What can be handed off:
 
-- The worker can be on a different provider from the chat: a Codex chat can use
-  a Claude worker and the reverse. Harness runs the worker itself, so this does
-  not depend on either provider's own subagents.
-- A worker can only search, list and read files in the project. It cannot change
-  anything and does not see the conversation; it returns a written answer.
-- The chat decides when to hand off. It is told what recent hand-offs cost on the
-  worker model and is asked to use one only when it expects the work to cost more
-  than that in its own context. This is the agent's judgment, not a guarantee,
-  and Harness does not block a chat from searching for itself.
-- Each hand-off appears in the Work log with the worker's name, its answer and
-  the tokens it used. The settings screen shows the typical cost per worker.
+| Kind of work                       | What the chat gets back                                                      |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| Read a file for the relevant parts | The lines that answer its question, verbatim with line numbers               |
+| Extract facts into a list          | The values, each with its file and line                                      |
+| Sort items by relevance            | The items in order, with a reason for each                                   |
+| Summarise for orientation          | A short summary with file and line references                                |
+| Locate code or files               | Paths and line numbers                                                       |
+| One specified edit to one file     | The diff of what changed, to review                                          |
+| Run a command and report           | The exit code and the output, or its relevant lines verbatim when it is long |
+| Draft a commit or changelog        | Text written from the uncommitted diff, to review                            |
+
+Everything else stays on the chat's own model, and the agent is told so:
+anything that must be exhaustive or prove absence, changes across several files,
+configuration or infrastructure, new code or tests, multi-step terminal work,
+planning, debugging and final review.
+
+How the decision is made:
+
+- Harness decides on every call, so no model spends tokens estimating. It
+  compares the whole round trip (starting the worker, the worker's tokens, and
+  the chat's model reading and checking the result) with the chat's model doing
+  the work itself, and uses the worker only when that is at least a tenth cheaper.
+- The sizes come from things Harness can measure for free: the files named, the
+  command's output, the diff. What a worker costs comes from what that worker
+  actually used on its recent runs of the same kind of work; until it has run,
+  fixed starting figures are used.
+- Tokens are weighed at list prices, so a token on a cheap model counts for less
+  than one on an expensive model. The prices are a dated table in
+  `src/core/prices.mjs`. A model with no price in that table is never compared,
+  so nothing is handed to it or away from it.
+- A job under about 2,000 tokens is never handed off. The saving would be a
+  fraction of a cent and not worth the wait.
+- When the worker is not cheaper, Harness does the plain part itself with no
+  model: it returns the file text, the command output, or the lines an exact
+  search for a name finds. An edit or draft that would not pay is declined and
+  the chat does it.
+- A kind of work that can never pay for a given pair of models is not offered
+  to that chat at all. For example, with a worker only four times cheaper than
+  the chat's model, drafts and small edits are left out.
+- Each hand-off appears in the Work log with the worker, its tokens and its cost
+  as a share of the estimate for the chat's own model. So does each job Harness
+  did itself.
+
+What a worker may do:
+
+- A worker can be on a different provider from the chat. Harness runs it itself,
+  so this does not depend on either provider's own subagents.
+- For reading, extracting, sorting, summarising, command output and drafts, the
+  worker is given the material and has no tools at all.
+- A locating worker can search, list and read files in the project and nothing
+  else.
+- An editing worker may change the one file it was given and nothing else. If it
+  fails part-way, Harness puts the file back as it was.
+- A command runs only after you approve it, in PowerShell, with a ten-minute
+  limit. Harness runs it; the worker only ever sees its output.
 - A worker spends its own provider's included usage and passes the same
-  subscription checks as a chat turn. A Codex chat with a Claude worker therefore
-  spends Claude usage for its searches.
+  subscription checks as a chat turn. A Codex chat with a Claude worker
+  therefore spends Claude usage.
 - Claude Code and Codex chats are covered. Cursor chats are not, and a Cursor
-  model cannot be a worker. A chat already running on the worker model does the
-  work itself.
+  model cannot be a worker. A chat already running on the worker model does its
+  own work.
 
 When a worker cannot run:
 
 - If the worker's provider is out of usage, signed out or blocked when a turn
   starts, the turn uses the fallback worker. If neither can run, the chat is not
-  offered the hand-off for that turn and searches for itself.
+  offered the tools for that turn and does its own work.
 - A limit reached during a turn is caught when the worker checks its own usage.
   That worker is skipped for the rest of the turn, the next one is tried, and
   provider status is refreshed.
 - A worker that takes longer than five minutes or fails for another reason also
   gives way to the next one. A chat never fails because its worker could not run.
 - The settings screen shows each worker's current status and one line saying
-  where a search would go right now. Every fallback is written to the Work log
+  where a hand-off would go right now. Every fallback is written to the Work log
   with the provider's reason.
 
-The fallback covers the worker's provider only. A chat whose own provider is out
-of usage still cannot run. Put the fallback on the other provider so one limit
-cannot stop both workers.
+Limits to keep in mind:
+
+- The comparison is an estimate. It counts each token once and does not count
+  that text read by the chat's model stays in its context for later turns, so it
+  understates the saving from handing off long reads.
+- What a search would cost the chat's own model cannot be measured beforehand,
+  so locating uses a fixed assumption of about 6,000 tokens.
+- A worker's answer can be wrong or incomplete. That is why exhaustive and
+  absence questions are kept on the chat's model, edits come back as a diff, and
+  the agent is told that "not found" is not proof.
+- The fallback covers the worker's provider only. A chat whose own provider is
+  out of usage still cannot run.
 
 ## Sign-in and subscription boundaries
 

@@ -18,7 +18,14 @@ export function runCommand({
       child = spawn(
         windows ? "powershell.exe" : "/bin/sh",
         windows
-          ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command]
+          ? [
+              "-NoLogo",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              // PowerShell otherwise reports every failing program as exit code 1.
+              `${command}\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }`,
+            ]
           : ["-c", command],
         { cwd, env: subscriptionEnvironment(), windowsHide: true },
       );

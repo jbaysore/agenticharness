@@ -24,9 +24,11 @@ Up to three chats run side by side, the sidebar shows what every chat is doing,
 and agents sharing a folder are told about each other; this has been checked
 with a simulated provider, not yet with real providers running at once.
 **Agent rules** holds standing instructions for every agent and can hand
-read-only searches to a cheaper worker model on either Claude Code or Codex,
-with a fallback when that provider is out of usage; this too has only been
-checked with simulated providers.
+eight kinds of work (reading, extracting, sorting, summarising, locating, a
+single-file edit, running a command, drafting a commit message) to a cheaper
+worker model on Claude Code or Codex. Harness works out each time whether the
+hand-off is cheaper and falls back when the worker's provider is out of usage;
+this too has only been checked with simulated providers.
 Remote access runs through a Cloudflare Tunnel behind Cloudflare Access; real
 endpoint and physical laptop/iPhone validation are pending. See [daily-use instructions](docs/OPERATIONS.md),
 [acceptance evidence](docs/ACCEPTANCE.md), [the delivery plan](docs/PLAN.md), and

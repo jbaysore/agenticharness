@@ -67,22 +67,39 @@
 
 ## Agent rules follow-ups
 
-17. Run the delegation rule against real providers and record the results: a
-    Claude chat with a Haiku worker, a Codex chat with the same Claude worker, a
-    Claude chat with a small Codex worker, one trivial request the chat should do
-    itself, and one real search measured with the rule on and off. All use
-    included usage. Nothing has run against a real provider yet, including the
-    two workers themselves.
-18. Find out how long Codex waits for a client tool to answer. A worker is limited
-    to five minutes, and Codex's own limit for `item/tool/call` is undocumented.
-19. Confirm a Codex worker can run its read-only commands on this PC, where the
-    Codex Windows sandbox sometimes fails ACL setup. A worker that cannot returns
-    an error and the chat does the work itself.
-20. Cover Cursor: let Cursor chats hand off through the MCP bridge (its tool-call
-    time limit is unknown and the bridge currently allows 15 seconds), and decide
-    whether a Cursor model can be a worker without a usage meter.
-21. More rules, per-project overrides, and a per-turn token summary so the saving
-    from a rule can be seen without reading the Work log.
+17. Run the hand-off rule against real providers and record the results. Nothing
+    has run against a real provider yet, including the workers themselves. For
+    each of the eight kinds of work, on a Claude chat and a Codex chat: one job
+    large enough to be handed off, checked for a correct answer, and its real
+    cost against the estimate. Also one small job the host should do itself, and
+    one real task measured end to end with the rule on and off. All of this uses
+    included usage.
+18. Measure quality per kind of work on these repos: a fixed set of tasks with
+    known answers, run on each worker at each effort and on the chat's model as
+    the baseline. The current list of what is handed off rests on public
+    evidence, which is controlled for only two of the eight kinds and on an older
+    small model.
+19. Update Claude Code so Haiku 5.5 is offered here. This install still resolves
+    `haiku` to Haiku 4.5, which is only four times cheaper than Opus 5.5. At
+    that ratio the estimate declines plain reads, drafts and all but very large
+    edits.
+20. Keep `src/core/prices.mjs` current, and decide whether prices should be
+    editable in Agent rules. The table is dated, comes from third-party price
+    trackers, and has no entry for older models, which are therefore never used.
+21. Improve the estimate: count that text read by the chat's model is re-read on
+    later turns; replace the fixed assumption for what a search costs the chat's
+    model with a measured one; show a per-turn saving in the Work log.
+22. Find out how long Codex waits for a client tool to answer. A worker is limited
+    to five minutes, a command to ten, and Codex's own limit for `item/tool/call`
+    is undocumented.
+23. Confirm on this PC that a Codex worker can read under the read-only sandbox,
+    and that a Codex editing worker's file-change approvals arrive as the host
+    expects. The Codex Windows sandbox here sometimes fails ACL setup. A worker
+    that cannot run returns an error and the chat does the work itself.
+24. Cover Cursor: let Cursor chats hand off through the MCP bridge (its tool-call
+    time limit is unknown and the bridge allows 15 seconds), and decide whether a
+    Cursor model can be a worker without a usage meter.
+25. Per-project overrides for the rules, and further rules.
 
 ## Architecture notes
 

@@ -46,7 +46,12 @@ The complete product is not finished at the first working provider milestone.
   subagents cannot leave their provider and their model is not always settable,
   so Harness offers its own `delegate_task` tool and runs a read-only worker on
   the chosen model. That makes cross-provider workers, a visible token count and
-  a fallback possible. The agent still decides when delegating is cheaper.
+  a fallback possible.
+- The host, not the agent, decides whether a hand-off is cheaper. The agent calls
+  a structured tool for one of eight kinds of work; the host measures the size of
+  the job for free, compares the whole round trip at list prices with the chat's
+  own model doing it, and either starts a worker or does the plain part itself.
+  This keeps the estimate from costing tokens and makes it the same every time.
 - The host already ran one turn per chat. The browser holds open chats in a map
   fed by one event stream, so any pane can show any chat without a second stream.
 - All changes are committed and pushed directly to main, per AGENTS.md.
