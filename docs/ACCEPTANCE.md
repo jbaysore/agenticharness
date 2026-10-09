@@ -45,6 +45,31 @@ across reload after both a lost response and an unreceived request.
   terminates a disposable host during streaming, then restarts and continues.
 - `node scripts/outbox-acceptance.mjs`: real Edge/HTTP with an explicitly simulated
   provider; verifies action reconciliation and draft recovery after reload.
+- `node scripts/multichat-acceptance.mjs`: real Edge/HTTP with an explicitly
+  simulated provider; several chats running side by side and in the background.
+- `npm run test:layout`: real Edge, no provider; sidebars and one to three panes.
+
+## Several chats at once — 2026-10-09
+
+Everything here used a simulated provider or stored state. No real provider ran
+two turns at once, so none of it counts as real concurrent-provider evidence.
+
+| Check                                                                  | Kind                                             | Result                                                                                                                                                                       |
+| ---------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Two turns streaming side by side, each with its own draft and model    | Real Edge and HTTP, simulated provider           | Passed (`node scripts/multichat-acceptance.mjs`)                                                                                                                             |
+| Background chat: working, approval, unread markers; window title count | Real Edge and HTTP, simulated provider           | Passed; an approval in a chat that was not open opened and was answered with one click                                                                                       |
+| Work panel and breadcrumb follow the focused pane across two projects  | Real Edge and HTTP, simulated provider           | Passed                                                                                                                                                                       |
+| Rename, archive, unarchive                                             | Real Edge and HTTP                               | Passed                                                                                                                                                                       |
+| One to three panes at 1920, 1512 and 1200 px; restore on reload        | Real Edge (`node scripts/layout-acceptance.mjs`) | Passed: three panes of at least 390 px with the work panel docked at 1920; panel floats at 1512; two panes with the focused one kept at 1200; one pane on the phone viewport |
+| Single-chat review, files, terminal, search, reconnect                 | Real Edge with saved real transcripts            | Passed after the change (`node scripts/browser-acceptance.mjs`)                                                                                                              |
+| Workspace notice, commit rules and `workspace_activity`                | Unit tests with a stubbed provider               | Passed: a chat starting beside another in the same or a nested folder receives the notice; an unrelated project does not                                                     |
+| Chat status, unread, archive and the migration of an existing database | Unit tests against real SQLite                   | Passed                                                                                                                                                                       |
+| Real agents following the notice; two real turns committing at once    | Requires included usage                          | Not run                                                                                                                                                                      |
+| Two simultaneous Cursor turns                                          | Requires included usage                          | Not run; Cursor's worker lock is untested with concurrent sessions                                                                                                           |
+
+`scripts/outbox-acceptance.mjs` and `scripts/browser-acceptance.mjs` had stopped
+passing before this work, once models were left unset by default and Cursor Auto
+was removed from the picker. Both now choose a model the picker offers.
 
 ## Bugs found through dogfooding
 

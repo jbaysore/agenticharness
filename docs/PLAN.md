@@ -16,6 +16,9 @@ The complete product is not finished at the first working provider milestone.
    authenticated encrypted remote browser access, responsive review and approvals.
 6. **Acceptance and dogfooding (physical device acceptance pending).** Real provider/device checks, setup/update/backup
    guide, prioritized backlog. No mock-only capability counts as complete.
+7. **Several chats at once (built; real concurrent providers not yet run).** One to three
+   chats side by side, per-chat status in the sidebar, rename/archive, and an
+   automatic shared-workspace notice to agents. Verified with a simulated provider only.
 
 ## Architecture decisions
 
@@ -31,6 +34,12 @@ The complete product is not finished at the first working provider milestone.
   are not silently granted write access. Git state stays per repository.
 - Local host binds to loopback. Remote access requires an explicitly configured
   encrypted authenticated path. Never expose raw agent RPC endpoints publicly.
+- Chats in a project share one working folder. Agents are told about each other
+  and given commit rules on every overlapping turn; this is advisory. Enforced
+  isolation through a Git worktree per chat is the planned next phase, switched
+  on only when a chat starts beside another that is already working.
+- The host already ran one turn per chat. The browser holds open chats in a map
+  fed by one event stream, so any pane can show any chat without a second stream.
 - All changes are committed and pushed directly to main, per AGENTS.md.
 
 ## Account/setup actions

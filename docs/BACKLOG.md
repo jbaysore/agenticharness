@@ -27,8 +27,9 @@
 
 ## Product improvements
 
-7. Rename/archive chats and projects from the UI, collapse/resize panels, and add
-   keyboard shortcuts. The current sidebar supports creation, selection and search.
+7. Rename/archive projects and delete chats from the UI, and add more keyboard
+   shortcuts. Chats can be renamed and archived, panels collapse and resize, and
+   Alt+1/2/3 moves between side-by-side chats.
 8. Group tool events into one updating card and make native subagent progress
    easier to scan. Keep provider-managed work distinct from app orchestration.
 9. Resolve/retire individual review comments and navigate deleted-line anchors.
@@ -40,6 +41,27 @@
     resuming those native sessions. SQLite restore already covers app-owned state.
 12. Improve long-history paging with per-message offsets and explicit handoff
     truncation notices. Add deterministic repository evidence freshness checks.
+
+## Multi-chat follow-ups
+
+13. Run two real turns at once and record the result: two providers in the
+    `.local/dogfood-project` fixture that both commit, confirming neither commit
+    holds the other's files, and two simultaneous Cursor turns. Cursor's worker
+    lock has not been tested with concurrent sessions; if it refuses, add a
+    per-provider limit in `Controller.send` with a clear message. Both checks use
+    included subscription usage. Everything verified so far used a simulated
+    provider.
+14. Give a chat its own Git worktree when it starts while another chat is working
+    in the same repository. A chat's folder must be fixed at its first turn,
+    because each provider ties its native session to the working directory.
+    Review, Files, Terminal and the providers then resolve the folder through the
+    chat. Open questions: files a fresh worktree lacks (`node_modules`, `.env`,
+    local databases) and how "commit and push to main" maps onto a branch.
+15. Until then the shared-workspace notice is advisory and cannot attribute edits
+    made while turns overlap. A Codex thread resumed from before this release may
+    not have the `workspace_activity` tool; the per-turn notice still reaches it.
+16. Resizable or reorderable panes, and sending one request to several agents to
+    compare the results. Both were left out of the first multi-chat release.
 
 ## Architecture notes
 

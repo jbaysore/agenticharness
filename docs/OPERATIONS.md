@@ -7,7 +7,7 @@ or right-click the open Harness window and choose **Pin to taskbar**. The window
 is an Edge app, and its taskbar identity is separate from the Edge browser only
 when that shortcut is present. Pinning the window before the shortcut exists pins
 Edge instead. The installed app and its bundled
-runtime are under `%LOCALAPPDATA%\Programs\AgenticHarness\0.1.1`. Data is separate,
+runtime are under `%LOCALAPPDATA%\Programs\AgenticHarness\<version>`. Data is separate,
 under `%LOCALAPPDATA%\AgenticHarness`. Closing the app window leaves the host and
 ongoing work running. The host starts when you launch the app; it is not a Windows
 service and does not currently start automatically when you sign in.
@@ -41,6 +41,44 @@ buttons in the conversation header hide or reopen each side; each sidebar also
 has its own collapse button. Desktop widths and visibility are remembered in
 this browser. On smaller screens the work panel opens over the conversation,
 and on phones the project sidebar does too. Escape dismisses these overlays.
+
+## Working in several chats
+
+Each chat runs its own turn, so several can work at once. Up to three show side
+by side:
+
+- Click a chat to open it in the focused pane. Ctrl-click or middle-click it, or
+  use **Open beside** on its sidebar row, to add a pane. The split button in the
+  header adds an empty pane, and Ctrl-click on **New conversation** starts a new
+  chat beside the current one.
+- Each pane has its own composer, draft, agent and model. A draft stays with its
+  chat when the pane is closed. Closing a pane never stops the chat's work.
+- The header breadcrumb and the work panel (Review, Work, Files, Terminal) follow
+  the pane you last clicked. Alt+1, Alt+2 and Alt+3 move focus between panes.
+- The window width decides how many panes fit: each needs 390 px. A pane that
+  does not fit stays open and reappears when the window widens. The work panel
+  stays docked while every pane keeps that width and otherwise opens over them.
+- Open panes are part of the address and are restored on the next launch.
+
+Sidebar rows mark what a chat is doing: a pulsing dot while it works, **!** when
+it waits for your approval, **×** when it stopped before finishing, and a solid
+dot when it finished since you last looked. **Active** at the top of the sidebar
+lists those chats from every project, and the window title counts the ones
+waiting on you. A chat shown in a visible window counts as looked at. Hover a
+row to rename or archive it; archived chats sit behind **Show archived** in
+their project and return when you unarchive them or send them a message.
+
+Chats in one project share one working folder. When a turn starts while another
+chat is already working in that folder, or in a folder nested inside it, the
+agent is told who else is working, what they were asked, and which files already
+had uncommitted changes. It is instructed to commit only its own files by path
+and not to stash, reset, rebase or switch branches. Every agent can also call
+`workspace_activity` to check again before committing. The composer and Review
+panel show how many other chats are working in the project. This is guidance to
+the agents, not enforcement: Harness cannot tell which chat made an edit while
+turns overlap, and parallel chats still see each other's unfinished files when
+they run tests. Give parallel chats separate areas of the code, and review the
+diff before trusting a commit made while another chat was working.
 
 ## Sign-in and subscription boundaries
 
@@ -93,7 +131,8 @@ globally or automatically approve the workaround.
 All chat text, run outcomes, tool activity, review comments, artifacts and decisions
 are recorded in SQLite. Search conversations by words, filenames or decisions.
 Search results link to the source conversation and retain provider attribution.
-Agents can call `history_search`, `history_read`, and `project_notes` on demand.
+Agents can call `history_search`, `history_read`, and `project_notes` on demand,
+and `workspace_activity` to see which other chats are working in the same folder.
 
 The History selector controls agent access: **This conversation**, **This project**,
 or **All projects**. Reducing/changing scope starts fresh native sessions so an old
