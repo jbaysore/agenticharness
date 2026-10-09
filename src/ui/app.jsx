@@ -1,121 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
-import { readPending, savePending } from "./outbox.mjs";
-import { providerStatusLabel } from "./status.mjs";
+import { api } from "./api.mjs";
+import { Icon, Mark, Modal } from "./components.jsx";
+import { ChatPane } from "./chat-pane.jsx";
+import { readAllPending } from "./outbox.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
-
-async function api(path, body, method) {
-  const response = await fetch(path, {
-    method: method ?? (body === undefined ? "GET" : "POST"),
-    headers: {
-      "X-Harness-Client": "1",
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    const error = new Error(data.error ?? "Request failed");
-    error.status = response.status;
-    throw error;
-  }
-  return data;
-}
-const paths = {
-  plus: "M12 5v14M5 12h14",
-  chat: "M5 4h14v12H9l-4 4V4Z",
-  folder: "M3 6h7l2 3h9v11H3V6Z",
-  search: "m16 16 5 5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
-  terminal: "m5 7 5 5-5 5m8 0h6",
-  review: "M8 4H4v16h4M16 4h4v16h-4M9 8h6M9 12h6M9 16h6",
-  file: "M6 3h8l4 4v14H6V3Zm8 0v5h5",
-  activity: "M2 12h5l3-8 4 16 3-8h5",
-  settings:
-    "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2",
-  arrow: "M12 20V4m-6 6 6-6 6 6",
-  stop: "M6 6h12v12H6Z",
-  close: "m6 6 12 12M6 18 18 6",
-  menu: "M4 6h16M4 12h16M4 18h16",
-  sidebar: "M3 4h18v16H3V4Zm6 0v16",
-  panel: "M3 4h18v16H3V4Zm12 0v16",
-  refresh: "M20 10a8 8 0 1 0-1 7M20 4v6h-6",
-  check: "m5 12 4 4 10-10",
-  link: "m9 15 6-6M7 14l-2 2a3 3 0 0 0 4 4l4-4M11 8l4-4a3 3 0 0 1 4 4l-2 2",
-};
-function Icon({ name, size = 18 }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d={paths[name] ?? paths.file} />
-    </svg>
-  );
-}
-function Mark() {
-  return (
-    <span className="brand-mark" aria-hidden="true">
-      <i />
-      <i />
-      <i />
-    </span>
-  );
-}
-function Markdown({ text }) {
-  const html = DOMPurify.sanitize(
-    marked
-      .parse(text ?? "", { breaks: true })
-      .replace(
-        /href="harness:\/\/conversation\/([^"#]+)(#[^"]*)?"/g,
-        'href="/?chat=$1$2"',
-      ),
-  );
-  return (
-    <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />
-  );
-}
-function Modal({ title, children, onClose, wide = false }) {
-  return (
-    <div
-      className="modal-scrim"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <section
-        className={"modal " + (wide ? "wide" : "")}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <header>
-          <h2>{title}</h2>
-          <button
-            className="icon-button"
-            aria-label="Close dialog"
-            onClick={onClose}
-          >
-            <Icon name="close" />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
-  );
-}
 
 function App() {
   const [state, setState] = useState({
@@ -127,12 +20,9 @@ function App() {
     [needsPair, setNeedsPair] = useState(false),
     [pair, setPair] = useState(""),
     [error, setError] = useState("");
-  const [chat, setChat] = useState(null),
-    [selectedProject, setSelectedProject] = useState(""),
-    [provider, setProvider] = useState("codex"),
-    [model, setModel] = useState(""),
-    [effort, setEffort] = useState(""),
-    [draft, setDraft] = useState("");
+  const [chats, setChats] = useState({}),
+    [pane, setPane] = useState({ key: "pane-0", chatId: null }),
+    [selectedProject, setSelectedProject] = useState("");
   const [panel, setPanel] = useState("review"),
     [overlayPanel, setOverlayPanel] = useState(false),
     [sidebar, setSidebar] = useState(false),
@@ -179,11 +69,12 @@ function App() {
   const [projectName, setProjectName] = useState(""),
     [projectDirectory, setProjectDirectory] = useState(""),
     [remoteCode, setRemoteCode] = useState(null);
-  const currentChat = useRef(null),
+  const tracked = useRef(new Set()),
     lastEvent = useRef(0),
     floors = useRef({}),
-    pendingSend = useRef(readPending()),
-    bottom = useRef(null),
+    selection = useRef({ provider: "codex", model: "", effort: "" }),
+    paneRef = useRef(null),
+    paneKeys = useRef(0),
     errorTimer = useRef(null);
   const report = useCallback((e) => {
     setError(e.message ?? String(e));
@@ -209,19 +100,53 @@ function App() {
     setSelectedProject((p) => p || next.projects[0]?.id || "");
     return next;
   }, []);
-  const loadChat = useCallback(async (id) => {
-    const next = await api("/api/chats/" + id);
-    floors.current[id] = next.lastEventId;
-    currentChat.current = id;
-    setChat(next);
-    setSelectedProject(next.project_id);
-    setProvider(next.provider);
-    setModel(next.model);
-    setEffort(next.effort ?? "");
-    setSidebar(false);
-    history.replaceState({}, "", `/?chat=${id}`);
+  // A chat is tracked from the moment its snapshot arrives, so no streamed
+  // text between that snapshot and the next render is dropped.
+  const admit = useCallback((next) => {
+    floors.current[next.id] = next.lastEventId;
+    tracked.current.add(next.id);
+    setChats((all) => ({ ...all, [next.id]: next }));
     return next;
   }, []);
+  const reload = useCallback(
+    async (id) => {
+      const next = await api("/api/chats/" + id);
+      return tracked.current.has(id) ? admit(next) : next;
+    },
+    [admit],
+  );
+  const openChat = useCallback(
+    async (id) => {
+      const next = admit(await api("/api/chats/" + id));
+      setPane((current) =>
+        current.chatId === id
+          ? current
+          : { key: "pane-" + ++paneKeys.current, chatId: id },
+      );
+      setSelectedProject(next.project_id);
+      setSidebar(false);
+      return next;
+    },
+    [admit],
+  );
+  const openIds = [pane.chatId].filter(Boolean);
+  useEffect(() => {
+    const open = new Set(openIds);
+    for (const id of tracked.current)
+      if (!open.has(id)) tracked.current.delete(id);
+    setChats((all) => {
+      const kept = Object.entries(all).filter(([id]) => open.has(id));
+      return kept.length === Object.keys(all).length
+        ? all
+        : Object.fromEntries(kept);
+    });
+    if (ready)
+      history.replaceState(
+        {},
+        "",
+        openIds.length ? `/?chat=${openIds.join(",")}` : "/",
+      );
+  }, [openIds.join(","), ready]);
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -234,30 +159,10 @@ function App() {
         const next = await refresh();
         if (ignore) return;
         lastEvent.current = next.lastEventId;
-        const pending = pendingSend.current;
         const id =
-          pending?.chatId ?? new URLSearchParams(location.search).get("chat");
-        if (id) await loadChat(id);
-        if (pending) {
-          const { run } = await api(
-            "/api/actions/" + encodeURIComponent(pending.actionId),
-          );
-          if (run) {
-            pendingSend.current = null;
-            savePending(null);
-            setDraft("");
-          } else {
-            setDraft(pending.text);
-            setProvider(pending.provider);
-            setModel(pending.model);
-            setEffort(pending.effort ?? "");
-            report(
-              new Error(
-                "Your unconfirmed message was restored. Sending it again uses the same action ID.",
-              ),
-            );
-          }
-        }
+          Object.keys(readAllPending())[0] ??
+          new URLSearchParams(location.search).get("chat");
+        if (id) await openChat(id).catch(report);
         setReady(true);
       } catch (e) {
         if (e.status === 401) setNeedsPair(true);
@@ -279,7 +184,7 @@ function App() {
     stream.addEventListener("resync", async (event) => {
       lastEvent.current = JSON.parse(event.data).lastEventId;
       await refresh();
-      if (currentChat.current) await loadChat(currentChat.current);
+      await Promise.all([...tracked.current].map((id) => reload(id)));
     });
     stream.onmessage = (event) => {
       const e = JSON.parse(event.data);
@@ -287,13 +192,28 @@ function App() {
       lastEvent.current = e.id;
       if (e.type === "providers")
         setState((s) => ({ ...s, providers: e.payload.providers }));
-      if (["projects", "chat"].includes(e.type)) refresh().catch(report);
+      if (
+        ["projects", "chat", "run", "approval", "approval-resolved"].includes(
+          e.type,
+        )
+      )
+        refresh().catch(report);
       if (e.type.startsWith("terminal-"))
         window.dispatchEvent(new CustomEvent(e.type, { detail: e.payload }));
-      if (e.conversationId !== currentChat.current) return;
+      if (e.type === "usage" && e.payload.provider) {
+        const { provider, ...usage } = e.payload;
+        setState((s) => ({
+          ...s,
+          providers: s.providers.map((p) =>
+            p.id === provider ? { ...p, usage } : p,
+          ),
+        }));
+      }
+      if (!tracked.current.has(e.conversationId)) return;
       if (e.type === "text" && e.id > (floors.current[e.conversationId] ?? 0))
-        setChat((c) => {
-          if (!c || c.id !== e.conversationId) return c;
+        setChats((all) => {
+          const c = all[e.conversationId];
+          if (!c) return all;
           const p = e.payload,
             existing = c.messages.find((m) => m.id === p.messageId);
           const next = existing
@@ -313,55 +233,25 @@ function App() {
                 created_at: new Date().toISOString(),
               };
           return {
-            ...c,
-            messages: existing
-              ? c.messages.map((m) => (m.id === next.id ? next : m))
-              : [...c.messages, next],
+            ...all,
+            [c.id]: {
+              ...c,
+              messages: existing
+                ? c.messages.map((m) => (m.id === next.id ? next : m))
+                : [...c.messages, next],
+            },
           };
         });
-      if (["run", "approval", "approval-resolved"].includes(e.type)) {
-        api("/api/chats/" + e.conversationId)
-          .then((next) => {
-            if (currentChat.current === next.id) {
-              floors.current[next.id] = next.lastEventId;
-              setChat(next);
-            }
-          })
-          .catch(report);
-        if (e.type === "run") refresh().catch(report);
-      }
-      if (e.type === "usage")
-        setState((s) => ({
-          ...s,
-          providers: s.providers.map((p) =>
-            p.id === provider ? { ...p, usage: e.payload } : p,
-          ),
-        }));
+      if (["run", "approval", "approval-resolved", "chat"].includes(e.type))
+        reload(e.conversationId).catch(report);
       window.dispatchEvent(new CustomEvent("harness-activity", { detail: e }));
     };
     return () => stream.close();
-  }, [ready, provider]);
-  const connected = state.providers.find((p) => p.id === provider),
-    selectedModel = connected?.models?.find((m) => m.id === model),
-    project = state.projects.find((p) => p.id === selectedProject);
-  useEffect(() => {
-    if (!connected?.models?.length) return;
-    const available = connected.models.some(
-      (m) => m.id === model && !m.disabled,
-    );
-    if (model && !available) {
-      setModel("");
-      setEffort("");
-    }
-  }, [provider, model, connected]);
-  useEffect(() => {
-    if (selectedModel && effort && !selectedModel.efforts.includes(effort))
-      setEffort("");
-  }, [model]);
-  useEffect(() => {
-    if (bottom.current && chat?.activeRun)
-      bottom.current.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [chat?.messages?.at(-1)?.content]);
+  }, [ready]);
+  const project = state.projects.find((p) => p.id === selectedProject),
+    chat = (pane.chatId && chats[pane.chatId]) || null;
+  const emptyPane = () =>
+    setPane({ key: "pane-" + ++paneKeys.current, chatId: null });
   async function newChat() {
     if (!project) {
       setModal("project");
@@ -369,64 +259,20 @@ function App() {
     }
     const c = await api("/api/chats", {
       projectId: project.id,
-      provider,
-      model,
-      effort,
+      ...selection.current,
     });
-    await loadChat(c.id);
+    await openChat(c.id);
     await refresh();
   }
-  async function sendMessage(override) {
-    const text = typeof override === "string" ? override : draft;
-    if (
-      !text.trim() ||
-      busy ||
-      chat?.activeRun ||
-      !model ||
-      (selectedModel?.efforts?.length && !effort)
-    )
-      return;
-    setBusy(true);
-    try {
-      let c = chat;
-      if (!c) {
-        c = await api("/api/chats", {
-          projectId: selectedProject,
-          provider,
-          model,
-          effort,
-        });
-        await loadChat(c.id);
-      }
-      const prior = pendingSend.current;
-      const body =
-        prior &&
-        prior.text === text &&
-        prior.chatId === c.id &&
-        prior.provider === provider &&
-        prior.model === model
-          ? prior
-          : {
-              chatId: c.id,
-              actionId: crypto.randomUUID(),
-              text,
-              provider,
-              model,
-              effort: effort || null,
-            };
-      pendingSend.current = body;
-      savePending(body);
-      await api(`/api/chats/${c.id}/messages`, body);
-      pendingSend.current = null;
-      savePending(null);
-      setDraft("");
-      await loadChat(c.id);
-      await refresh();
-    } catch (e) {
-      report(e);
-    } finally {
-      setBusy(false);
-    }
+  // The pane that asked keeps its key, so its composer survives the chat's creation.
+  async function ensureChat(chosen) {
+    const c = await api("/api/chats", {
+      projectId: selectedProject,
+      ...chosen,
+    });
+    const next = admit(await api("/api/chats/" + c.id));
+    setPane((current) => ({ ...current, chatId: c.id }));
+    return next;
   }
   const action = (fn) => async () => {
     try {
@@ -548,9 +394,7 @@ function App() {
                 }
                 onClick={() => {
                   setSelectedProject(p.id);
-                  setChat(null);
-                  currentChat.current = null;
-                  history.replaceState({}, "", "/");
+                  emptyPane();
                   setSidebar(false);
                 }}
               >
@@ -572,7 +416,7 @@ function App() {
                       className={
                         "chat-row " + (c.id === chat?.id ? "selected" : "")
                       }
-                      onClick={action(() => loadChat(c.id))}
+                      onClick={action(() => openChat(c.id))}
                     >
                       <span className={"provider-dot " + c.provider} />
                       <span>{c.title}</span>
@@ -653,268 +497,22 @@ function App() {
             sent twice.
           </div>
         )}
-        <div className="messages">
-          {!chat?.messages?.length ? (
-            <div className="welcome">
-              <div className="eyebrow">ONE WORKSPACE. YOUR AGENTS.</div>
-              <h1>What are we building?</h1>
-              <p>
-                Start with a task, pick an agent, and keep the whole story
-                together.
-              </p>
-              <div className="provider-cards">
-                {state.providers.map((p) => (
-                  <button
-                    className={
-                      "provider-card " + (provider === p.id ? "chosen" : "")
-                    }
-                    key={p.id}
-                    onClick={() => setProvider(p.id)}
-                  >
-                    <span className={"provider-emblem " + p.id}>
-                      {p.id === "codex" ? "C" : p.id === "claude" ? "✳" : "↗"}
-                    </span>
-                    <strong>{p.name}</strong>
-                    <span>
-                      <i
-                        className={
-                          "status-dot " +
-                          (!p.connected || p.blockReason ? "warning" : "")
-                        }
-                      />
-                      {providerStatusLabel(p)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <div className="starter-grid">
-                {[
-                  "Explain this codebase",
-                  "Review my current changes",
-                  "Help me implement a feature",
-                ].map((t, i) => (
-                  <button key={t} onClick={() => setDraft(t)}>
-                    <Icon name={["search", "review", "plus"][i]} />
-                    {t}
-                    <span>↗</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            chat.messages.map((m) => (
-              <article className={"message " + m.role} key={m.id} id={m.id}>
-                {m.role === "assistant" && (
-                  <div className="message-byline">
-                    <span className={"provider-dot " + m.provider} />
-                    <strong>
-                      {m.provider === "claude"
-                        ? "Claude Code"
-                        : m.provider === "cursor"
-                          ? "Cursor"
-                          : "Codex"}
-                    </strong>
-                    <span>{m.model}</span>
-                    <a
-                      href={`/?chat=${chat.id}#${m.id}`}
-                      title="Link to this message"
-                    >
-                      <Icon name="link" size={12} />
-                    </a>
-                  </div>
-                )}
-                <Markdown text={m.content} />
-              </article>
-            ))
-          )}
-          {chat?.activeRun && (
-            <div className="working-indicator">
-              <span className="pulse-dot" />
-              {chat.activeRun.status === "waiting"
-                ? "Waiting for your approval"
-                : "Working"}
-              <span>
-                {chat.activeRun.provider} · {chat.activeRun.model}
-              </span>
-            </div>
-          )}
-          {!chat?.activeRun && chat?.runs?.[0]?.status === "interrupted" && (
-            <div className="notice">
-              The host restarted during this turn. Review partial work, then
-              send a message to continue. No action was replayed.
-            </div>
-          )}
-          {!chat?.activeRun && chat?.runs?.[0]?.status === "failed" && (
-            <div className="notice">
-              Work stopped:{" "}
-              {chat.runs[0].error ?? "The provider could not finish this turn."}{" "}
-              Send a message to continue after resolving the issue.
-            </div>
-          )}
-          {chat?.approvals?.map((a) => (
-            <Approval
-              key={a.id}
-              approval={a}
-              onAnswer={(answer) => api("/api/approvals/" + a.id, answer)}
-            />
-          ))}
-          <div ref={bottom} />
-        </div>
-        <div className="composer-area">
-          {connected?.blockReason && (
-            <button
-              className="billing-notice"
-              onClick={() => setModal("connections")}
-            >
-              <span className="status-dot warning" />
-              {connected.blockReason}
-              <span>View setup ↗</span>
-            </button>
-          )}
-          <form
-            className="composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              sendMessage();
-            }}
-          >
-            <textarea
-              aria-label="Message your coding agent"
-              placeholder={
-                project
-                  ? "Describe a task, ask a question, or request a review…"
-                  : "Add a project to start a conversation…"
-              }
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (
-                  e.key === "Enter" &&
-                  !e.shiftKey &&
-                  !e.nativeEvent.isComposing
-                ) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              disabled={!project}
-            />
-            <div className="composer-controls">
-              <div className="model-control">
-                <span className={"provider-dot " + provider} />
-                <select
-                  aria-label="Agent and model"
-                  value={model ? provider + "|" + model : ""}
-                  onChange={(e) => {
-                    if (!e.target.value) {
-                      setModel("");
-                      setEffort("");
-                      return;
-                    }
-                    const [p, ...m] = e.target.value.split("|");
-                    setProvider(p);
-                    setModel(m.join("|"));
-                    setEffort("");
-                  }}
-                >
-                  <option value="">Choose a model</option>
-                  {state.providers.map((p) => (
-                    <optgroup label={p.name + " · " + p.route} key={p.id}>
-                      {p.models?.map((m) => (
-                        <option
-                          key={m.id}
-                          value={p.id + "|" + m.id}
-                          disabled={m.disabled}
-                        >
-                          {p.name} · {m.name}
-                          {m.disabled ? " · unavailable" : ""}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-              <select
-                className="effort-select"
-                aria-label="Reasoning effort"
-                value={effort}
-                onChange={(e) => setEffort(e.target.value)}
-                disabled={!selectedModel?.efforts?.length}
-              >
-                <option value="">
-                  {selectedModel?.efforts?.length
-                    ? "Choose effort"
-                    : "Provider preset"}
-                </option>
-                {selectedModel?.efforts?.map((e) => (
-                  <option key={e} value={e}>
-                    {e[0].toUpperCase() + e.slice(1)}
-                  </option>
-                ))}
-              </select>
-              <span className="composer-spacer" />
-              {chat?.activeRun ? (
-                <button
-                  type="button"
-                  className="send-button stopping"
-                  aria-label="Stop work"
-                  onClick={action(() =>
-                    api(`/api/chats/${chat.id}/cancel`, {}),
-                  )}
-                >
-                  <Icon name="stop" size={16} />
-                </button>
-              ) : (
-                <button
-                  className="send-button"
-                  aria-label="Send message"
-                  disabled={
-                    busy ||
-                    !draft.trim() ||
-                    !project ||
-                    !model ||
-                    (selectedModel?.efforts?.length && !effort) ||
-                    !!connected?.blockReason
-                  }
-                >
-                  <Icon name="arrow" size={18} />
-                </button>
-              )}
-            </div>
-          </form>
-          <div className="composer-footer">
-            <span>
-              <Icon name="check" size={12} />
-              Subscription only
-            </span>
-            {chat ? (
-              <label>
-                History{" "}
-                <select
-                  aria-label="Shared history scope"
-                  value={chat.scope}
-                  disabled={!!chat.activeRun}
-                  onChange={(e) => {
-                    api(
-                      "/api/chats/" + chat.id,
-                      { scope: e.target.value },
-                      "PATCH",
-                    )
-                      .then(() => loadChat(chat.id))
-                      .catch(report);
-                  }}
-                >
-                  <option value="none">This conversation</option>
-                  <option value="project">This project</option>
-                  <option value="all">All projects</option>
-                </select>
-              </label>
-            ) : (
-              <span>Code and history stay on your Windows host</span>
-            )}
-            <span className="keyboard-hint">↵ send · shift ↵ newline</span>
-          </div>
-        </div>
+        <ChatPane
+          key={pane.key}
+          ref={paneRef}
+          chat={chat}
+          project={project}
+          providers={state.providers}
+          selection={selection.current}
+          onSelection={(chosen) => {
+            selection.current = chosen;
+          }}
+          ensureChat={ensureChat}
+          reload={reload}
+          refresh={refresh}
+          report={report}
+          onOpenConnections={() => setModal("connections")}
+        />
       </main>
       {showPanel && (
         <aside className="work-panel" id="work-panel" aria-label="Work panel">
@@ -963,8 +561,8 @@ function App() {
               panel={panel}
               project={project}
               chat={chat}
-              onRevision={sendMessage}
-              onChatRefresh={() => chat && loadChat(chat.id)}
+              onRevision={(text) => paneRef.current?.send(text)}
+              onChatRefresh={() => chat && reload(chat.id)}
               report={report}
             />
           ) : (
@@ -1010,8 +608,7 @@ function App() {
                 });
                 await refresh();
                 setSelectedProject(p.id);
-                setChat(null);
-                currentChat.current = null;
+                emptyPane();
                 setModal(null);
                 setProjectName("");
                 setProjectDirectory("");
@@ -1264,7 +861,7 @@ function App() {
               <button
                 key={r.id}
                 onClick={action(async () => {
-                  await loadChat(r.conversation_id);
+                  await openChat(r.conversation_id);
                   setModal(null);
                 })}
               >
@@ -1286,102 +883,6 @@ function App() {
         </Modal>
       )}
     </div>
-  );
-}
-
-function Approval({ approval, onAnswer }) {
-  const [answers, setAnswers] = useState({}),
-    [submitting, setSubmitting] = useState(false),
-    r = approval.request;
-  const questionId = (q) => q.id ?? q.question ?? q.header;
-  const [problem, setProblem] = useState("");
-  const respond = async (answer) => {
-    setSubmitting(true);
-    try {
-      await onAnswer(answer);
-    } catch (error) {
-      setProblem(error.message);
-      setSubmitting(false);
-    }
-  };
-  return (
-    <section className="approval">
-      <div className="eyebrow">YOUR INPUT IS NEEDED</div>
-      <h3>{r.title}</h3>
-      {r.kind === "question" ? (
-        r.questions?.map((q) => (
-          <label key={questionId(q)}>
-            {q.question ?? q.header}
-            {q.selectionOnly ? (
-              <select
-                multiple={q.multiple}
-                value={answers[questionId(q)] ?? (q.multiple ? [] : "")}
-                onChange={(e) =>
-                  setAnswers({
-                    ...answers,
-                    [questionId(q)]: q.multiple
-                      ? [...e.target.selectedOptions].map((o) => o.value)
-                      : e.target.value,
-                  })
-                }
-              >
-                <option value="" disabled>
-                  Choose an option
-                </option>
-                {q.options.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                list={"options-" + questionId(q)}
-                value={answers[questionId(q)] ?? ""}
-                onChange={(e) =>
-                  setAnswers({ ...answers, [questionId(q)]: e.target.value })
-                }
-              />
-            )}
-            <datalist id={"options-" + questionId(q)}>
-              {q.options?.map((o) => (
-                <option key={o.label ?? o} value={o.label ?? o} />
-              ))}
-            </datalist>
-          </label>
-        ))
-      ) : (
-        <details>
-          <summary>Review requested action</summary>
-          <pre>{JSON.stringify(r.details, null, 2)}</pre>
-        </details>
-      )}
-      {problem && <p className="error-text">{problem}</p>}
-      <div className="approval-buttons">
-        <button
-          className="secondary"
-          disabled={submitting}
-          onClick={() => respond({ allow: false })}
-        >
-          Decline
-        </button>
-        <button
-          className="primary"
-          disabled={
-            submitting ||
-            (r.kind === "question" &&
-              r.questions?.some((q) =>
-                Array.isArray(answers[questionId(q)])
-                  ? !answers[questionId(q)].length
-                  : !answers[questionId(q)]?.trim(),
-              ))
-          }
-          onClick={() => respond({ allow: true, answers })}
-        >
-          {r.kind === "question" ? "Send answer" : "Allow once"}
-        </button>
-      </div>
-    </section>
   );
 }
 

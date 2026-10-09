@@ -50,7 +50,7 @@ try {
   await page.getByLabel("Reasoning effort").selectOption("medium");
   const cursor = app.controller.providers
     .find((p) => p.id === "cursor")
-    .models.find((m) => m.isDefault && !m.disabled);
+    .models.find((m) => !m.disabled);
   await page.getByLabel("Agent and model").selectOption("cursor|" + cursor.id);
   await expect(page.getByLabel("Reasoning effort")).toBeDisabled();
   result.modelAndEffortControls = true;

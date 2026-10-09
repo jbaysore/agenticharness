@@ -34,6 +34,7 @@ const browser = await chromium.launch({ channel: "msedge", headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(app.runtime.origin + "/#pair=" + app.auth.pairing());
+  await page.getByLabel("Agent and model").selectOption("codex|fixture");
   await page
     .getByLabel("Message your coding agent")
     .fill("Accepted once even when the response is lost");
@@ -50,7 +51,7 @@ try {
   );
   expect(
     await page.evaluate(() =>
-      sessionStorage.getItem("harness.pending-submission.v1"),
+      sessionStorage.getItem("harness.pending-submissions.v2"),
     ),
   ).toBeNull();
   await page.unroute("**/api/chats/*/messages");
@@ -60,8 +61,10 @@ try {
     .fill("Not received yet, keep this action ID");
   await page.getByLabel("Send message").click();
   await expect(page.getByRole("alert")).toBeVisible();
-  const pending = await page.evaluate(() =>
-    JSON.parse(sessionStorage.getItem("harness.pending-submission.v1")),
+  const [pending] = await page.evaluate(() =>
+    Object.values(
+      JSON.parse(sessionStorage.getItem("harness.pending-submissions.v2")),
+    ),
   );
   await page.reload();
   await expect(page.getByLabel("Message your coding agent")).toHaveValue(
