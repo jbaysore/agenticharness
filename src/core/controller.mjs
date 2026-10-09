@@ -8,10 +8,24 @@ import {
   agentInstructions,
   handoffContext,
   historyCall,
+  historyTools,
   workspaceNotice,
   workspacePeers,
 } from "./history.mjs";
 import { repositoryState } from "./repository.mjs";
+import {
+  delegateTool,
+  delegationStats,
+  planWorkers,
+  readRules,
+  recordDelegation,
+  rulesInstructions,
+  workerName,
+} from "./rules.mjs";
+import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
+
+const MAX_DELEGATIONS = 12,
+  MAX_PARALLEL_DELEGATIONS = 3;
 
 export class Controller extends EventEmitter {
   constructor(store, { probePath, bridgeUrl }) {
@@ -24,6 +38,8 @@ export class Controller extends EventEmitter {
     this.approvalWaiters = new Map();
     this.bridgeTokens = new Map();
     this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
+    this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
+    this.workerTimeoutMs = 5 * 60 * 1000;
     store.recover();
   }
   event(chatId, runId, type, payload) {
@@ -192,6 +208,25 @@ export class Controller extends EventEmitter {
         },
         sources: peers.map((p) => p.source),
       });
+    // The user's standing rules. A worker that cannot run right now is left
+    // out, and the turn says so rather than promising a tool that would fail.
+    const rules = readRules(this.store),
+      plan = planWorkers(rules, this.providers, run),
+      delegation = { workers: plan.workers, running: 0, calls: 0, reasons: [] };
+    if (plan.skipped.length) {
+      delegation.reasons = plan.skipped.map(
+        (s) => `${workerName(s.worker, this.providers)}: ${s.reason}`,
+      );
+      this.event(chat.id, run.id, "work", {
+        kind: "delegation-fallback",
+        item: {
+          title: plan.workers.length
+            ? `Searches go to ${workerName(plan.workers[0], this.providers)}`
+            : "No worker is available; this chat will search for itself",
+          description: delegation.reasons.join(" "),
+        },
+      });
+    }
     const ctx = {
       project,
       chat,
@@ -200,7 +235,17 @@ export class Controller extends EventEmitter {
       effort,
       session,
       handoff: [notice, handoff].filter(Boolean).join("\n\n"),
-      instructions: agentInstructions(project, chat),
+      instructions:
+        agentInstructions(project, chat) +
+        rulesInstructions(
+          rules,
+          plan.workers[0],
+          this.providers,
+          delegationStats(this.store),
+        ),
+      tools: plan.workers.length
+        ? [...historyTools, delegateTool]
+        : historyTools,
       signal: abort.signal,
       emit,
       billingConfirmation: this.store.setting("cursor-billing"),
@@ -212,12 +257,11 @@ export class Controller extends EventEmitter {
           });
       },
       history: async (name, args) => {
-        const result = historyCall(
-          this.store,
-          chat.id,
-          name,
-          typeof args === "string" ? JSON.parse(args) : (args ?? {}),
-        );
+        const input =
+          typeof args === "string" ? JSON.parse(args) : (args ?? {});
+        if (name === delegateTool.name)
+          return this.delegate(run, project, delegation, input, abort.signal);
+        const result = historyCall(this.store, chat.id, name, input);
         emit("work", {
           kind: "history-tool",
           name,
@@ -275,6 +319,106 @@ export class Controller extends EventEmitter {
         provider: run.provider,
         model: run.model,
       });
+    }
+  }
+  // Runs one delegated task on the first worker that can take it. A chat is
+  // never failed by its worker: when none can run, the answer says to carry on alone.
+  async delegate(run, project, delegation, args, signal) {
+    const chatId = run.conversation_id,
+      note = (kind, item, extra = {}) =>
+        this.event(chatId, run.id, "work", { kind, item, ...extra }),
+      alone = (error, instruction) => ({
+        error,
+        reasons: delegation.reasons,
+        instruction,
+      });
+    const task = [args.task, args.report && "Report: " + args.report]
+      .filter((part) => typeof part === "string" && part.trim())
+      .join("\n\n")
+      .slice(0, 8000);
+    if (!task) return alone("No task was given.", "Describe the whole task.");
+    if (!delegation.workers.length)
+      return alone(
+        "No worker is available.",
+        "Do this task yourself and do not call delegate_task again this turn.",
+      );
+    if (delegation.calls >= MAX_DELEGATIONS)
+      return alone(
+        `This turn has used its ${MAX_DELEGATIONS} delegations.`,
+        "Do the remaining work yourself.",
+      );
+    if (delegation.running >= MAX_PARALLEL_DELEGATIONS)
+      return alone(
+        `${MAX_PARALLEL_DELEGATIONS} delegations are already running.`,
+        "Wait for one to finish, or do this task yourself.",
+      );
+    delegation.calls++;
+    delegation.running++;
+    try {
+      const candidates = [...delegation.workers];
+      for (const [index, worker] of candidates.entries()) {
+        const name = workerName(worker, this.providers),
+          limit = new AbortController(),
+          stop = () => limit.abort(),
+          timer = setTimeout(stop, this.workerTimeoutMs);
+        signal.addEventListener("abort", stop, { once: true });
+        note("delegated-task", {
+          title: `Delegated to ${name}`,
+          description: task.slice(0, 300),
+        });
+        try {
+          if (signal.aborted) throw new Error("The turn was stopped");
+          const result = await this.workers[worker.provider]({
+            cwd: project.path,
+            model: worker.model,
+            effort: worker.effort,
+            task,
+            signal: limit.signal,
+          });
+          recordDelegation(this.store, worker, result.tokens);
+          note(
+            "delegated-task",
+            {
+              title: `${name} answered`,
+              description: `${(result.tokens || 0).toLocaleString("en-US")} tokens`,
+              text: result.text,
+            },
+            { tokens: result.tokens },
+          );
+          return { answer: result.text, worker: name, tokens: result.tokens };
+        } catch (error) {
+          if (signal.aborted) throw error;
+          const reason = limit.signal.aborted
+            ? `no answer within ${Math.round(this.workerTimeoutMs / 60000)} minutes`
+            : error.message;
+          delegation.reasons.push(`${name}: ${reason}`);
+          // A provider that is out of usage stays out for the rest of the turn.
+          if (error.unavailable) {
+            delegation.workers = delegation.workers.filter((w) => w !== worker);
+            this.refreshProviders().catch(() => {});
+          }
+          const next = candidates[index + 1];
+          note("delegation-fallback", {
+            title: `${name} could not run`,
+            description:
+              reason +
+              (next
+                ? ` Trying ${workerName(next, this.providers)}.`
+                : " The chat will do this itself."),
+          });
+        } finally {
+          clearTimeout(timer);
+          signal.removeEventListener("abort", stop);
+        }
+      }
+      return alone(
+        "No worker could finish this task.",
+        delegation.workers.length
+          ? "Do this task yourself."
+          : "Do this task yourself and do not call delegate_task again this turn.",
+      );
+    } finally {
+      delegation.running--;
     }
   }
   waitApproval(run, request, signal) {

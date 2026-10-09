@@ -146,3 +146,59 @@ export function delegationStats(store) {
       }),
   );
 }
+
+export const delegateTool = {
+  name: "delegate_task",
+  description:
+    "Hand a self-contained, read-only task (searching, listing or reading files in this repository) to the user's low-cost worker model and get back its written answer. The worker cannot change anything and does not see this conversation, so state the whole task and what to report.",
+  inputSchema: {
+    type: "object",
+    properties: { task: { type: "string" }, report: { type: "string" } },
+    required: ["task"],
+    additionalProperties: false,
+  },
+};
+
+// Which workers this turn may use, in order, and why any configured one is
+// left out. A chat already running on the worker model has nothing cheaper to
+// hand work to, and Cursor chats are not covered.
+export function planWorkers(rules, providers, run) {
+  const { enabled, workers } = rules.delegate,
+    onModel = (w) => w.provider === run.provider && w.model === run.model;
+  if (
+    !enabled ||
+    !workers.length ||
+    !WORKER_PROVIDERS.includes(run.provider) ||
+    onModel(workers[0])
+  )
+    return { workers: [], skipped: [] };
+  const usable = [],
+    skipped = [];
+  for (const worker of workers.filter((w) => !onModel(w))) {
+    const { available, reason } = workerAvailability(worker, providers);
+    if (available) usable.push(worker);
+    else skipped.push({ worker, reason });
+  }
+  return { workers: usable, skipped };
+}
+
+export function rulesInstructions(rules, worker, providers, stats) {
+  const parts = [];
+  if (rules.instructions.trim())
+    parts.push(
+      "Standing instructions from the user for every agent in this workspace:\n" +
+        rules.instructions.trim(),
+    );
+  if (worker) {
+    const cost = stats[workerKey(worker)],
+      count = (n) => n.toLocaleString("en-US");
+    parts.push(
+      `Cost rule set by the user: a low-cost worker (${workerName(worker, providers)}) is available through the delegate_task tool. It can search, list and read files in this repository, cannot change anything, does not see this conversation, and returns a written answer. ${
+        cost
+          ? `Recent delegations have cost about ${count(cost.median)} tokens on that cheaper model, and never less than ${count(cost.min)}.`
+          : "Each delegation has a small fixed overhead on that cheaper model."
+      } Delegate when you expect a search or exploration to cost more than that in your own context: finding where something lives, surveying how a pattern is used, or reading several files to answer one question. Do the work yourself when one or two direct lookups will do, or when you need the file contents in your own context to edit them. Give the worker a complete, specific task and say what to report (paths, line numbers, short excerpts). Use delegate_task rather than your own built-in subagents for this kind of work. If delegate_task reports that no worker is available, do the task yourself.`,
+    );
+  }
+  return parts.length ? "\n" + parts.join("\n") : "";
+}

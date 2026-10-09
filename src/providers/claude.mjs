@@ -190,6 +190,24 @@ export async function runClaude(ctx) {
           ],
         }),
       ),
+      // Offered only on turns where the user's rules name a worker that can run.
+      ...(ctx.tools ?? [])
+        .filter((t) => t.name === "delegate_task")
+        .map((t) =>
+          tool(
+            t.name,
+            t.description,
+            { task: z.string(), report: z.string().optional() },
+            async (args) => ({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(await ctx.history(t.name, args)),
+                },
+              ],
+            }),
+          ),
+        ),
     ],
   });
   const q = query({

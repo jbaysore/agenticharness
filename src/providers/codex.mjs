@@ -261,7 +261,10 @@ export async function runCodex(ctx) {
         forced_login_method: "chatgpt",
         service_tier: "default",
       },
-      dynamicTools: historyTools.map((t) => ({ type: "function", ...t })),
+      dynamicTools: (ctx.tools ?? historyTools).map((t) => ({
+        type: "function",
+        ...t,
+      })),
     };
     let response;
     if (ctx.session?.id)
