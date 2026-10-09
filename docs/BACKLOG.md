@@ -58,10 +58,31 @@
     chat. Open questions: files a fresh worktree lacks (`node_modules`, `.env`,
     local databases) and how "commit and push to main" maps onto a branch.
 15. Until then the shared-workspace notice is advisory and cannot attribute edits
-    made while turns overlap. A Codex thread resumed from before this release may
-    not have the `workspace_activity` tool; the per-turn notice still reaches it.
+    made while turns overlap. Harness sends its tool list again when it resumes a
+    Codex thread, which Codex documents as replacing the stored list; that a
+    thread from before this release then gains `workspace_activity` is unverified.
+    The per-turn notice reaches it either way.
 16. Resizable or reorderable panes, and sending one request to several agents to
     compare the results. Both were left out of the first multi-chat release.
+
+## Agent rules follow-ups
+
+17. Run the delegation rule against real providers and record the results: a
+    Claude chat with a Haiku worker, a Codex chat with the same Claude worker, a
+    Claude chat with a small Codex worker, one trivial request the chat should do
+    itself, and one real search measured with the rule on and off. All use
+    included usage. Nothing has run against a real provider yet, including the
+    two workers themselves.
+18. Find out how long Codex waits for a client tool to answer. A worker is limited
+    to five minutes, and Codex's own limit for `item/tool/call` is undocumented.
+19. Confirm a Codex worker can run its read-only commands on this PC, where the
+    Codex Windows sandbox sometimes fails ACL setup. A worker that cannot returns
+    an error and the chat does the work itself.
+20. Cover Cursor: let Cursor chats hand off through the MCP bridge (its tool-call
+    time limit is unknown and the bridge currently allows 15 seconds), and decide
+    whether a Cursor model can be a worker without a usage meter.
+21. More rules, per-project overrides, and a per-turn token summary so the saving
+    from a rule can be seen without reading the Work log.
 
 ## Architecture notes
 

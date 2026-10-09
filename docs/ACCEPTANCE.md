@@ -48,6 +48,8 @@ across reload after both a lost response and an unreceived request.
 - `node scripts/multichat-acceptance.mjs`: real Edge/HTTP with an explicitly
   simulated provider; several chats running side by side and in the background.
 - `npm run test:layout`: real Edge, no provider; sidebars and one to three panes.
+- `node scripts/rules-acceptance.mjs`: real Edge/HTTP with an explicitly simulated
+  provider and worker; the Agent rules screen, a delegated search and each fallback.
 
 ## Several chats at once — 2026-10-09
 
@@ -70,6 +72,27 @@ two turns at once, so none of it counts as real concurrent-provider evidence.
 `scripts/outbox-acceptance.mjs` and `scripts/browser-acceptance.mjs` had stopped
 passing before this work, once models were left unset by default and Cursor Auto
 was removed from the picker. Both now choose a model the picker offers.
+
+## Agent rules — 2026-10-09
+
+Everything here used simulated chat providers and simulated workers. No worker
+has run against a real provider, so none of this is evidence that a real agent
+delegates, that a real worker answers, or that tokens are saved.
+
+| Check                                                                                                            | Kind                                                     | Result                  |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------------- |
+| Choose a worker and fallback, save, reload                                                                       | Real Edge and HTTP (`node scripts/rules-acceptance.mjs`) | Passed                  |
+| A Codex chat hands a search to a Claude worker; Work log shows the worker and its token count                    | Real Edge and HTTP, simulated provider and worker        | Passed                  |
+| Worker's provider out of usage: settings shows where searches go, next search uses the fallback, reason logged   | Real Edge and HTTP, simulated blocked provider           | Passed                  |
+| No worker available: chat is not offered the tool and searches for itself                                        | Real Edge and HTTP, simulated                            | Passed                  |
+| Turning the rule off removes the tool from the next turn                                                         | Real Edge and HTTP, simulated                            | Passed                  |
+| Limit reached mid-turn: fallback answers, the exhausted worker is not retried, provider status refresh requested | Unit tests with stubbed workers                          | Passed                  |
+| Every worker failing returns a "do it yourself" answer instead of failing the turn                               | Unit tests with stubbed workers                          | Passed                  |
+| Slow worker gives way after the time limit; stopping a turn stops its worker; 3-at-once and 12-per-turn caps     | Unit tests with stubbed workers                          | Passed                  |
+| Rules validated against live model lists; not offered to Cursor chats or a chat on the worker model              | Unit tests                                               | Passed                  |
+| The Claude and Codex worker implementations themselves                                                           | Requires included usage                                  | Not run                 |
+| A real agent choosing to delegate, and token use with the rule on versus off                                     | Requires included usage                                  | Not run                 |
+| A real usage limit triggering the fallback                                                                       | Would require exhausting a subscription                  | Not run; simulated only |
 
 ## Bugs found through dogfooding
 

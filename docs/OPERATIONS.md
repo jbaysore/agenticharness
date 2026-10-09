@@ -80,6 +80,56 @@ turns overlap, and parallel chats still see each other's unfinished files when
 they run tests. Give parallel chats separate areas of the code, and review the
 diff before trusting a commit made while another chat was working.
 
+## Agent rules
+
+**Agent rules** in the sidebar holds standing rules that every agent receives at
+the start of each turn, in every project. Changes apply to the next turn.
+
+- **Instructions for every agent** is free text given to Codex, Claude Code and
+  Cursor chats as written.
+- **Hand off searches to a cheaper model** lets a chat give a read-only task,
+  such as finding where something lives, to a worker model you choose instead of
+  doing it on its own model. Pick the worker, optionally a fallback worker, and
+  switch the rule on. Nothing is selected until you choose.
+
+How the hand-off works:
+
+- The worker can be on a different provider from the chat: a Codex chat can use
+  a Claude worker and the reverse. Harness runs the worker itself, so this does
+  not depend on either provider's own subagents.
+- A worker can only search, list and read files in the project. It cannot change
+  anything and does not see the conversation; it returns a written answer.
+- The chat decides when to hand off. It is told what recent hand-offs cost on the
+  worker model and is asked to use one only when it expects the work to cost more
+  than that in its own context. This is the agent's judgment, not a guarantee,
+  and Harness does not block a chat from searching for itself.
+- Each hand-off appears in the Work log with the worker's name, its answer and
+  the tokens it used. The settings screen shows the typical cost per worker.
+- A worker spends its own provider's included usage and passes the same
+  subscription checks as a chat turn. A Codex chat with a Claude worker therefore
+  spends Claude usage for its searches.
+- Claude Code and Codex chats are covered. Cursor chats are not, and a Cursor
+  model cannot be a worker. A chat already running on the worker model does the
+  work itself.
+
+When a worker cannot run:
+
+- If the worker's provider is out of usage, signed out or blocked when a turn
+  starts, the turn uses the fallback worker. If neither can run, the chat is not
+  offered the hand-off for that turn and searches for itself.
+- A limit reached during a turn is caught when the worker checks its own usage.
+  That worker is skipped for the rest of the turn, the next one is tried, and
+  provider status is refreshed.
+- A worker that takes longer than five minutes or fails for another reason also
+  gives way to the next one. A chat never fails because its worker could not run.
+- The settings screen shows each worker's current status and one line saying
+  where a search would go right now. Every fallback is written to the Work log
+  with the provider's reason.
+
+The fallback covers the worker's provider only. A chat whose own provider is out
+of usage still cannot run. Put the fallback on the other provider so one limit
+cannot stop both workers.
+
 ## Sign-in and subscription boundaries
 
 The app uses the official native executables already installed for your Windows

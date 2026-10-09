@@ -19,6 +19,10 @@ The complete product is not finished at the first working provider milestone.
 7. **Several chats at once (built; real concurrent providers not yet run).** One to three
    chats side by side, per-chat status in the sidebar, rename/archive, and an
    automatic shared-workspace notice to agents. Verified with a simulated provider only.
+8. **Agent rules (built; not yet run against real providers).** Standing instructions for
+   every agent, and a rule that hands read-only searches to a cheaper worker model
+   the user picks, across providers, with a fallback when a worker's provider is
+   out of usage. Verified with simulated providers and workers only.
 
 ## Architecture decisions
 
@@ -38,6 +42,11 @@ The complete product is not finished at the first working provider milestone.
   and given commit rules on every overlapping turn; this is advisory. Enforced
   isolation through a Git worktree per chat is the planned next phase, switched
   on only when a chat starts beside another that is already working.
+- Delegated work runs in the host, not in a provider's own subagents. Built-in
+  subagents cannot leave their provider and their model is not always settable,
+  so Harness offers its own `delegate_task` tool and runs a read-only worker on
+  the chosen model. That makes cross-provider workers, a visible token count and
+  a fallback possible. The agent still decides when delegating is cheaper.
 - The host already ran one turn per chat. The browser holds open chats in a map
   fed by one event stream, so any pane can show any chat without a second stream.
 - All changes are committed and pushed directly to main, per AGENTS.md.
