@@ -20,6 +20,15 @@ try {
     role: "user",
     content: "Check the neutral workspace and adjustable sidebars.",
   });
+  for (const title of ["Second chat", "Third chat"])
+    app.store.addMessage({
+      conversationId: app.store.createConversation({
+        projectId: project.id,
+        title,
+      }).id,
+      role: "user",
+      content: `${title} for the side-by-side layout.`,
+    });
   app.controller.providers = [
     ["codex", "Codex"],
     ["claude", "Claude Code"],
@@ -128,6 +137,73 @@ try {
   await page.setViewportSize({ width: 1512, height: 982 });
   await expect(right).toBeVisible();
 
+  // Up to three chats sit side by side; the work panel gives way before a chat does.
+  const panes = page.locator(".chat-pane");
+  const focused = page.locator(".chat-pane.focused");
+  const sidebarChat = (name) => left.getByRole("button", { name, exact: true });
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await expect(panes).toHaveCount(1);
+  await expect(page.getByLabel("Close pane")).toHaveCount(0);
+  // An empty pane is filled rather than split, whichever way the chat is opened.
+  await expect(page.getByLabel("Add a pane beside")).toBeDisabled();
+  await sidebarChat("Layout check").click({ modifiers: ["Control"] });
+  await expect(focused).toHaveAttribute("aria-label", "Layout check");
+  await expect(panes).toHaveCount(1);
+  await sidebarChat("Second chat").click({ modifiers: ["Control"] });
+  await expect(panes).toHaveCount(2);
+  await sidebarChat("Third chat").click({ button: "middle" });
+  await expect(panes).toHaveCount(3);
+  await expect(focused).toHaveAttribute("aria-label", "Third chat");
+  await expect(page.getByLabel("Add a pane beside")).toBeDisabled();
+  for (const paneWidth of await panes.evaluateAll((all) =>
+    all.map((pane) => pane.getBoundingClientRect().width),
+  ))
+    expect(paneWidth).toBeGreaterThanOrEqual(390);
+  await expect(right).toBeVisible();
+  expect(await right.evaluate((el) => getComputedStyle(el).position)).toBe(
+    "relative",
+  );
+  await noOverflow();
+  await page.screenshot({
+    path: ".local/screenshots/three-panes-desktop.png",
+    fullPage: true,
+  });
+  await sidebarChat("Layout check").click();
+  await expect(panes).toHaveCount(3);
+  await expect(focused).toHaveAttribute("aria-label", "Layout check");
+  await page.keyboard.press("Alt+2");
+  await expect(focused).toHaveAttribute("aria-label", "Second chat");
+  await expect(focused.getByLabel("Message your coding agent")).toBeFocused();
+  await page.setViewportSize({ width: 1512, height: 982 });
+  await expect(panes).toHaveCount(3);
+  await expect(right).toHaveCount(0);
+  await page.getByLabel("Toggle work panel").click();
+  expect(await right.evaluate((el) => getComputedStyle(el).position)).toBe(
+    "fixed",
+  );
+  await page.keyboard.press("Escape");
+  await noOverflow();
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await expect(panes).toHaveCount(2);
+  await expect(focused).toHaveAttribute("aria-label", "Second chat");
+  await expect(page.getByText("2 of 3 chats shown")).toBeVisible();
+  await noOverflow();
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await expect(panes).toHaveCount(3);
+  await page.reload();
+  await expect(panes).toHaveCount(3);
+  await expect(focused).toHaveAttribute("aria-label", "Second chat");
+  expect(new URL(page.url()).searchParams.get("chat").split(",")).toHaveLength(
+    3,
+  );
+  await panes.nth(2).getByLabel("Close pane").click();
+  await panes.nth(1).getByLabel("Close pane").click();
+  await expect(panes).toHaveCount(1);
+  await expect(focused).toHaveAttribute("aria-label", "Layout check");
+  await expect(page.getByLabel("Close pane")).toHaveCount(0);
+  await page.setViewportSize({ width: 1512, height: 982 });
+  await expect(right).toBeVisible();
+
   const mobile = await browser.newContext({
     ...devices["iPhone 13"],
     defaultBrowserType: undefined,
@@ -140,6 +216,8 @@ try {
   await expect(phone.getByLabel("Show sidebar", { exact: true })).toBeVisible();
   await expect(phone.locator(".sidebar")).toBeHidden();
   await expect(phone.locator(".work-panel")).toHaveCount(0);
+  await expect(phone.locator(".chat-pane")).toHaveCount(1);
+  await expect(phone.getByLabel("Add a pane beside")).toHaveCount(0);
   await phone.getByLabel("Show sidebar", { exact: true }).click();
   await expect(phone.locator(".sidebar")).toBeVisible();
   await phone
@@ -189,7 +267,7 @@ try {
   await expect.poll(() => width(left)).toBe(256);
   expect(errors).toEqual([]);
   console.log(
-    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, responsive layouts, storage recovery, and no page errors.",
+    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, responsive layouts, storage recovery, and no page errors.",
   );
 } finally {
   await browser?.close();

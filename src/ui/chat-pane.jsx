@@ -10,8 +10,13 @@ export function ChatPane({
   chat,
   project,
   providers,
+  focused,
+  solo,
   selection,
   onSelection,
+  onFocus,
+  onClose,
+  onOpenChat,
   ensureChat,
   reload,
   refresh,
@@ -29,6 +34,7 @@ export function ChatPane({
     [draft, setDraft] = useState(() => readDraft(draftKey)),
     [busy, setBusy] = useState(false);
   const bottom = useRef(null),
+    input = useRef(null),
     sending = useRef(false);
   const connected = providers.find((p) => p.id === provider),
     selectedModel = connected?.models?.find((m) => m.id === model);
@@ -93,6 +99,7 @@ export function ChatPane({
     const text = typeof override === "string" ? override : draft;
     if (
       !text.trim() ||
+      !project ||
       busy ||
       chat?.activeRun ||
       !model ||
@@ -132,7 +139,10 @@ export function ChatPane({
       setBusy(false);
     }
   }
-  useImperativeHandle(ref, () => ({ send }));
+  useImperativeHandle(ref, () => ({
+    send,
+    focus: () => input.current?.focus(),
+  }));
   const act = (fn) => async () => {
     try {
       await fn();
@@ -140,9 +150,43 @@ export function ChatPane({
       report(e);
     }
   };
+  // Links to other chats open in a pane instead of replacing the whole workspace.
+  const followLink = (e) => {
+    const link = e.target.closest?.('a[href^="/?chat="]');
+    if (!link) return;
+    const url = new URL(link.href),
+      id = url.searchParams.get("chat");
+    if (!id || id.includes(",")) return;
+    e.preventDefault();
+    onOpenChat(id, e.ctrlKey || e.metaKey, url.hash.slice(1));
+  };
+  const title = chat?.title ?? "New conversation";
   return (
-    <>
-      <div className="messages">
+    <section
+      className={"chat-pane" + (focused ? " focused" : "")}
+      aria-label={title}
+      onPointerDown={onFocus}
+      onFocus={onFocus}
+    >
+      {!solo && (
+        <header className="pane-header">
+          <span className={"provider-dot " + (chat?.provider ?? provider)} />
+          <strong title={title}>{title}</strong>
+          {project && <span>{project.name}</span>}
+          <button
+            className="icon-button"
+            aria-label="Close pane"
+            title="Close this pane. The chat keeps running."
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+          >
+            <Icon name="close" size={14} />
+          </button>
+        </header>
+      )}
+      <div className="messages" onClick={followLink}>
         {!chat?.messages?.length ? (
           <div className="welcome">
             <div className="eyebrow">ONE WORKSPACE. YOUR AGENTS.</div>
@@ -265,6 +309,7 @@ export function ChatPane({
           }}
         >
           <textarea
+            ref={input}
             aria-label="Message your coding agent"
             placeholder={
               project
@@ -399,6 +444,6 @@ export function ChatPane({
           <span className="keyboard-hint">↵ send · shift ↵ newline</span>
         </div>
       </div>
-    </>
+    </section>
   );
 }

@@ -9,6 +9,20 @@ import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
 import { readAllPending } from "./outbox.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
+import {
+  closePane,
+  focusedPane,
+  focusPane,
+  initialPanes,
+  openBeside,
+  openInFocused,
+  parseSearch,
+  readPanes,
+  savePanes,
+  setPaneChat,
+  toSearch,
+  visiblePanes,
+} from "./panes.mjs";
 
 function App() {
   const [state, setState] = useState({
@@ -21,8 +35,11 @@ function App() {
     [pair, setPair] = useState(""),
     [error, setError] = useState("");
   const [chats, setChats] = useState({}),
-    [pane, setPane] = useState({ key: "pane-0", chatId: null }),
-    [selectedProject, setSelectedProject] = useState("");
+    [view, setView] = useState(() => initialPanes()),
+    [selectedProject, setSelectedProject] = useState(""),
+    [windowVisible, setWindowVisible] = useState(
+      () => document.visibilityState === "visible",
+    );
   const [panel, setPanel] = useState("review"),
     [overlayPanel, setOverlayPanel] = useState(false),
     [sidebar, setSidebar] = useState(false),
@@ -34,11 +51,12 @@ function App() {
     setLayout,
     mobile,
     docked,
+    paneLimit,
     leftWidth,
     rightWidth,
     leftMax,
     rightMax,
-  } = useSidebarLayout();
+  } = useSidebarLayout(view.panes.length);
   const sidebarVisible = mobile ? sidebar : layout.leftOpen;
   const showPanel = docked ? layout.rightOpen : overlayPanel;
   const setShowPanel = (open) => {
@@ -73,9 +91,11 @@ function App() {
     lastEvent = useRef(0),
     floors = useRef({}),
     selection = useRef({ provider: "codex", model: "", effort: "" }),
-    paneRef = useRef(null),
-    paneKeys = useRef(0),
+    paneRefs = useRef({}),
+    limit = useRef(paneLimit),
+    marking = useRef(new Set()),
     errorTimer = useRef(null);
+  limit.current = paneLimit;
   const report = useCallback((e) => {
     setError(e.message ?? String(e));
     clearTimeout(errorTimer.current);
@@ -116,12 +136,12 @@ function App() {
     [admit],
   );
   const openChat = useCallback(
-    async (id) => {
+    async (id, beside = false) => {
       const next = admit(await api("/api/chats/" + id));
-      setPane((current) =>
-        current.chatId === id
-          ? current
-          : { key: "pane-" + ++paneKeys.current, chatId: id },
+      setView((current) =>
+        beside
+          ? openBeside(current, id, next.project_id, limit.current)
+          : openInFocused(current, id, next.project_id),
       );
       setSelectedProject(next.project_id);
       setSidebar(false);
@@ -129,7 +149,7 @@ function App() {
     },
     [admit],
   );
-  const openIds = [pane.chatId].filter(Boolean);
+  const openIds = view.panes.map((p) => p.chatId).filter(Boolean);
   useEffect(() => {
     const open = new Set(openIds);
     for (const id of tracked.current)
@@ -140,13 +160,10 @@ function App() {
         ? all
         : Object.fromEntries(kept);
     });
-    if (ready)
-      history.replaceState(
-        {},
-        "",
-        openIds.length ? `/?chat=${openIds.join(",")}` : "/",
-      );
-  }, [openIds.join(","), ready]);
+    if (!ready) return;
+    history.replaceState({}, "", toSearch(view));
+    savePanes(view);
+  }, [openIds.join(","), view.focused, ready]);
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -159,10 +176,41 @@ function App() {
         const next = await refresh();
         if (ignore) return;
         lastEvent.current = next.lastEventId;
-        const id =
-          Object.keys(readAllPending())[0] ??
-          new URLSearchParams(location.search).get("chat");
-        if (id) await openChat(id).catch(report);
+        // Chats with an unconfirmed send come first, then the address, then the last layout.
+        const linked = parseSearch(location.search),
+          saved = readPanes(),
+          wanted = parseSearch(
+            "?chat=" +
+              [
+                ...Object.keys(readAllPending()),
+                ...(linked.length ? linked : saved.chats),
+              ].join(","),
+          );
+        const found = (
+          await Promise.all(
+            wanted.map((id) => api("/api/chats/" + id).catch(() => null)),
+          )
+        ).filter(Boolean);
+        if (ignore) return;
+        if (found.length) {
+          found.forEach(admit);
+          // A reload returns to the pane that had focus; a link to other chats does not.
+          const remembered =
+            !linked.length || linked.join() === saved.chats.join()
+              ? saved.chats[saved.focused]
+              : linked[0];
+          const restored = initialPanes(
+            found.map((c) => c.id),
+            Math.max(
+              0,
+              found.findIndex((c) => c.id === remembered),
+            ),
+          );
+          setView(restored);
+          setSelectedProject(
+            found.find((c) => c.id === focusedPane(restored).chatId).project_id,
+          );
+        }
         setReady(true);
       } catch (e) {
         if (e.status === 401) setNeedsPair(true);
@@ -248,31 +296,83 @@ function App() {
     };
     return () => stream.close();
   }, [ready]);
-  const project = state.projects.find((p) => p.id === selectedProject),
-    chat = (pane.chatId && chats[pane.chatId]) || null;
-  const emptyPane = () =>
-    setPane({ key: "pane-" + ++paneKeys.current, chatId: null });
-  async function newChat() {
-    if (!project) {
+  useEffect(() => {
+    const changed = () =>
+      setWindowVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", changed);
+    return () => document.removeEventListener("visibilitychange", changed);
+  }, []);
+  const shown = visiblePanes(view, paneLimit),
+    current = focusedPane(view),
+    chat = (current.chatId && chats[current.chatId]) || null;
+  const paneProject = (p) =>
+    state.projects.find(
+      (candidate) =>
+        candidate.id ===
+        (chats[p.chatId]?.project_id ?? (p.projectId || selectedProject)),
+    );
+  // The work panel and breadcrumb follow whichever pane has focus.
+  const project = paneProject(current);
+  useEffect(() => {
+    if (project) setSelectedProject(project.id);
+  }, [view.focused]);
+  // Looking at a chat is what marks its finished turn as read.
+  const shownIds = shown.map((p) => p.chatId).filter(Boolean);
+  useEffect(() => {
+    if (!windowVisible) return;
+    for (const id of shownIds) {
+      const unread = state.conversations.find((c) => c.id === id)?.unread;
+      if (!unread || marking.current.has(id)) continue;
+      marking.current.add(id);
+      api(`/api/chats/${id}/read`, {})
+        .catch(() => {})
+        .finally(() => marking.current.delete(id));
+    }
+  }, [windowVisible, shownIds.join(","), state.conversations]);
+  useEffect(() => {
+    const jump = (event) => {
+      const target = event.altKey && shown[Number(event.key) - 1];
+      if (!target || event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      setView((v) => focusPane(v, target.key));
+      paneRefs.current[target.key]?.focus();
+    };
+    window.addEventListener("keydown", jump);
+    return () => window.removeEventListener("keydown", jump);
+  }, [shown.map((p) => p.key).join(",")]);
+  const emptyPane = (projectId) =>
+    setView((v) => openInFocused(v, null, projectId));
+  async function newChat(beside = false) {
+    const target = state.projects.find((p) => p.id === selectedProject);
+    if (!target) {
       setModal("project");
       return;
     }
     const c = await api("/api/chats", {
-      projectId: project.id,
+      projectId: target.id,
       ...selection.current,
     });
-    await openChat(c.id);
+    await openChat(c.id, beside);
     await refresh();
   }
   // The pane that asked keeps its key, so its composer survives the chat's creation.
-  async function ensureChat(chosen) {
+  async function ensureChat(p, chosen) {
     const c = await api("/api/chats", {
-      projectId: selectedProject,
+      projectId: paneProject(p).id,
       ...chosen,
     });
     const next = admit(await api("/api/chats/" + c.id));
-    setPane((current) => ({ ...current, chatId: c.id }));
+    setView((v) => setPaneChat(v, p.key, c.id));
     return next;
+  }
+  async function followLink(id, beside, anchor) {
+    await openChat(id, beside);
+    if (anchor)
+      setTimeout(
+        () =>
+          document.getElementById(anchor)?.scrollIntoView({ block: "start" }),
+        60,
+      );
   }
   const action = (fn) => async () => {
     try {
@@ -331,12 +431,13 @@ function App() {
     <div
       className={
         "workspace " +
-        (showPanel ? "with-panel " : "") +
+        (showPanel && docked ? "with-panel " : "") +
         (sidebarVisible ? "sidebar-open" : "sidebar-collapsed")
       }
       style={{
         "--sidebar-width": `${leftWidth}px`,
         "--panel-width": `${rightWidth}px`,
+        "--panes": shown.length,
       }}
     >
       {mobile && sidebar && (
@@ -367,7 +468,11 @@ function App() {
             <Icon name="sidebar" size={17} />
           </button>
         </div>
-        <button className="new-chat" onClick={action(newChat)}>
+        <button
+          className="new-chat"
+          title="New conversation. Ctrl-click to open it beside this one."
+          onClick={(e) => action(() => newChat(e.ctrlKey || e.metaKey))()}
+        >
           <Icon name="plus" />
           New conversation<span>＋</span>
         </button>
@@ -394,7 +499,7 @@ function App() {
                 }
                 onClick={() => {
                   setSelectedProject(p.id);
-                  emptyPane();
+                  emptyPane(p.id);
                   setSidebar(false);
                 }}
               >
@@ -414,9 +519,21 @@ function App() {
                     <button
                       key={c.id}
                       className={
-                        "chat-row " + (c.id === chat?.id ? "selected" : "")
+                        "chat-row " +
+                        (c.id === chat?.id
+                          ? "selected"
+                          : openIds.includes(c.id)
+                            ? "open"
+                            : "")
                       }
-                      onClick={action(() => openChat(c.id))}
+                      title="Ctrl-click to open beside the current chat"
+                      onClick={(e) =>
+                        action(() => openChat(c.id, e.ctrlKey || e.metaKey))()
+                      }
+                      onAuxClick={(e) => {
+                        if (e.button === 1)
+                          action(() => openChat(c.id, true))();
+                      }}
                     >
                       <span className={"provider-dot " + c.provider} />
                       <span>{c.title}</span>
@@ -480,6 +597,33 @@ function App() {
             <b>/</b>
             <strong>{chat?.title ?? "New conversation"}</strong>
           </div>
+          {view.panes.length > shown.length && (
+            <span
+              className="badge"
+              title="Widen the window or collapse the sidebar to show every open chat."
+            >
+              {shown.length} of {view.panes.length} chats shown
+            </span>
+          )}
+          {!mobile && (
+            <button
+              className="icon-button"
+              aria-label="Add a pane beside"
+              title={
+                view.panes.length >= paneLimit
+                  ? "No room for another chat at this window size"
+                  : "Open another chat beside this one"
+              }
+              disabled={view.panes.length >= paneLimit || !current.chatId}
+              onClick={() =>
+                setView((v) =>
+                  openBeside(v, null, project?.id ?? "", limit.current),
+                )
+              }
+            >
+              <Icon name="split" />
+            </button>
+          )}
           <button
             className={"icon-button " + (showPanel ? "active" : "")}
             aria-label="Toggle work panel"
@@ -497,25 +641,45 @@ function App() {
             sent twice.
           </div>
         )}
-        <ChatPane
-          key={pane.key}
-          ref={paneRef}
-          chat={chat}
-          project={project}
-          providers={state.providers}
-          selection={selection.current}
-          onSelection={(chosen) => {
-            selection.current = chosen;
-          }}
-          ensureChat={ensureChat}
-          reload={reload}
-          refresh={refresh}
-          report={report}
-          onOpenConnections={() => setModal("connections")}
-        />
+        <div className="pane-strip">
+          {shown.map((p) => (
+            <ChatPane
+              key={p.key}
+              ref={(handle) => {
+                if (handle) paneRefs.current[p.key] = handle;
+                else delete paneRefs.current[p.key];
+              }}
+              chat={(p.chatId && chats[p.chatId]) || null}
+              project={paneProject(p)}
+              providers={state.providers}
+              focused={p.key === current.key}
+              solo={view.panes.length === 1}
+              selection={selection.current}
+              onSelection={(chosen) => {
+                if (p.key === view.focused) selection.current = chosen;
+              }}
+              onFocus={() => setView((v) => focusPane(v, p.key))}
+              onClose={() =>
+                setView((v) => closePane(v, p.key, selectedProject))
+              }
+              onOpenChat={(id, beside, anchor) =>
+                followLink(id, beside, anchor).catch(report)
+              }
+              ensureChat={(chosen) => ensureChat(p, chosen)}
+              reload={reload}
+              refresh={refresh}
+              report={report}
+              onOpenConnections={() => setModal("connections")}
+            />
+          ))}
+        </div>
       </main>
       {showPanel && (
-        <aside className="work-panel" id="work-panel" aria-label="Work panel">
+        <aside
+          className={"work-panel" + (docked ? "" : " overlay")}
+          id="work-panel"
+          aria-label="Work panel"
+        >
           {!mobile && (
             <ResizeHandle
               side="right"
@@ -561,7 +725,7 @@ function App() {
               panel={panel}
               project={project}
               chat={chat}
-              onRevision={(text) => paneRef.current?.send(text)}
+              onRevision={(text) => paneRefs.current[current.key]?.send(text)}
               onChatRefresh={() => chat && reload(chat.id)}
               report={report}
             />
@@ -608,7 +772,7 @@ function App() {
                 });
                 await refresh();
                 setSelectedProject(p.id);
-                emptyPane();
+                emptyPane(p.id);
                 setModal(null);
                 setProjectName("");
                 setProjectDirectory("");

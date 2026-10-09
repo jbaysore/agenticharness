@@ -19,6 +19,7 @@ const paths = {
   menu: "M4 6h16M4 12h16M4 18h16",
   sidebar: "M3 4h18v16H3V4Zm6 0v16",
   panel: "M3 4h18v16H3V4Zm12 0v16",
+  split: "M3 4h18v16H3V4Zm9 0v16",
   refresh: "M20 10a8 8 0 1 0-1 7M20 4v6h-6",
   check: "m5 12 4 4 10-10",
   link: "m9 15 6-6M7 14l-2 2a3 3 0 0 0 4 4l4-4M11 8l4-4a3 3 0 0 1 4 4l-2 2",
