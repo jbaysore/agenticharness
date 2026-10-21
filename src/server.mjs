@@ -656,8 +656,19 @@ export async function createHarness({
       const asset = Object.hasOwn(assets, path) ? assets[path] : null;
       if (!asset) return json(res, 404, { error: "Not found" });
       const [filename, contentType] = asset;
-      const content = await readFile(join(root, "dist", filename));
-      res.setHeader("Cache-Control", "no-cache");
+      let content = await readFile(join(root, "dist", filename));
+      // The page names its scripts by build, so no cache between here and a
+      // remote browser can hand back an old one, and is never stored itself.
+      if (filename === "index.html") {
+        const build = await clientBuild();
+        if (build)
+          content = String(content).replace(
+            /"\/app\.(js|css)"/g,
+            `"/app.$1?v=${build}"`,
+          );
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("CDN-Cache-Control", "no-store");
+      } else res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Content-Type", contentType);
       res.end(content);
     } catch (error) {
