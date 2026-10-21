@@ -50,7 +50,8 @@ function App() {
     [ready, setReady] = useState(false),
     [needsPair, setNeedsPair] = useState(false),
     [pair, setPair] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [toastKind, setToastKind] = useState("error");
   const [chats, setChats] = useState({}),
     [view, setView] = useState(() => initialPanes()),
     [selectedProject, setSelectedProject] = useState(""),
@@ -123,7 +124,8 @@ function App() {
     errorTimer = useRef(null),
     build = useRef(loadedBuild);
   limit.current = paneLimit;
-  const report = useCallback((e) => {
+  const report = useCallback((e, kind = "error") => {
+    setToastKind(kind);
     setError(e.message ?? String(e));
     clearTimeout(errorTimer.current);
     errorTimer.current = setTimeout(() => setError(""), 14000);
@@ -820,7 +822,9 @@ function App() {
       </main>
       {showPanel && (
         <aside
-          className={"work-panel" + (docked ? "" : " overlay")}
+          className={
+            "work-panel " + (chat?.provider ?? "") + (docked ? "" : " overlay")
+          }
           id="work-panel"
           aria-label="Work panel"
         >
@@ -890,7 +894,7 @@ function App() {
         </aside>
       )}
       {error && (
-        <div className="toast" role="alert">
+        <div className={"toast " + toastKind} role="alert">
           <span>{error}</span>
           <button
             className="icon-button"
@@ -967,11 +971,11 @@ function App() {
           </div>
           <div className="connections">
             {state.providers.map((p) => (
-              <section className="connection" key={p.id}>
+              <section className={"connection " + p.id} key={p.id}>
                 <header>
                   <span className={"provider-dot " + p.id} />
                   <h3>{p.name}</h3>
-                  <span className="badge">
+                  <span className={"badge " + (p.connected ? "ok" : "off")}>
                     {p.connected ? "Connected" : "Not connected"}
                   </span>
                 </header>
@@ -1105,7 +1109,10 @@ function App() {
               className="secondary"
               onClick={action(async () => {
                 const b = await api("/api/backup", {});
-                setError("Backup saved on the Windows host: " + b.path);
+                report(
+                  { message: "Backup saved on the Windows host: " + b.path },
+                  "info",
+                );
               })}
             >
               Back up workspace
@@ -1118,10 +1125,13 @@ function App() {
                 try {
                   const result = await api("/api/history/import", {});
                   await refresh();
-                  setError(
-                    result.imported
-                      ? `Imported ${result.imported} conversations from Cursor, Codex, and Claude.`
-                      : "No new local conversations to import.",
+                  report(
+                    {
+                      message: result.imported
+                        ? `Imported ${result.imported} conversations from Cursor, Codex, and Claude.`
+                        : "No new local conversations to import.",
+                    },
+                    "info",
                   );
                 } finally {
                   setBusy(false);
@@ -1333,7 +1343,11 @@ function WorkspacePanel({
                     <strong>
                       {step
                         ? verbLabels[step.verb]
-                        : p.kind === "native-subagent"
+                        : p.kind === "tool-result"
+                          ? p.isError
+                            ? "Result · failed"
+                            : "Result"
+                          : p.kind === "native-subagent"
                           ? "Native subagent"
                           : (item.title ??
                             item.name ??
@@ -1343,6 +1357,9 @@ function WorkspacePanel({
                     </strong>
                     <small>
                       {step?.target ??
+                        (p.kind === "tool-result"
+                          ? item.file?.filePath?.split(/[\\/]/).at(-1)
+                          : null) ??
                         item.command ??
                         item.description ??
                         p.error ??
@@ -1727,11 +1744,29 @@ function TerminalPane({ project, report }) {
     if (!id || !container.current) return;
     const t = new Terminal({
         fontFamily: "Cascadia Code, Consolas, monospace",
-        fontSize: 12,
+        fontSize: 13,
+        // The workspace palette, so command output matches the chats.
         theme: {
           background: "#101010",
-          foreground: "#dedede",
-          cursor: "#eeeeee",
+          foreground: "#e4e4e4",
+          cursor: "#ececec",
+          selectionBackground: "#3d7bff55",
+          black: "#1b1b1b",
+          red: "#ff5c5c",
+          green: "#4fd18b",
+          yellow: "#ffe14d",
+          blue: "#5b8dff",
+          magenta: "#b57aff",
+          cyan: "#4fc4d9",
+          white: "#d8d8d8",
+          brightBlack: "#6f6f6f",
+          brightRed: "#ff8a8a",
+          brightGreen: "#7fe0aa",
+          brightYellow: "#fff08a",
+          brightBlue: "#7ea6ff",
+          brightMagenta: "#c197ff",
+          brightCyan: "#7fd8e8",
+          brightWhite: "#ffffff",
         },
         cursorBlink: true,
         scrollback: 5000,

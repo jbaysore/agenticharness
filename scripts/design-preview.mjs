@@ -130,7 +130,21 @@ try {
     ["codex", "Codex", model("gpt-6.1-sol", "GPT-6.1-Sol", ["medium", "high", "xhigh"])],
     ["claude", "Claude Code", model("claude-opus-5-5", "Opus 5.5", ["high"])],
     ["cursor", "Cursor", model("standard", "Standard preset")],
-  ].map(([id, name, m]) => ({ id, name, connected: true, models: [m] }));
+  ].map(([id, name, m]) => ({
+    id,
+    name,
+    connected: true,
+    models: [m],
+    route: `${name} subscription`,
+    plan: "Included usage",
+    usage: id === "cursor" ? null : {
+      authoritative: true,
+      windows: [
+        { label: "Session", windowMinutes: 300, usedPercent: id === "codex" ? 38 : 71 },
+        { label: "Weekly", windowMinutes: 10080, usedPercent: id === "codex" ? 22 : 54 },
+      ],
+    },
+  }));
 
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const shoot = async (name, url, options, before) => {
@@ -153,6 +167,12 @@ try {
   await shoot("welcome", "/", { viewport: { width: 1536, height: 730 } });
   await shoot("welcome-menu", "/", { viewport: { width: 1536, height: 730 } }, (page) =>
     page.getByRole("button", { name: "Choose a Codex model" }).click(),
+  );
+  await shoot("work-log", `/?chat=${claude.id}`, { viewport: { width: 1440, height: 900 } }, (page) =>
+    page.getByRole("button", { name: "Work", exact: true }).click(),
+  );
+  await shoot("connections", `/?chat=${codex.id}`, { viewport: { width: 1440, height: 900 } }, (page) =>
+    page.getByRole("button", { name: /^Connections & usage/ }).click(),
   );
   await shoot("phone", `/?chat=${claude.id}`, { ...devices["iPhone 13"], defaultBrowserType: undefined });
 } finally {

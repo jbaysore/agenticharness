@@ -54,6 +54,8 @@ billing boundary. The app never supplies an inference API key or buys credits.
 
 Node 24, Windows x64. Run `npm ci --include=dev`, `npm run build`, `npm test`, then
 double-click **Launch Harness.vbs**. `npm run package` creates the Windows zip.
+`npm run preview:design` screenshots the main screens against seeded chats into
+`.local/screenshots`, with no provider calls, for reviewing visual changes.
 `node scripts/acceptance.mjs` is an **opt-in real provider test** that consumes
 included usage and edits an ignored fixture. Ordinary tests use no inference.
 
