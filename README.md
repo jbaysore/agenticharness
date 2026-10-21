@@ -29,8 +29,9 @@ single-file edit, running a command, drafting a commit message) to a cheaper
 worker model on Claude Code or Codex. Harness works out each time whether the
 hand-off is cheaper and falls back when the worker's provider is out of usage;
 this too has only been checked with simulated providers.
-**Skills** are named instructions you write in the app and turn on for a chat.
-The next message includes their full text for Codex, Claude Code and Cursor.
+**Skills** are named instructions you write in the app. A message invokes one
+with its slash command, and that message includes the full text for Codex,
+Claude Code and Cursor.
 Every chat can also drive a shared Chrome on the host through Playwright MCP;
 each action that can change a page asks for approval unless **Override** is selected.
 New conversations default to **Auto-review**. The permission picker saves each

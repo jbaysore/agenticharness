@@ -19,7 +19,7 @@ import {
   rulesInstructions,
   workerName,
 } from "./rules.mjs";
-import { skillInstructions, skillsForTurn } from "./skills.mjs";
+import { invokedSkills, listSkills, skillInstructions } from "./skills.mjs";
 import { isDelegationTool } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
@@ -369,7 +369,7 @@ export class Controller extends EventEmitter {
     };
     if (browserTools.length)
       this.bridgeBrowser.set(token, { tools: browserTools, call: browser });
-    const skills = skillsForTurn(this.store, chat.id);
+    const skills = invokedSkills(listSkills(this.store), text);
     if (skills.length)
       this.event(chat.id, run.id, "work", {
         kind: "skills",
@@ -378,7 +378,7 @@ export class Controller extends EventEmitter {
             skills.length === 1
               ? `Skill · ${skills[0].name}`
               : `Skills · ${skills.map((skill) => skill.name).join(", ")}`,
-          description: "Included in the instructions for this turn.",
+          description: "Invoked by a slash command in this message.",
         },
       });
     const ctx = {

@@ -1164,6 +1164,7 @@ small {
   margin: 24px 0;
 }
 .composer-area {
+  position: relative;
   padding: 10px max(24px, calc((100% - 760px) / 2)) 16px;
   flex-shrink: 0;
 }
@@ -2649,58 +2650,54 @@ small {
     display: none;
   }
 }
-.skills-control {
-  position: relative;
-}
-.skills-control > button {
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: 12px;
-  color: var(--text-2);
-}
-.skills-control > button[aria-expanded="true"] {
-  color: var(--text);
-}
-.skills-menu {
+.slash-menu {
   position: absolute;
   z-index: 30;
-  bottom: calc(100% + 8px);
-  left: 0;
-  width: 260px;
+  left: max(24px, calc((100% - 760px) / 2));
+  right: max(24px, calc((100% - 760px) / 2));
+  bottom: calc(100% - 8px);
   max-height: 280px;
   overflow: auto;
-  padding: 8px;
+  padding: 6px;
   background: var(--surface);
   border: 1px solid var(--line-stronger);
   border-radius: 12px;
   box-shadow: 0 10px 35px #0008;
   color: var(--text);
 }
-.skills-menu label {
+.slash-menu button[role="option"] {
   display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  margin: 0;
-  padding: 7px 6px;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-align: left;
   font-size: 13px;
-  color: var(--text);
 }
-.skills-menu label input {
-  display: inline-block;
-  width: auto;
-  margin: 2px 0 0;
-  accent-color: var(--text);
+.slash-menu button[role="option"].active,
+.slash-menu button[role="option"]:hover {
+  background: var(--surface-3);
 }
-.skills-menu p {
-  margin: 4px 6px 8px;
+.slash-menu button[role="option"] span {
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slash-menu p {
+  margin: 6px 10px;
   color: var(--text-3);
   font-size: 12px;
-  line-height: 1.45;
 }
-.skills-menu .text-button {
+.slash-menu .text-button {
   display: block;
-  margin: 4px 6px 6px;
+  margin: 4px 10px 6px;
+}
+.skill-command {
+  color: var(--text-3);
+  font-size: 12px;
+  font-family: var(--font-mono);
 }
 .skill-list {
   display: grid;

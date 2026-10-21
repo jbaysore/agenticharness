@@ -1,13 +1,21 @@
-// Named instructions the user writes once and turns on for a chat. The host
-// includes the full text in the instruction block every agent already receives.
-// No Node builtin: the composer imports the limits from this file.
+// Named instructions the user writes once. A message invokes a skill by its
+// slash command. The host then includes the full text in the instruction block
+// every agent already receives. No Node builtin: the composer imports this file.
 
 export const MAX_SKILLS = 40,
   MAX_NAME = 60,
   MAX_INSTRUCTIONS = 8000,
   MAX_PER_CHAT = 6;
-const SKILLS_KEY = "skills",
-  CHAT_SKILLS_KEY = "chat-skills";
+const SKILLS_KEY = "skills";
+
+// "Review notes" becomes /review-notes. Letters and digits stay; the rest
+// becomes a single hyphen, so the command is something a person can type.
+export function skillCommand(name) {
+  return String(name ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 const clean = (skill) =>
   skill &&
@@ -22,9 +30,14 @@ const clean = (skill) =>
       }
     : null;
 
+const withCommand = (skill) => {
+  const row = clean(skill);
+  return row && { ...row, command: skillCommand(row.name) };
+};
+
 export function listSkills(store) {
   const saved = store.setting(SKILLS_KEY);
-  return Array.isArray(saved) ? saved.map(clean).filter(Boolean) : [];
+  return Array.isArray(saved) ? saved.map(withCommand).filter(Boolean) : [];
 }
 
 function writeSkills(store, skills) {
@@ -40,6 +53,10 @@ function nameOf(name) {
   if (text.length > MAX_NAME)
     throw new Error(
       `A skill name can be at most ${MAX_NAME} characters`,
+    );
+  if (!/^[a-z][a-z0-9-]*$/.test(skillCommand(text)))
+    throw new Error(
+      "Use a name that starts with a letter, so it can be a /command",
     );
   return text;
 }
@@ -62,6 +79,10 @@ const taken = (skills, name, except) =>
     (skill) =>
       skill.id !== except && skill.name.toLowerCase() === name.toLowerCase(),
   );
+const commandClash = (skills, name, except) =>
+  skills.find(
+    (skill) => skill.id !== except && skill.command === skillCommand(name),
+  );
 
 export function createSkill(store, input) {
   const skills = listSkills(store);
@@ -70,11 +91,16 @@ export function createSkill(store, input) {
   const name = nameOf(input?.name);
   if (taken(skills, name))
     throw new Error("A skill with that name already exists");
-  const skill = {
+  const clash = commandClash(skills, name);
+  if (clash)
+    throw new Error(
+      `That name uses the same slash command as ${clash.name} (/${clash.command})`,
+    );
+  const skill = withCommand({
     id: crypto.randomUUID(),
     name,
     instructions: bodyOf(input?.instructions),
-  };
+  });
   writeSkills(store, [...skills, skill]);
   return skill;
 }
@@ -86,22 +112,20 @@ export function updateSkill(store, id, input) {
   const name = nameOf(input?.name);
   if (taken(skills, name, id))
     throw new Error("A skill with that name already exists");
-  const skill = { id, name, instructions: bodyOf(input?.instructions) },
+  const clash = commandClash(skills, name, id);
+  if (clash)
+    throw new Error(
+      `That name uses the same slash command as ${clash.name} (/${clash.command})`,
+    );
+  const skill = withCommand({
+      id,
+      name,
+      instructions: bodyOf(input?.instructions),
+    }),
     next = skills.slice();
   next[index] = skill;
   writeSkills(store, next);
   return skill;
-}
-
-function chatMap(store) {
-  const saved = store.setting(CHAT_SKILLS_KEY);
-  return saved && typeof saved === "object" && !Array.isArray(saved)
-    ? saved
-    : {};
-}
-
-function writeChatMap(store, map) {
-  store.setting(CHAT_SKILLS_KEY, map);
 }
 
 export function deleteSkill(store, id) {
@@ -112,57 +136,55 @@ export function deleteSkill(store, id) {
     store,
     skills.filter((skill) => skill.id !== id),
   );
-  const map = {};
-  for (const [chatId, ids] of Object.entries(chatMap(store))) {
-    if (!Array.isArray(ids)) continue;
-    const kept = ids.filter((skillId) => skillId !== id);
-    if (kept.length) map[chatId] = kept;
-  }
-  writeChatMap(store, map);
   return { id };
 }
 
-// Ids the chat still has, in the order the user ticked them. A deleted skill
-// is dropped here so a turn never receives a missing body.
-export function chatSkillIds(store, conversationId) {
-  const ids = chatMap(store)[conversationId],
-    known = new Set(listSkills(store).map((skill) => skill.id));
-  return Array.isArray(ids)
-    ? ids.filter((id) => typeof id === "string" && known.has(id))
-    : [];
+// The /command being typed at the caret, if the caret is still inside it.
+export function slashToken(text, caret) {
+  const slice = String(text ?? "").slice(0, caret ?? 0);
+  const match = slice.match(/(?:^|\s)(\/([a-z0-9-]*))$/i);
+  if (!match) return null;
+  return {
+    query: match[2].toLowerCase(),
+    start: slice.length - match[1].length,
+  };
 }
 
-export function setChatSkills(store, conversationId, skillIds) {
-  if (!Array.isArray(skillIds)) throw new Error("Choose skills from the list");
-  const unique = [];
-  for (const id of skillIds) {
-    if (typeof id !== "string" || !id)
-      throw new Error("Choose skills from the list");
-    if (!unique.includes(id)) unique.push(id);
+// Replace the command being typed with /command and a trailing space.
+export function applyCommand(text, caret, command) {
+  const token = slashToken(text, caret);
+  if (!token) return { text, cursor: caret ?? 0 };
+  const insert = "/" + command + " ";
+  return {
+    text: String(text).slice(0, token.start) + insert + String(text).slice(caret),
+    cursor: token.start + insert.length,
+  };
+}
+
+// Skills whose /command appears as its own word. A path such as src/review-notes
+// does not count. The same command twice counts once. At most six.
+export function invokedSkills(skills, text) {
+  const byCommand = new Map(skills.map((skill) => [skill.command, skill])),
+    found = [];
+  const seen = new Set();
+  for (const match of String(text ?? "").matchAll(
+    /(?:^|\s)\/([a-z0-9-]+)(?=$|\s)/gi,
+  )) {
+    const skill = byCommand.get(match[1].toLowerCase());
+    if (!skill || seen.has(skill.id)) continue;
+    if (found.length >= MAX_PER_CHAT) break;
+    seen.add(skill.id);
+    found.push(skill);
   }
-  if (unique.length > MAX_PER_CHAT)
-    throw new Error(`A chat can use at most ${MAX_PER_CHAT} skills`);
-  const known = new Set(listSkills(store).map((skill) => skill.id));
-  if (unique.some((id) => !known.has(id)))
-    throw new Error("Choose a skill that still exists");
-  const map = { ...chatMap(store) };
-  if (unique.length) map[conversationId] = unique;
-  else delete map[conversationId];
-  writeChatMap(store, map);
-  return unique;
-}
-
-export function skillsForTurn(store, conversationId) {
-  const byId = new Map(listSkills(store).map((skill) => [skill.id, skill]));
-  return chatSkillIds(store, conversationId)
-    .map((id) => byId.get(id))
-    .filter(Boolean);
+  return found;
 }
 
 export function skillInstructions(skills) {
   if (!skills.length) return "";
   return (
-    "\nSkills the user turned on for this chat. Follow each one. The same text is given to Codex, Claude Code and Cursor.\n\n" +
-    skills.map((skill) => `Skill: ${skill.name}\n${skill.instructions}`).join("\n\n")
+    "\nSkills the user invoked in this message with slash commands. Follow each one. The same text is given to Codex, Claude Code and Cursor.\n\n" +
+    skills
+      .map((skill) => `Skill: ${skill.name}\n${skill.instructions}`)
+      .join("\n\n")
   );
 }

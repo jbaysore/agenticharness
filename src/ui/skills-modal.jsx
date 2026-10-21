@@ -1,11 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
 import { api } from "./api.mjs";
 import { Modal } from "./components.jsx";
 import {
   MAX_INSTRUCTIONS,
   MAX_NAME,
-  MAX_PER_CHAT,
   MAX_SKILLS,
+  skillCommand,
+  slashToken,
 } from "../core/skills.mjs";
 
 export function SkillsModal({ skills, onSaved, onClose }) {
@@ -66,10 +67,11 @@ export function SkillsModal({ skills, onSaved, onClose }) {
   return (
     <Modal title="Skills" wide onClose={onClose}>
       <p>
-        A skill is a name and instructions you turn on for a chat. The next
-        message includes the full text, for Codex, Claude Code and Cursor. A
-        long skill spends included usage on every message that uses it. Text
-        that every chat should always see belongs in Agent rules.
+        A skill is a name and instructions. In a message, type its slash
+        command, such as /review-notes, and that message includes the full
+        text, for Codex, Claude Code and Cursor. A long skill spends included
+        usage each time you invoke it. Text that every chat should always see
+        belongs in Agent rules.
       </p>
       <form
         className="rules-form"
@@ -89,10 +91,15 @@ export function SkillsModal({ skills, onSaved, onClose }) {
               aria-label="Skill name"
               maxLength={MAX_NAME}
               value={name}
-              placeholder="For example: Review notes"
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
+            placeholder="For example: Review notes"
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+        <p className="muted small">
+          {/^[a-z]/.test(skillCommand(name))
+            ? `Slash command: /${skillCommand(name)}`
+            : "The name needs a letter so it can be a /command."}
+        </p>
           <label>
             Instructions
             <textarea
@@ -135,6 +142,7 @@ export function SkillsModal({ skills, onSaved, onClose }) {
               <li key={skill.id}>
                 <header>
                   <strong>{skill.name}</strong>
+                  <span className="skill-command">/{skill.command}</span>
                   <div className="skill-actions">
                     <button
                       type="button"
@@ -172,85 +180,83 @@ export function SkillsModal({ skills, onSaved, onClose }) {
   );
 }
 
-// Ticked skills travel with the next message. The menu stays out of the
-// permission control, which another part of the composer owns.
-export function SkillPicker({
-  skills,
-  skillIds,
-  disabled,
-  onChange,
-  onCreate,
-}) {
-  const [open, setOpen] = useState(false),
-    root = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event) => {
-      if (!root.current?.contains(event.target)) setOpen(false);
-    };
-    const onKey = (event) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  const selected = skills.filter((skill) => skillIds.includes(skill.id));
+// The menu appears while a /command is being typed. Escape hides it until the
+// command being typed changes. Enter and Tab insert the highlighted skill.
+export function SkillSlash({ ref, skills, text, caret, onPick, onCreate }) {
+  const token = slashToken(text, caret),
+    key = token ? `${token.start}:${token.query}` : "";
+  const matches = token
+    ? skills
+        .filter((skill) => skill.command.startsWith(token.query))
+        .slice(0, 8)
+    : [];
+  const [hidden, setHidden] = useState(""),
+    [highlight, setHighlight] = useState(0);
+  useEffect(() => setHighlight(0), [key]);
+  const open = !!token && hidden !== key;
+  useImperativeHandle(
+    ref,
+    () => ({
+      onKeyDown(event) {
+        if (!open) return false;
+        if (event.key === "Escape") {
+          setHidden(key);
+          return true;
+        }
+        if (!matches.length) return false;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          setHighlight((index) => {
+            const step = event.key === "ArrowDown" ? 1 : -1;
+            return (index + step + matches.length) % matches.length;
+          });
+          return true;
+        }
+        if (event.key === "Enter" || event.key === "Tab") {
+          event.preventDefault();
+          onPick(matches[Math.min(highlight, matches.length - 1)].command);
+          return true;
+        }
+        return false;
+      },
+    }),
+    [open, key, matches, highlight, onPick],
+  );
+  if (!open) return null;
   return (
-    <div className="skills-control" ref={root}>
-      <button
-        type="button"
-        aria-label="Skills for this chat"
-        aria-expanded={open}
-        aria-haspopup="true"
-        disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {selected.length ? `Skills · ${selected.length}` : "Skills"}
-      </button>
-      {open && (
-        <div className="skills-menu" role="group" aria-label="Skills for this chat">
-          <p>The next message includes the ones you tick. Up to {MAX_PER_CHAT}.</p>
-          {skills.length === 0 ? (
-            <p>No skills yet.</p>
-          ) : (
-            skills.map((skill) => {
-              const on = skillIds.includes(skill.id),
-                full = !on && skillIds.length >= MAX_PER_CHAT;
-              return (
-                <label key={skill.id} title={skill.instructions}>
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    disabled={disabled || full}
-                    onChange={() =>
-                      onChange(
-                        on
-                          ? skillIds.filter((id) => id !== skill.id)
-                          : [...skillIds, skill.id],
-                      )
-                    }
-                  />
-                  {skill.name}
-                </label>
-              );
-            })
-          )}
+    <div className="slash-menu" role="listbox" aria-label="Skills">
+      {matches.length ? (
+        matches.map((skill, index) => (
           <button
             type="button"
-            className="text-button"
-            onClick={() => {
-              setOpen(false);
-              onCreate();
+            role="option"
+            aria-selected={index === highlight}
+            key={skill.id}
+            className={index === highlight ? "active" : ""}
+            title={skill.instructions}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              onPick(skill.command);
             }}
+            onMouseEnter={() => setHighlight(index)}
           >
-            Create a skill
+            <strong>/{skill.command}</strong>
+            <span>{skill.name}</span>
           </button>
-        </div>
+        ))
+      ) : (
+        <p>{skills.length ? `No skill for /${token.query}.` : "No skills yet."}</p>
       )}
+      <button
+        type="button"
+        className="text-button"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          onCreate();
+        }}
+      >
+        Create a skill
+      </button>
     </div>
   );
 }

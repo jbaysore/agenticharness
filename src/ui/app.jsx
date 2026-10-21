@@ -489,13 +489,10 @@ function App() {
   }
   // The pane that asked keeps its key, so its composer survives the chat's creation.
   async function ensureChat(p, chosen) {
-    const { skillIds, ...fields } = chosen;
     const c = await api("/api/chats", {
       projectId: paneProject(p).id,
-      ...fields,
+      ...chosen,
     });
-    if (Array.isArray(skillIds))
-      await api(`/api/chats/${c.id}/skills`, { skillIds }, "PUT");
     const next = admit(await api("/api/chats/" + c.id));
     setView((v) => setPaneChat(v, p.key, c.id));
     return next;

@@ -43,8 +43,8 @@ try {
   await page.goto(app.runtime.origin + "/#pair=" + app.auth.pairing());
   const skillsButton = page.locator(".sidebar").getByRole("button", { name: /^Skills/ }),
     dialog = page.getByRole("dialog", { name: "Skills" }),
-    picker = page.getByRole("button", { name: "Skills for this chat" }),
-    menu = page.getByRole("group", { name: "Skills for this chat" }),
+    box = page.getByLabel("Message your coding agent"),
+    menu = page.getByRole("listbox", { name: "Skills" }),
     reply = page.locator(".message.assistant").last();
   const ask = async (text) => {
     await page.getByLabel("Message your coding agent").fill(text);
@@ -59,6 +59,7 @@ try {
   await dialog.getByLabel("Skill instructions").fill("Write the decision down.");
   await dialog.getByRole("button", { name: "Create skill" }).click();
   await expect(dialog.getByRole("status")).toContainText("Created.");
+  await expect(dialog.locator(".skill-command", { hasText: "/review-notes" })).toBeVisible();
   await expect(dialog.getByText("Write the decision down.")).toBeVisible();
   await dialog.getByRole("button", { name: "Edit Review notes" }).click();
   await dialog.getByLabel("Skill instructions").fill("Name the file the decision came from.");
@@ -68,47 +69,38 @@ try {
   await expect(skillsButton).toContainText("1");
 
   await chooseModel(page, controller.providers, "codex", "gpt-6.1-sol");
-  await picker.click();
-  await menu.getByRole("checkbox", { name: "Review notes" }).check();
-  await picker.click();
-  await ask("Look at the parser");
+  await box.fill("/rev");
+  await expect(menu.getByRole("option", { name: "/review-notes Review notes" })).toBeVisible();
+  await menu.getByRole("option", { name: "/review-notes Review notes" }).click();
+  await expect(box).toHaveValue("/review-notes ");
+  await box.press("End");
+  await box.pressSequentially("Look at the parser");
+  await page.getByLabel("Send message").click();
+  await expect(reply).toContainText("Done: /review-notes Look at the parser");
+  assert.match(seen[0].text, /\/review-notes Look at the parser/);
   assert.match(seen[0].instructions, /Skill: Review notes/);
   assert.match(seen[0].instructions, /Name the file the decision came from\./);
   await page.getByRole("button", { name: "Work", exact: true }).click();
   await expect(page.locator(".work-item", { hasText: "Skill · Review notes" })).toBeVisible();
 
-  await page.reload();
-  await picker.click();
-  await expect(menu.getByRole("checkbox", { name: "Review notes" })).toBeChecked();
-  await menu.getByRole("checkbox", { name: "Review notes" }).uncheck();
-  await picker.click();
   await ask("Look again");
   assert.doesNotMatch(seen[1].instructions, /Skill: Review notes/);
 
-  await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/chats") &&
-        response.request().method() === "POST",
-    ),
-    page.getByRole("button", { name: "New conversation" }).click(),
-  ]);
-  await picker.click();
-  await expect(menu.getByRole("checkbox", { name: "Review notes" })).not.toBeChecked();
-  await picker.click();
-  await ask("A fresh chat");
+  await box.fill("Read src/review-notes");
+  await expect(menu).toHaveCount(0);
+  await ask("Read src/review-notes");
   assert.doesNotMatch(seen[2].instructions, /Skill: Review notes/);
 
   await skillsButton.click();
   await dialog.getByRole("button", { name: "Delete Review notes" }).click();
   await expect(dialog.getByRole("status")).toContainText("Deleted Review notes.");
   await dialog.getByLabel("Close dialog").click();
-  await picker.click();
+  await box.fill("/");
   await expect(menu).toContainText("No skills yet.");
 
   expect(errors).toEqual([]);
   console.log(
-    "Skills checks passed: create, edit, turn on for one chat, include the text on the next message, keep it across reload, leave it off another chat, and delete it. The provider was simulated.",
+    "Skills checks passed: create, edit, invoke with a slash command, include the text on that message, ignore a path, leave a later message alone, and delete. The provider was simulated.",
   );
 } finally {
   await browser.close();

@@ -34,11 +34,9 @@ import {
   saveRules,
 } from "./core/rules.mjs";
 import {
-  chatSkillIds,
   createSkill,
   deleteSkill,
   listSkills,
-  setChatSkills,
   updateSkill,
 } from "./core/skills.mjs";
 
@@ -408,30 +406,12 @@ export async function createHarness({
           controller.event(chat.id, null, "chat", chat);
           return json(res, 201, chat);
         }
-        if (
-          (match = path.match(/^\/api\/chats\/([^/]+)\/skills$/)) &&
-          method === "PUT"
-        ) {
-          const id = match[1];
-          if (!store.conversation(id))
-            return json(res, 404, { error: "Conversation not found" });
-          const skillIds = setChatSkills(
-            store,
-            id,
-            (await readJson(req)).skillIds,
-          );
-          controller.event(id, null, "skills", { skillIds });
-          return json(res, 200, { skillIds });
-        }
         if ((match = path.match(/^\/api\/chats\/([^/]+)$/))) {
           const id = match[1];
           if (!store.conversation(id))
             return json(res, 404, { error: "Conversation not found" });
           if (method === "GET")
-            return json(res, 200, {
-              ...store.conversationSnapshot(id),
-              skillIds: chatSkillIds(store, id),
-            });
+            return json(res, 200, store.conversationSnapshot(id));
           if (method === "PATCH") {
             const body = await readJson(req),
               fields = {};

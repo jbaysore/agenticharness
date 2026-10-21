@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
+import { flushSync } from "react-dom";
 import { api } from "./api.mjs";
 import { Icon, Markdown, Approval } from "./components.jsx";
 import { readPending, savePending } from "./outbox.mjs";
 import { readDraft, saveDraft } from "./drafts.mjs";
 import { useChatScroll } from "./chat-scroll.jsx";
 import { ModelPicker } from "./model-picker.jsx";
-import { SkillPicker } from "./skills-modal.jsx";
+import { SkillSlash } from "./skills-modal.jsx";
+import { applyCommand } from "../core/skills.mjs";
 import {
   chatMarker,
   chatMarkerLabel,
@@ -132,10 +134,10 @@ export function ChatPane({
     [draft, setDraft] = useState(() => readDraft(draftKey)),
     [busy, setBusy] = useState(false),
     [permissionsBusy, setPermissionsBusy] = useState(false),
-    [skillIds, setSkillIds] = useState(chat?.skillIds ?? []),
-    [skillsBusy, setSkillsBusy] = useState(false);
+    [caret, setCaret] = useState(0);
   const messages = useChatScroll(chat),
     input = useRef(null),
+    slash = useRef(null),
     sending = useRef(false);
   const connected = providers.find((p) => p.id === provider),
     selectedModel = connected?.models?.find((m) => m.id === model);
@@ -183,19 +185,6 @@ export function ChatPane({
   useEffect(() => {
     if (chat && !permissionsBusy) setPermissions(chat.permissions);
   }, [chat?.id, chat?.permissions, permissionsBusy]);
-  const skillKey = chat?.skillIds?.join("\n") ?? "";
-  useEffect(() => {
-    if (sending.current) return;
-    setSkillIds(chat?.skillIds ?? []);
-  }, [chat?.id, skillKey]);
-  useEffect(() => {
-    const known = new Set(skills.map((skill) => skill.id));
-    setSkillIds((ids) =>
-      ids.every((id) => known.has(id))
-        ? ids
-        : ids.filter((id) => known.has(id)),
-    );
-  }, [skills]);
   useEffect(() => {
     if (!connected?.models?.length) return;
     const available = connected.models.some(
@@ -224,23 +213,15 @@ export function ChatPane({
       setPermissionsBusy(false);
     }
   }
-  async function changeSkills(next) {
-    setSkillIds(next);
-    if (!chat) return;
-    setSkillsBusy(true);
-    try {
-      const saved = await api(
-        `/api/chats/${chat.id}/skills`,
-        { skillIds: next },
-        "PUT",
-      );
-      setSkillIds(saved.skillIds);
-    } catch (e) {
-      report(e);
-      await reload(chat.id).catch(() => {});
-    } finally {
-      setSkillsBusy(false);
-    }
+  function pickSkill(command) {
+    const field = input.current;
+    const next = applyCommand(field?.value ?? draft, field?.selectionStart ?? caret, command);
+    flushSync(() => {
+      setDraft(next.text);
+      setCaret(next.cursor);
+    });
+    field?.focus();
+    field?.setSelectionRange(next.cursor, next.cursor);
   }
   async function send(override) {
     const text = typeof override === "string" ? override : draft;
@@ -249,7 +230,6 @@ export function ChatPane({
       !project ||
       busy ||
       permissionsBusy ||
-      skillsBusy ||
       chat?.activeRun ||
       !model ||
       (selectedModel?.efforts?.length && !effort)
@@ -260,14 +240,7 @@ export function ChatPane({
     try {
       const c =
         chat ??
-        (await ensureChat({
-          provider,
-          model,
-          effort,
-          permissions,
-          skillIds,
-        }));
-      if (chat) await api(`/api/chats/${chat.id}/skills`, { skillIds }, "PUT");
+        (await ensureChat({ provider, model, effort, permissions }));
       if (!chat) saveDraft(draftKey, "");
       const prior = readPending(c.id);
       const body =
@@ -471,6 +444,14 @@ export function ChatPane({
         ))}
       </div>
       <div className="composer-area">
+        <SkillSlash
+          ref={slash}
+          skills={skills}
+          text={draft}
+          caret={caret}
+          onPick={pickSkill}
+          onCreate={onOpenSkills}
+        />
         {connected?.blockReason && (
           <button className="billing-notice" onClick={onOpenConnections}>
             <span className="status-dot warning" />
@@ -494,8 +475,13 @@ export function ChatPane({
                 : "Add a project to start a conversation…"
             }
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setCaret(e.target.selectionStart ?? 0);
+            }}
+            onSelect={(e) => setCaret(e.target.selectionStart ?? 0)}
             onKeyDown={(e) => {
+              if (slash.current?.onKeyDown(e)) return;
               if (
                 e.key === "Enter" &&
                 !e.shiftKey &&
@@ -539,7 +525,6 @@ export function ChatPane({
                   permissionsBusy ||
                   !draft.trim() ||
                   !project ||
-                  skillsBusy ||
                   !model ||
                   (selectedModel?.efforts?.length && !effort) ||
                   !!connected?.blockReason
@@ -568,13 +553,6 @@ export function ChatPane({
               ))}
             </select>
           </label>
-          <SkillPicker
-            skills={skills}
-            skillIds={skillIds}
-            disabled={busy || skillsBusy}
-            onChange={changeSkills}
-            onCreate={onOpenSkills}
-          />
           {peers.length > 0 && (
             <span
               className="workspace-peers"

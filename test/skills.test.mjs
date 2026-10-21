@@ -11,13 +11,13 @@ import {
   MAX_NAME,
   MAX_PER_CHAT,
   MAX_SKILLS,
-  chatSkillIds,
+  applyCommand,
   createSkill,
   deleteSkill,
+  invokedSkills,
   listSkills,
-  setChatSkills,
   skillInstructions,
-  skillsForTurn,
+  slashToken,
   updateSkill,
 } from "../src/core/skills.mjs";
 
@@ -62,6 +62,15 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
       instructions: "Draft from the diff.",
     });
   assert.equal(notes.name, "Review notes");
+  assert.equal(notes.command, "review-notes");
+  assert.throws(
+    () => createSkill(store, { name: "123", instructions: "x" }),
+    /letter/,
+  );
+  assert.throws(
+    () => createSkill(store, { name: "Release-notes", instructions: "Again." }),
+    /slash command/,
+  );
   assert.equal(notes.instructions, "Write the decision down.\nKeep the source.");
   assert.throws(
     () => createSkill(store, { name: "review notes", instructions: "Again." }),
@@ -81,43 +90,39 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
     /already exists/,
   );
   assert.throws(() => updateSkill(store, "missing", { name: "A", instructions: "B" }), /no longer exists/);
-  const chat = store.createConversation({
-      projectId: store.addProject("fixture", "C:\\skills-fixture").id,
-    }),
-    elsewhere = store.createConversation({
-      projectId: store.projects()[0].id,
-      title: "Elsewhere",
-    });
-  assert.deepEqual(setChatSkills(store, chat.id, [other.id, notes.id, other.id]), [
-    other.id,
-    notes.id,
-  ]);
+  const listed = listSkills(store);
   assert.deepEqual(
-    skillsForTurn(store, chat.id).map((skill) => skill.name),
-    ["Release notes", "Decisions"],
+    invokedSkills(listed, "/decisions look at src/release-notes").map(
+      (skill) => skill.name,
+    ),
+    ["Decisions"],
   );
-  assert.deepEqual(chatSkillIds(store, elsewhere.id), []);
-  assert.match(skillInstructions(skillsForTurn(store, chat.id)), /Skill: Decisions/);
-  assert.match(
-    skillInstructions(skillsForTurn(store, chat.id)),
-    /Record the decision and the file it came from\./,
+  assert.deepEqual(
+    invokedSkills(listed, "See /Release-notes and /decisions again").map(
+      (skill) => skill.command,
+    ),
+    ["release-notes", "decisions"],
+  );
+  assert.deepEqual(invokedSkills(listed, "no command here"), []);
+  assert.match(skillInstructions(invokedSkills(listed, "/decisions")), /Skill: Decisions/);
+  const token = slashToken("Please /rev", "Please /rev".length);
+  assert.equal(token.query, "rev");
+  assert.equal(
+    applyCommand("Please /rev", "Please /rev".length, "decisions").text,
+    "Please /decisions ",
   );
   deleteSkill(store, notes.id);
-  assert.deepEqual(chatSkillIds(store, chat.id), [other.id]);
+  assert.deepEqual(invokedSkills(listSkills(store), "/decisions"), []);
   assert.throws(() => deleteSkill(store, notes.id), /no longer exists/);
-  assert.deepEqual(setChatSkills(store, chat.id, []), []);
-  assert.equal(chatSkillIds(store, chat.id).length, 0);
   const many = [other];
   for (let i = 1; i <= MAX_PER_CHAT; i++)
     many.push(createSkill(store, { name: "Skill " + i, instructions: "Do " + i }));
-  assert.throws(
-    () =>
-      setChatSkills(
-        store,
-        chat.id,
-        many.map((skill) => skill.id),
-      ),
-    /at most/,
+  assert.equal(
+    invokedSkills(
+      listSkills(store),
+      many.map((skill) => "/" + skill.command).join(" "),
+    ).length,
+    MAX_PER_CHAT,
   );
   for (let i = listSkills(store).length; i < MAX_SKILLS; i++)
     createSkill(store, { name: "Extra " + i, instructions: "Do " + i });
@@ -130,7 +135,7 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
   store.close();
 });
 
-test("ticked skills are included on the next turn for every agent, and only for that chat", async () => {
+test("a slash command includes the skill on that message for every agent", async () => {
   const store = new Store(":memory:"),
     controller = new Controller(store, {});
   controller.providers = providers;
@@ -153,10 +158,12 @@ test("ticked skills are included on the next turn for every agent, and only for 
       model: "m",
       title: provider.id,
     });
-    if (provider.id !== "cursor") setChatSkills(store, chat.id, [notes.id]);
     controller.send(chat.id, {
       actionId: "skills-turn-" + provider.id + "-check",
-      text: "Look at the parser",
+      text:
+        provider.id === "cursor"
+          ? "Look at the parser"
+          : "/review-notes Look at the parser",
       provider: provider.id,
       model: "m",
     });
@@ -178,7 +185,7 @@ test("ticked skills are included on the next turn for every agent, and only for 
   const again = store.conversations().find((chat) => chat.title === "codex");
   controller.send(again.id, {
     actionId: "skills-turn-codex-updated",
-    text: "Look again",
+    text: "/review-notes Look again",
     provider: "codex",
     model: "m",
   });
@@ -188,7 +195,7 @@ test("ticked skills are included on the next turn for every agent, and only for 
   store.close();
 });
 
-test("skill routes create, edit, assign and delete without touching another chat", async () => {
+test("skill routes create, edit and delete, and publish the slash command", async () => {
   const dir = await mkdtemp(join(tmpdir(), "harness-skills-")),
     app = await createHarness({ dataDir: dir, port: 0, startProviders: false });
   try {
@@ -217,6 +224,7 @@ test("skill routes create, edit, assign and delete without touching another chat
       "POST",
     );
     assert.equal(created.status, 201);
+    assert.equal(created.body.command, "review-notes");
     const edited = await call(
       "/api/skills/" + created.body.id,
       { name: "Decisions", instructions: "Name the file." },
@@ -224,34 +232,16 @@ test("skill routes create, edit, assign and delete without touching another chat
     );
     assert.equal(edited.status, 200);
     assert.equal(edited.body.name, "Decisions");
-    const project = await call(
-      "/api/projects",
-      { path: dir, name: "Skills" },
+    assert.equal(edited.body.command, "decisions");
+    const clash = await call(
+      "/api/skills",
+      { name: "Decisions!", instructions: "Again." },
       "POST",
     );
-    const first = await call(
-        "/api/chats",
-        { projectId: project.body.id, provider: "codex", model: "m" },
-        "POST",
-      ),
-      second = await call(
-        "/api/chats",
-        { projectId: project.body.id, provider: "claude", model: "m" },
-        "POST",
-      );
-    const assigned = await call(
-      "/api/chats/" + first.body.id + "/skills",
-      { skillIds: [created.body.id] },
-      "PUT",
-    );
-    assert.deepEqual(assigned.body.skillIds, [created.body.id]);
-    assert.deepEqual((await call("/api/chats/" + first.body.id)).body.skillIds, [
-      created.body.id,
-    ]);
-    assert.deepEqual((await call("/api/chats/" + second.body.id)).body.skillIds, []);
+    assert.equal(clash.status, 400);
+    assert.match(clash.body.error, /slash command/);
     const removed = await call("/api/skills/" + created.body.id, undefined, "DELETE");
     assert.equal(removed.status, 200);
-    assert.deepEqual((await call("/api/chats/" + first.body.id)).body.skillIds, []);
     assert.deepEqual((await call("/api/state")).body.skills, []);
     const exported = await call("/api/export");
     assert.deepEqual(exported.body.skills, []);

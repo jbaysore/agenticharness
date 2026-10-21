@@ -110,9 +110,9 @@ is not evidence that Codex, Claude Code, or Cursor obeys one.
 
 | Check                                                                                                                                          | Kind                                                   | Result  |
 | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------- |
-| Create, edit, turn on for one chat, include the text on the next message, keep that choice across reload, leave it off a new chat, and delete | Real Edge (`node scripts/skills-acceptance.mjs`)       | Passed  |
-| Name and length checks, the six-skill limit, and deleting a skill removes it from chats                                                       | Unit tests (`test/skills.test.mjs`)                    | Passed  |
-| Codex, Claude Code, and Cursor turns receive the skill text; a chat without it does not; an edit is included on the next turn                 | Unit tests with stubbed providers (`test/skills.test.mjs`) | Passed  |
+| Create, edit, invoke with `/review-notes`, include the text on that message, ignore a path, leave a later message alone, and delete         | Real Edge (`node scripts/skills-acceptance.mjs`)       | Passed  |
+| Name and command checks, the six-skill limit, and a deleted skill no longer matches its command                                                | Unit tests (`test/skills.test.mjs`)                    | Passed  |
+| Codex, Claude Code, and Cursor turns receive a slash command’s skill; a message without it does not; an edit is included the next time it is invoked | Unit tests with stubbed providers (`test/skills.test.mjs`) | Passed  |
 | A real agent following a skill                                                                                                                 | Requires included usage                                | Not run |
 
 ## Bugs found through dogfooding
