@@ -200,7 +200,10 @@ export function ChatPane({
           </button>
         </header>
       )}
-      <div className="messages" onClick={followLink}>
+      <div
+        className={"messages " + (chat?.messages?.length ? "" : "empty")}
+        onClick={followLink}
+      >
         {!chat?.messages?.length ? (
           <div className="welcome">
             <div className="eyebrow">ONE WORKSPACE. YOUR AGENTS.</div>

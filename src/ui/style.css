@@ -688,6 +688,29 @@ small {
   margin: clamp(32px, 11vh, 130px) auto 40px;
   text-align: center;
 }
+/* Centre the welcome in whatever height is left so it never needs a scroll bar;
+   auto margins fall to zero, rather than clipping, when the pane is too short. */
+.messages.empty {
+  display: flex;
+  flex-direction: column;
+}
+.messages.empty > .welcome {
+  margin: auto;
+  width: 100%;
+}
+@media (max-height: 800px) {
+  .messages.empty {
+    padding-top: 18px;
+    padding-bottom: 18px;
+  }
+  .welcome .eyebrow {
+    margin-bottom: 12px;
+  }
+  .welcome > p,
+  .provider-cards {
+    margin-bottom: 20px;
+  }
+}
 .eyebrow {
   font-size: 11px;
   letter-spacing: 2px;
