@@ -614,9 +614,6 @@ small {
   .composer-area {
     padding: 8px 14px 14px;
   }
-  .keyboard-hint {
-    display: none;
-  }
   .welcome {
     margin: 6vh auto 26px;
   }
@@ -1115,8 +1112,9 @@ small {
   color: #a3a3a3;
   max-width: 103px;
 }
-.keyboard-hint {
+.composer-footer .history-control {
   margin-left: auto;
+  flex-shrink: 0;
 }
 .permissions-control select {
   field-sizing: content;
@@ -2084,9 +2082,6 @@ small {
   }
   .provider-card {
     padding: 13px;
-  }
-  .keyboard-hint {
-    display: none;
   }
 }
 @media (max-width: 700px) {

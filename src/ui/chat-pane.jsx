@@ -438,7 +438,7 @@ export function ChatPane({
             </span>
           )}
           {chat ? (
-            <label>
+            <label className="history-control">
               History{" "}
               <select
                 aria-label="Shared history scope"
@@ -462,7 +462,6 @@ export function ChatPane({
           ) : (
             <span>Code and history stay on your Windows host</span>
           )}
-          <span className="keyboard-hint">↵ send · shift ↵ newline</span>
         </div>
       </div>
     </section>
