@@ -1053,6 +1053,12 @@ small {
 .markdown p {
   margin: 0 0 14px;
 }
+.markdown img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
 .markdown > :last-child {
   margin-bottom: 0;
 }

@@ -22,6 +22,7 @@ import {
 } from "./core/repository.mjs";
 import { historyCall, historyTools } from "./core/history.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
+import { serveBrowserScreenshot } from "./core/browser-images.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
@@ -232,6 +233,13 @@ export async function createHarness({
           return json(res, 401, {
             error: "Pair this browser with the Windows host",
           });
+        if (path.startsWith("/api/browser/screenshots/"))
+          return serveBrowserScreenshot(
+            req,
+            res,
+            dataDir,
+            path.slice("/api/browser/screenshots/".length),
+          );
         if (path === "/api/logout" && method === "POST") {
           auth.logout(req);
           return json(

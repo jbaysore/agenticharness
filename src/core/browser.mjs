@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { RpcProcess } from "./rpc.mjs";
+import { screenshotLinks } from "./browser-images.mjs";
 
 const cli = join(
   dirname(
@@ -92,11 +93,12 @@ export class Browser {
   call(name, args) {
     const next = this.queue.then(async () => {
       if (withheld.has(name)) throw new Error(`${name} is not available`);
-      return (await this.connect()).call(
-        "tools/call",
-        { name, arguments: args ?? {} },
-        5 * 60 * 1000,
-      );
+      const result = await (
+        await this.connect()
+      ).call("tools/call", { name, arguments: args ?? {} }, 5 * 60 * 1000);
+      return name === "browser_take_screenshot"
+        ? screenshotLinks(result, join(this.dir, "output"))
+        : result;
     });
     this.queue = next.catch(() => {});
     return next;
