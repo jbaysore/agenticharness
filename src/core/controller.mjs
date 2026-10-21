@@ -22,10 +22,11 @@ import {
 import { isDelegationTool } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
+import { browserTitle } from "./browser.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 
 export class Controller extends EventEmitter {
-  constructor(store, { probePath, bridgeUrl }) {
+  constructor(store, { probePath, bridgeUrl, browser = null }) {
     super();
     this.store = store;
     this.probePath = probePath;
@@ -34,6 +35,8 @@ export class Controller extends EventEmitter {
     this.active = new Map();
     this.approvalWaiters = new Map();
     this.bridgeTokens = new Map();
+    this.browser = browser;
+    this.bridgeBrowser = new Map();
     this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
     this.workerTimeoutMs = 5 * 60 * 1000;
@@ -236,6 +239,50 @@ export class Controller extends EventEmitter {
             .join(" "),
         },
       });
+    // The browser is offered only when it can start; a turn goes on without it.
+    const browserTools = this.browser
+      ? await this.browser.tools().then(
+          (tools) =>
+            tools.map(({ name, description, inputSchema }) => ({
+              name,
+              description,
+              inputSchema,
+            })),
+          (failure) => {
+            this.event(chat.id, run.id, "work", {
+              kind: "browser-unavailable",
+              item: {
+                title: "The browser is unavailable this turn",
+                description: failure.message,
+              },
+            });
+            return [];
+          },
+        )
+      : [];
+    // Every action that can change a page asks the user, whichever agent calls it.
+    const browser = async (name, args) => {
+      const input = typeof args === "string" ? JSON.parse(args) : (args ?? {}),
+        title = browserTitle(name, input);
+      if (await this.browser.needsApproval(name)) {
+        const answer = await this.waitApproval(
+          run,
+          { kind: "permission", title, details: { tool: name, input } },
+          abort.signal,
+        );
+        if (!answer.allow)
+          return {
+            isError: true,
+            content: [
+              { type: "text", text: "The user declined this browser action." },
+            ],
+          };
+      }
+      emit("work", { kind: "browser-tool", item: { title, name } });
+      return this.browser.call(name, input);
+    };
+    if (browserTools.length)
+      this.bridgeBrowser.set(token, { tools: browserTools, call: browser });
     const ctx = {
       project,
       chat,
@@ -247,7 +294,8 @@ export class Controller extends EventEmitter {
       instructions:
         agentInstructions(project, chat) +
         rulesInstructions(rules, plan, this.providers, COMMAND_SHELL),
-      tools: [...historyTools, ...plan.tools],
+      tools: [...historyTools, ...plan.tools, ...browserTools],
+      browser,
       signal: abort.signal,
       emit,
       billingConfirmation: this.store.setting("cursor-billing"),
@@ -314,6 +362,7 @@ export class Controller extends EventEmitter {
       this.store.setRun(run.id, status, null, error ?? null);
       this.store.expireApprovals(run.id);
       this.bridgeTokens.delete(token);
+      this.bridgeBrowser.delete(token);
       for (const [id, waiter] of this.approvalWaiters)
         if (waiter.runId === run.id) {
           waiter.resolve({ allow: false });
@@ -399,5 +448,6 @@ export class Controller extends EventEmitter {
     const active = [...this.active.values()];
     for (const { abort } of active) abort.abort();
     await Promise.allSettled([...active.map((a) => a.task), this.refreshing]);
+    this.browser?.close();
   }
 }

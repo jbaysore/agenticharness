@@ -20,7 +20,8 @@ import {
   repositoryDiff,
   readRepositoryFile,
 } from "./core/repository.mjs";
-import { historyCall } from "./core/history.mjs";
+import { historyCall, historyTools } from "./core/history.mjs";
+import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
@@ -152,13 +153,35 @@ export async function createHarness({
         setTimeout(() => close(), 50);
         return;
       }
+      // Cursor reaches Harness's own tools through history-mcp.mjs and this bridge.
+      if (path === "/internal/tools" && method === "GET") {
+        const token = req.headers.authorization?.replace(/^Bearer /, "");
+        if (!controller.bridgeTokens.has(token))
+          return json(res, 401, { error: "History capability expired" });
+        return json(res, 200, {
+          tools: [
+            ...historyTools,
+            ...(controller.bridgeBrowser.get(token)?.tools ?? []),
+          ],
+        });
+      }
       if (path === "/internal/history" && method === "POST") {
         const token = req.headers.authorization?.replace(/^Bearer /, ""),
           chatId = controller.bridgeTokens.get(token);
         if (!chatId)
           return json(res, 401, { error: "History capability expired" });
         const body = await readJson(req),
-          result = historyCall(store, chatId, body.name, body.arguments ?? {});
+          browser = controller.bridgeBrowser.get(token);
+        if (browser && isBrowserTool(body.name))
+          return json(res, 200, {
+            mcp: await browser.call(body.name, body.arguments ?? {}),
+          });
+        const result = historyCall(
+          store,
+          chatId,
+          body.name,
+          body.arguments ?? {},
+        );
         controller.event(chatId, store.activeRun(chatId)?.id ?? null, "work", {
           kind: "history-tool",
           name: body.name,
@@ -639,6 +662,7 @@ export async function createHarness({
   controller = new Controller(store, {
     probePath: join(dataDir, "connection-probe"),
     bridgeUrl: localOrigin,
+    browser: startProviders ? new Browser(dataDir) : null,
   });
   controller.on("event", (event) => {
     const data = `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;

@@ -70,7 +70,9 @@ export class Authentication {
 export function onHost(req, localOrigin) {
   const host = new URL(localOrigin).host;
   return (
-    ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress) &&
+    ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(
+      req.socket.remoteAddress,
+    ) &&
     [host, host.replace("127.0.0.1", "localhost")].includes(req.headers.host) &&
     !req.headers["cf-connecting-ip"] &&
     !req.headers["cf-access-jwt-assertion"]

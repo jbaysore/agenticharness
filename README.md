@@ -29,6 +29,8 @@ single-file edit, running a command, drafting a commit message) to a cheaper
 worker model on Claude Code or Codex. Harness works out each time whether the
 hand-off is cheaper and falls back when the worker's provider is out of usage;
 this too has only been checked with simulated providers.
+Every chat can also drive a shared Chrome on the host through Playwright MCP;
+each action that can change a page asks for approval.
 Remote access runs through a Cloudflare Tunnel behind Cloudflare Access; real
 endpoint and physical laptop/iPhone validation are pending. See [daily-use instructions](docs/OPERATIONS.md),
 [acceptance evidence](docs/ACCEPTANCE.md), [the delivery plan](docs/PLAN.md), and

@@ -3,6 +3,7 @@ import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { checkCodexBilling, publicCodexUsage } from "../security/billing.mjs";
 import { historyTools } from "../core/history.mjs";
+import { isBrowserTool } from "../core/browser.mjs";
 
 export function checkCodexRoute(config) {
   // config/read includes the official default even when the user set no override.
@@ -131,6 +132,21 @@ export async function runCodex(ctx) {
   rpc.on("request", async (message) => {
     try {
       const p = message.params;
+      if (message.method === "item/tool/call" && isBrowserTool(p.tool)) {
+        const result = await ctx.browser(p.tool, p.arguments);
+        rpc.respond(message.id, {
+          contentItems: (result.content ?? []).map((c) =>
+            c.type === "image"
+              ? {
+                  type: "inputImage",
+                  imageUrl: `data:${c.mimeType};base64,${c.data}`,
+                }
+              : { type: "inputText", text: c.text ?? JSON.stringify(c) },
+          ),
+          success: !result.isError,
+        });
+        return;
+      }
       if (message.method === "item/tool/call") {
         const result = await ctx.history(p.tool, p.arguments);
         rpc.respond(message.id, {

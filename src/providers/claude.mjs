@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { AsyncQueue } from "../core/queue.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
+import { isBrowserTool } from "../core/browser.mjs";
 const exec = promisify(execFile);
 
 export function claudeOptions(cwd) {
@@ -152,6 +153,14 @@ const delegationShapes = {
     staged: z.boolean().optional(),
   },
 };
+// Browser tools arrive as JSON schemas; one the SDK cannot take is left out.
+const browserShape = (schema) => {
+  try {
+    return z.fromJSONSchema(schema).shape;
+  } catch {
+    return null;
+  }
+};
 export async function runClaude(ctx) {
   const input = new AsyncQueue();
   let currentId = "initial";
@@ -227,6 +236,16 @@ export async function runClaude(ctx) {
                 },
               ],
             }),
+          ),
+        ),
+      // Harness asks the user before any browser action that can change a page.
+      ...(ctx.tools ?? [])
+        .filter((t) => isBrowserTool(t.name))
+        .map((t) => [t, browserShape(t.inputSchema)])
+        .filter(([, shape]) => shape)
+        .map(([t, shape]) =>
+          tool(t.name, t.description, shape, (args) =>
+            ctx.browser(t.name, args),
           ),
         ),
     ],

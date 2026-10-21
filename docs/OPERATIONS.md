@@ -229,6 +229,25 @@ Harness preserves that failure and the agent can request approval for a command
 outside the sandbox. Review that request; the app does not disable the sandbox
 globally or automatically approve the workaround.
 
+## Browser for agents
+
+Every Codex, Claude Code and Cursor chat can drive a browser through the
+`browser_*` tools (Playwright MCP). Harness runs one Chrome on the host PC and
+shares it between chats, so a page stays open between turns. It uses its own
+profile in `%LOCALAPPDATA%\AgenticHarness\browser\profile`, separate from your
+everyday Chrome: sign in to a site there once and the sign-in persists. Saved
+snapshots and screenshots go to `browser\output` beside it. The window is visible
+on the host PC; close it any time and the next browser action reopens it.
+
+Reading the page (snapshot, screenshot, find, console and network listings,
+waiting) needs no prompt. Anything that can change a page or leave this PC
+(navigating, clicking, typing, filling forms, running page script, uploading a
+file, managing tabs) asks for **Allow once**, titled with the action and its
+target, whichever agent asked. Playwright's tool for running arbitrary code on
+the host is never offered. Chats share the browser, so their actions run one at
+a time; Chrome must be installed. If the browser cannot start, the turn goes on
+without it and the work log says why.
+
 ## History and changing agents
 
 All chat text, run outcomes, tool activity, review comments, artifacts and decisions

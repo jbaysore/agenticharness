@@ -22,9 +22,24 @@ input.on("line", async (line) => {
         },
       });
     else if (m.method === "ping") reply({ id: m.id, result: {} });
-    else if (m.method === "tools/list")
-      reply({ id: m.id, result: { tools: historyTools } });
-    else if (m.method === "tools/call") {
+    else if (m.method === "tools/list") {
+      // The browser's tools are listed only while Harness offers them.
+      const response = await fetch(
+        process.env.HARNESS_BRIDGE_URL + "/internal/tools",
+        {
+          headers: {
+            Authorization: "Bearer " + process.env.HARNESS_BRIDGE_TOKEN,
+          },
+          signal: AbortSignal.timeout(15000),
+        },
+      ).catch(() => null);
+      reply({
+        id: m.id,
+        result: {
+          tools: response?.ok ? (await response.json()).tools : historyTools,
+        },
+      });
+    } else if (m.method === "tools/call") {
       const response = await fetch(
         process.env.HARNESS_BRIDGE_URL + "/internal/history",
         {
@@ -34,10 +49,14 @@ input.on("line", async (line) => {
             Authorization: "Bearer " + process.env.HARNESS_BRIDGE_TOKEN,
           },
           body: JSON.stringify(m.params),
-          signal: AbortSignal.timeout(15000),
+          // A browser action may wait for the user's approval.
+          signal: AbortSignal.timeout(
+            /^browser_/.test(m.params?.name) ? 15 * 60 * 1000 : 15000,
+          ),
         },
       );
       const value = await response.json();
+      if (value?.mcp) return reply({ id: m.id, result: value.mcp });
       reply({
         id: m.id,
         result: {
