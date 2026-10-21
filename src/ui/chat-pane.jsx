@@ -11,6 +11,66 @@ import {
   providerStatusLabel,
   workspacePeersLabel,
 } from "./status.mjs";
+import { elapsed, providerName, workingLine } from "./voice.mjs";
+
+// A turn's byline names the agent once, and the model only when it changed.
+function Conversation({ chat }) {
+  let lastModel = null;
+  return chat.messages.map((m, i) => {
+    if (m.role !== "assistant") return <UserTurn key={m.id} message={m} />;
+    const prev = chat.messages[i - 1],
+      sameTurn =
+        prev?.role === "assistant" &&
+        (prev.run_id ?? null) === (m.run_id ?? null),
+      model = !sameTurn && m.model !== lastModel ? m.model : null;
+    if (!sameTurn) lastModel = m.model;
+    return (
+      <article
+        className={"message assistant " + (m.provider ?? "")}
+        key={m.id}
+        id={m.id}
+      >
+        {!sameTurn && (
+          <div className="message-byline">
+            <span className={"provider-dot " + m.provider} />
+            <strong>{providerName(m.provider)}</strong>
+            {model && <span>{model}</span>}
+            <a href={`/?chat=${chat.id}#${m.id}`} title="Link to this message">
+              <Icon name="link" size={13} />
+            </a>
+          </div>
+        )}
+        <Markdown text={m.content} />
+      </article>
+    );
+  });
+}
+function UserTurn({ message }) {
+  const [open, setOpen] = useState(false),
+    text = message.content ?? "",
+    long = text.length > 520 || text.split("\n").length > 6;
+  return (
+    <article
+      className={"message user" + (long && !open ? " clamped" : "")}
+      id={message.id}
+    >
+      <Markdown text={text} />
+      {long && (
+        <button className="show-more" onClick={() => setOpen(!open)}>
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </article>
+  );
+}
+function Elapsed({ since }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <span>{since ? elapsed(since, now) : ""}</span>;
+}
 
 const permissionModes = [
   [
@@ -190,7 +250,7 @@ export function ChatPane({
     marker = chatMarker(chat);
   return (
     <section
-      className={"chat-pane" + (focused ? " focused" : "")}
+      className={"chat-pane " + provider + (focused ? " focused" : "")}
       aria-label={title}
       onPointerDown={onFocus}
       onFocus={onFocus}
@@ -273,40 +333,22 @@ export function ChatPane({
             </div>
           </div>
         ) : (
-          chat.messages.map((m) => (
-            <article className={"message " + m.role} key={m.id} id={m.id}>
-              {m.role === "assistant" && (
-                <div className="message-byline">
-                  <span className={"provider-dot " + m.provider} />
-                  <strong>
-                    {m.provider === "claude"
-                      ? "Claude Code"
-                      : m.provider === "cursor"
-                        ? "Cursor"
-                        : "Codex"}
-                  </strong>
-                  <span>{m.model}</span>
-                  <a
-                    href={`/?chat=${chat.id}#${m.id}`}
-                    title="Link to this message"
-                  >
-                    <Icon name="link" size={12} />
-                  </a>
-                </div>
-              )}
-              <Markdown text={m.content} />
-            </article>
-          ))
+          <Conversation chat={chat} />
         )}
-        {chat?.activeRun && (
-          <div className="working-indicator">
+        {chat?.activeRun && !chat.approvals?.length && (
+          <div
+            className={
+              "working-indicator " +
+              chat.activeRun.provider +
+              (chat.activeRun.status === "waiting" ? " waiting" : "")
+            }
+          >
             <span className="pulse-dot" />
-            {chat.activeRun.status === "waiting"
-              ? "Waiting for your approval"
-              : "Working"}
-            <span>
-              {chat.activeRun.provider} · {chat.activeRun.model}
-            </span>
+            {workingLine(
+              chat.activeRun.provider,
+              chat.activeRun.status === "waiting",
+            )}
+            <Elapsed since={chat.activeRun.created_at} />
           </div>
         )}
         {!chat?.activeRun && chat?.runs?.[0]?.status === "interrupted" && (
@@ -316,8 +358,8 @@ export function ChatPane({
           </div>
         )}
         {!chat?.activeRun && chat?.runs?.[0]?.status === "failed" && (
-          <div className="notice">
-            Work stopped:{" "}
+          <div className="notice failed">
+            <strong>Work stopped.</strong>{" "}
             {chat.runs[0].error ?? "The provider could not finish this turn."}{" "}
             Send a message to continue after resolving the issue.
           </div>
@@ -350,7 +392,7 @@ export function ChatPane({
             aria-label="Message your coding agent"
             placeholder={
               project
-                ? "Describe a task, ask a question, or request a review…"
+                ? `Ask ${providerName(provider)} anything…`
                 : "Add a project to start a conversation…"
             }
             value={draft}

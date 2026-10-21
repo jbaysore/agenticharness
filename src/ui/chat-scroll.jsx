@@ -64,6 +64,8 @@ export function useChatScroll(chat) {
       if (document.visibilityState === "hidden") remember();
     };
     restore();
+    // The bundled fonts can swap in after the first layout and reflow the text.
+    document.fonts?.ready.then(() => element.isConnected && restore());
     element.addEventListener("scroll", remember, { passive: true });
     // Pagehide catches a refresh even before the last scroll event is delivered.
     window.addEventListener("pagehide", remember);

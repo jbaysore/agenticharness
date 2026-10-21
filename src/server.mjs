@@ -658,7 +658,10 @@ export async function createHarness({
           "application/manifest+json",
         ],
       };
-      const asset = Object.hasOwn(assets, path) ? assets[path] : null;
+      const font = /^\/fonts\/[\w-]+\.woff2$/.test(path)
+        ? [path.slice(1), "font/woff2"]
+        : null;
+      const asset = Object.hasOwn(assets, path) ? assets[path] : font;
       if (!asset) return json(res, 404, { error: "Not found" });
       const [filename, contentType] = asset;
       let content = await readFile(join(root, "dist", filename));
@@ -673,7 +676,11 @@ export async function createHarness({
           );
         res.setHeader("Cache-Control", "no-store");
         res.setHeader("CDN-Cache-Control", "no-store");
-      } else res.setHeader("Cache-Control", "no-cache");
+      } else
+        res.setHeader(
+          "Cache-Control",
+          asset === font ? "public, max-age=31536000, immutable" : "no-cache",
+        );
       res.setHeader("Content-Type", contentType);
       res.end(content);
     } catch (error) {

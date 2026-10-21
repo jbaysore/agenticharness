@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import { providerName } from "./voice.mjs";
 
 const paths = {
   plus: "M12 5v14M5 12h14",
@@ -55,16 +56,40 @@ export function Mark() {
   );
 }
 export function Markdown({ text }) {
-  const html = DOMPurify.sanitize(
-    marked
-      .parse(text ?? "", { breaks: true })
-      .replace(
-        /href="harness:\/\/conversation\/([^"#]+)(#[^"]*)?"/g,
-        'href="/?chat=$1$2"',
-      ),
+  const html = useMemo(
+    () =>
+      DOMPurify.sanitize(
+        marked
+          .parse(text ?? "", { breaks: true })
+          .replace(
+            /href="harness:\/\/conversation\/([^"#]+)(#[^"]*)?"/g,
+            'href="/?chat=$1$2"',
+          ),
+      )
+        // Code blocks get a header naming the language, with a copy button.
+        .replace(
+          /<pre><code(?: class="language-([\w+#.-]+)")?>/g,
+          (open, lang) =>
+            `<div class="code-block"><div class="code-head"><span>${lang ?? "code"}</span><button type="button" data-copy>Copy</button></div>${open}`,
+        )
+        .replaceAll("</code></pre>", "</code></pre></div>"),
+    [text],
   );
+  const copy = (e) => {
+    const button = e.target.closest?.("[data-copy]");
+    if (!button) return;
+    const code = button.closest(".code-block")?.querySelector("code");
+    navigator.clipboard?.writeText(code?.textContent ?? "").then(() => {
+      button.textContent = "Copied";
+      setTimeout(() => (button.textContent = "Copy"), 1500);
+    });
+  };
   return (
-    <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />
+    <div
+      className="markdown"
+      onClick={copy}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
 export function Modal({ title, children, onClose, wide = false }) {
@@ -113,8 +138,12 @@ export function Approval({ approval, onAnswer }) {
     }
   };
   return (
-    <section className="approval">
-      <div className="eyebrow">YOUR INPUT IS NEEDED</div>
+    <section className={"approval " + (approval.provider ?? "")}>
+      <div className="eyebrow">
+        {r.kind === "question"
+          ? `${providerName(approval.provider)} has a question`
+          : `${providerName(approval.provider)} needs you`}
+      </div>
       <h3>{r.title}</h3>
       {r.kind === "question" ? (
         r.questions?.map((q) => (

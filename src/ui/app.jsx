@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/newsreader/opsz.css";
+import "@fontsource-variable/newsreader/opsz-italic.css";
 import "./style.css";
 import { api } from "./api.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
@@ -341,6 +344,7 @@ function App() {
               }
             : {
                 id: p.messageId,
+                run_id: e.runId,
                 role: "assistant",
                 provider: p.provider,
                 model: p.model,
