@@ -3,6 +3,7 @@ import { api } from "./api.mjs";
 import { Icon, Markdown, Approval } from "./components.jsx";
 import { readPending, savePending } from "./outbox.mjs";
 import { readDraft, saveDraft } from "./drafts.mjs";
+import { useChatScroll } from "./chat-scroll.jsx";
 import {
   chatMarker,
   chatMarkerLabel,
@@ -56,7 +57,7 @@ export function ChatPane({
     ),
     [draft, setDraft] = useState(() => readDraft(draftKey)),
     [busy, setBusy] = useState(false);
-  const bottom = useRef(null),
+  const messages = useChatScroll(chat),
     input = useRef(null),
     sending = useRef(false);
   const connected = providers.find((p) => p.id === provider),
@@ -116,10 +117,6 @@ export function ChatPane({
     if (selectedModel && effort && !selectedModel.efforts.includes(effort))
       setEffort("");
   }, [model]);
-  useEffect(() => {
-    if (bottom.current && chat?.activeRun)
-      bottom.current.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [chat?.messages?.at(-1)?.content]);
   async function send(override) {
     const text = typeof override === "string" ? override : draft;
     if (
@@ -223,6 +220,7 @@ export function ChatPane({
         </header>
       )}
       <div
+        ref={messages}
         className={"messages " + (chat?.messages?.length ? "" : "empty")}
         onClick={followLink}
       >
@@ -330,7 +328,6 @@ export function ChatPane({
             onAnswer={(answer) => api("/api/approvals/" + a.id, answer)}
           />
         ))}
-        <div ref={bottom} />
       </div>
       <div className="composer-area">
         {connected?.blockReason && (
