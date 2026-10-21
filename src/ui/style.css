@@ -1029,11 +1029,6 @@ small {
   font-size: 11px;
   color: #8c8c8c;
 }
-.composer-footer > span:first-child {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
 .composer-footer label {
   margin: 0;
   display: flex;

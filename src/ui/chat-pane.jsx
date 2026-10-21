@@ -451,10 +451,6 @@ export function ChatPane({
           </div>
         </form>
         <div className="composer-footer">
-          <span>
-            <Icon name="check" size={12} />
-            Subscription only
-          </span>
           <label
             className={"permissions-control " + permissions}
             title={permissionModes.find(([id]) => id === permissions)?.[2]}
