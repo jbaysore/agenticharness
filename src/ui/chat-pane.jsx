@@ -4,6 +4,7 @@ import { Icon, Markdown, Approval } from "./components.jsx";
 import { readPending, savePending } from "./outbox.mjs";
 import { readDraft, saveDraft } from "./drafts.mjs";
 import { useChatScroll } from "./chat-scroll.jsx";
+import { ModelPicker } from "./model-picker.jsx";
 import {
   chatMarker,
   chatMarkerLabel,
@@ -367,58 +368,18 @@ export function ChatPane({
             disabled={!project}
           />
           <div className="composer-controls">
-            <div className="model-control">
-              <span className={"provider-dot " + provider} />
-              <select
-                aria-label="Agent and model"
-                value={model ? provider + "|" + model : ""}
-                onChange={(e) => {
-                  if (!e.target.value) {
-                    setModel("");
-                    setEffort("");
-                    return;
-                  }
-                  const [p, ...m] = e.target.value.split("|");
-                  setProvider(p);
-                  setModel(m.join("|"));
-                  setEffort("");
-                }}
-              >
-                <option value="">Choose a model</option>
-                {providers.map((p) => (
-                  <optgroup label={p.name + " · " + p.route} key={p.id}>
-                    {p.models?.map((m) => (
-                      <option
-                        key={m.id}
-                        value={p.id + "|" + m.id}
-                        disabled={m.disabled}
-                      >
-                        {p.name} · {m.name}
-                        {m.disabled ? " · unavailable" : ""}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
-            <select
-              className="effort-select"
-              aria-label="Reasoning effort"
-              value={effort}
-              onChange={(e) => setEffort(e.target.value)}
-              disabled={!selectedModel?.efforts?.length}
-            >
-              <option value="">
-                {selectedModel?.efforts?.length
-                  ? "Choose effort"
-                  : "Provider preset"}
-              </option>
-              {selectedModel?.efforts?.map((e) => (
-                <option key={e} value={e}>
-                  {e[0].toUpperCase() + e.slice(1)}
-                </option>
-              ))}
-            </select>
+            <ModelPicker
+              providers={providers}
+              provider={provider}
+              model={model}
+              effort={effort}
+              onChange={(choice) => {
+                setProvider(choice.provider);
+                setModel(choice.model);
+                setEffort(choice.effort);
+              }}
+              onOpenConnections={onOpenConnections}
+            />
             <span className="composer-spacer" />
             {chat?.activeRun ? (
               <button

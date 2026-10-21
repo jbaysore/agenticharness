@@ -35,9 +35,20 @@ try {
     target.locator(`.chat-pane[aria-label="${title}"] .messages`);
   const top = (element) => element.evaluate((e) => Math.round(e.scrollTop));
   const scroll = (element, value) =>
-    element.evaluate((e, y) => {
-      e.scrollTop = y;
-    }, value);
+    element.evaluate(
+      (e, y) =>
+        new Promise((resolve) => {
+          const before = e.scrollTop,
+            done = () => resolve();
+          e.addEventListener("scroll", done, { once: true });
+          e.scrollTop = y;
+          if (e.scrollTop === before) {
+            e.removeEventListener("scroll", done);
+            resolve();
+          }
+        }),
+      value,
+    );
   const at = async (element, value) => {
     await expect.poll(() => top(element)).toBe(value);
   };
@@ -55,7 +66,9 @@ try {
   );
   await expect(messages(page).locator(".message")).toHaveCount(24);
   // Save even if a refresh arrives before the browser dispatches onscroll.
-  await scroll(messages(page), 900);
+  await messages(page).evaluate((e) => {
+    e.scrollTop = 900;
+  });
   await page.reload();
   await at(messages(page), 900);
   await scroll(messages(page), 0);

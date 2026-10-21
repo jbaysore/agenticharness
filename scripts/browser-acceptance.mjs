@@ -3,6 +3,7 @@ import { chromium, expect, devices } from "@playwright/test";
 import { resolve } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createHarness } from "../src/server.mjs";
+import { chooseModel } from "./model-picker-helpers.mjs";
 const app = await createHarness({
   dataDir: resolve(".local/acceptance"),
   port: 0,
@@ -40,19 +41,31 @@ try {
   await expect(page.locator(".message.assistant")).toHaveCount(
     app.store.messages(chat.id).filter((m) => m.role === "assistant").length,
   );
-  await page.getByLabel("Agent and model").selectOption("codex|gpt-6.1-sol");
-  await page.getByLabel("Reasoning effort").selectOption("high");
-  await expect(page.getByLabel("Reasoning effort")).toHaveValue("high");
+  await chooseModel(
+    page,
+    app.controller.providers,
+    "codex",
+    "gpt-6.1-sol",
+    "high",
+  );
+  await expect(page.getByLabel("Agent and model")).toContainText("High");
   const claude = app.controller.providers
     .find((p) => p.id === "claude")
     .models.find((m) => m.efforts.includes("medium"));
-  await page.getByLabel("Agent and model").selectOption("claude|" + claude.id);
-  await page.getByLabel("Reasoning effort").selectOption("medium");
+  await chooseModel(
+    page,
+    app.controller.providers,
+    "claude",
+    claude.id,
+    "medium",
+  );
   const cursor = app.controller.providers
     .find((p) => p.id === "cursor")
     .models.find((m) => !m.disabled);
-  await page.getByLabel("Agent and model").selectOption("cursor|" + cursor.id);
-  await expect(page.getByLabel("Reasoning effort")).toBeDisabled();
+  await chooseModel(page, app.controller.providers, "cursor", cursor.id);
+  await expect(page.locator(".model-summary")).toHaveText(
+    "Cursor · " + cursor.name,
+  );
   result.modelAndEffortControls = true;
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await page.getByRole("button", { name: "title.mjs M", exact: true }).click();

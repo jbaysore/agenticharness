@@ -1,5 +1,6 @@
 // Real provider cancellation plus browser-driven review/revision in the ignored fixture.
 import { createHarness } from "../src/server.mjs";
+import { chooseModel } from "./model-picker-helpers.mjs";
 import { randomUUID } from "node:crypto";
 import { resolve, join } from "node:path";
 import { writeFile, readFile } from "node:fs/promises";
@@ -92,7 +93,7 @@ try {
   const cursor = app.controller.providers
     .find((p) => p.id === "cursor")
     .models.find((m) => m.isDefault && !m.disabled);
-  await page.getByLabel("Agent and model").selectOption("cursor|" + cursor.id);
+  await chooseModel(page, app.controller.providers, "cursor", cursor.id);
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await page.getByRole("button", { name: "title.mjs M", exact: true }).click();
   await page

@@ -1,5 +1,6 @@
 // Actual browser/HTTP, explicitly simulated provider, no inference.
 import { createHarness } from "../src/server.mjs";
+import { chooseModel } from "./model-picker-helpers.mjs";
 import { chromium, expect } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -34,7 +35,7 @@ const browser = await chromium.launch({ channel: "msedge", headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(app.runtime.origin + "/#pair=" + app.auth.pairing());
-  await page.getByLabel("Agent and model").selectOption("codex|fixture");
+  await chooseModel(page, app.controller.providers, "codex", "fixture");
   await page
     .getByLabel("Message your coding agent")
     .fill("Accepted once even when the response is lost");

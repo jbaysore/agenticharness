@@ -1,6 +1,7 @@
 // Actual browser/HTTP with an explicitly simulated provider, no inference:
 // several chats running at once, side by side and in the background.
 import { createHarness } from "../src/server.mjs";
+import { chooseModel } from "./model-picker-helpers.mjs";
 import { chromium, expect } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -110,9 +111,14 @@ try {
   await row("Alpha").click();
   await row("Beta").click({ modifiers: ["Control"] });
   await expect(panes).toHaveCount(2);
-  await pane("Beta")
-    .getByLabel("Agent and model")
-    .selectOption("codex|fixture-b");
+  await chooseModel(
+    page,
+    controller.providers,
+    "codex",
+    "fixture-b",
+    "",
+    pane("Beta"),
+  );
   await composer("Beta").fill("half written");
   await composer("Alpha").fill("first task");
   await pane("Alpha").getByLabel("Send message").click();
@@ -135,11 +141,11 @@ try {
   await expect(page.locator(".work-panel .workspace-peers")).toContainText(
     "Alpha",
   );
-  await expect(pane("Alpha").getByLabel("Agent and model")).toHaveValue(
-    "codex|fixture",
+  await expect(pane("Alpha").locator(".model-summary")).toHaveText(
+    "Transport fixture · No inference fixture",
   );
-  await expect(pane("Beta").getByLabel("Agent and model")).toHaveValue(
-    "codex|fixture-b",
+  await expect(pane("Beta").locator(".model-summary")).toHaveText(
+    "Transport fixture · No inference fixture-b",
   );
   expect(store.conversation(beta.id).model).toBe("fixture-b");
   await expect(activeList.locator(".chat-row")).toHaveCount(2);
@@ -203,8 +209,8 @@ try {
   await expect(pane("Beta").locator(".message.assistant")).toContainText(
     "Working on: second task. Done.",
   );
-  await expect(pane("Beta").getByLabel("Agent and model")).toHaveValue(
-    "codex|fixture-b",
+  await expect(pane("Beta").locator(".model-summary")).toHaveText(
+    "Transport fixture · No inference fixture-b",
   );
   await expect(activeList).toHaveCount(0);
   await expect(page).toHaveTitle(/^Harness/);

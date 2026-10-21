@@ -2,6 +2,7 @@
 // inference: the Agent rules screen, a hand-off the host finds cheaper, one it
 // does itself, and each fallback.
 import { createHarness } from "../src/server.mjs";
+import { chooseModel } from "./model-picker-helpers.mjs";
 import { chromium, expect } from "@playwright/test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -156,7 +157,7 @@ try {
   expect(app.store.setting("agent-rules").delegate.actions.draft).toBe(false);
 
   // A long file is cheaper on the worker; the work log shows who answered and at what cost.
-  await page.getByLabel("Agent and model").selectOption("codex|gpt-6.1-sol");
+  await chooseModel(page, controller.providers, "codex", "gpt-6.1-sol");
   await ask("Find the part about line 900 in the big file");
   await expect(lastReply).toContainText("Worker said: claude found it");
   expect(jobs).toEqual([["claude", "haiku", null, "inline"]]);

@@ -110,7 +110,9 @@ try {
   await page.setViewportSize({ width: 1200, height: 900 });
   await leftHandle.press("End");
   await rightHandle.press("End");
-  expect(await width(page.locator(".chat-main"))).toBeGreaterThanOrEqual(390);
+  await expect
+    .poll(() => width(page.locator(".chat-main")))
+    .toBeGreaterThanOrEqual(390);
   await noOverflow();
   await leftHandle.press("Home");
   await rightHandle.press("Home");
