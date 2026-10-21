@@ -51,7 +51,8 @@ export function ChatRow({
   return (
     <div
       className={
-        "chat-row " + placement + (chat.archived_at ? " archived" : "")
+        `chat-row ${chat.provider} ${placement}` +
+        (chat.archived_at ? " archived" : "")
       }
       title={label || undefined}
     >

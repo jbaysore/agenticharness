@@ -11,7 +11,7 @@ import {
   providerStatusLabel,
   workspacePeersLabel,
 } from "./status.mjs";
-import { elapsed, providerName, workingLine } from "./voice.mjs";
+import { elapsed, greeting, providerName, workingLine } from "./voice.mjs";
 import { StepSummary } from "./steps.jsx";
 
 // A turn's byline names the agent once, and the model only when it changed.
@@ -297,49 +297,38 @@ export function ChatPane({
       >
         {!chat?.messages?.length ? (
           <div className="welcome">
-            <div className="eyebrow">ONE WORKSPACE. YOUR AGENTS.</div>
-            <h1>What are we building?</h1>
-            <p>
-              Start with a task, pick an agent, and keep the whole story
-              together.
-            </p>
+            <h1>{greeting()}</h1>
+            <p>{project ? "Who's on this one?" : "Add a project to begin."}</p>
             <div className="provider-cards">
-              {providers.map((p) => (
-                <button
-                  className={
-                    "provider-card " + (provider === p.id ? "chosen" : "")
-                  }
-                  key={p.id}
-                  onClick={() => setProvider(p.id)}
-                >
-                  <span className={"provider-emblem " + p.id}>
-                    {p.id === "codex" ? "C" : p.id === "claude" ? "✳" : "↗"}
-                  </span>
-                  <strong>{p.name}</strong>
-                  <span>
-                    <i
-                      className={
-                        "status-dot " +
-                        (!p.connected || p.blockReason ? "warning" : "")
-                      }
-                    />
-                    {providerStatusLabel(p)}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="starter-grid">
-              {[
-                "Explain this codebase",
-                "Review my current changes",
-                "Help me implement a feature",
-              ].map((t, i) => (
-                <button key={t} onClick={() => setDraft(t)}>
-                  <Icon name={["search", "review", "plus"][i]} />
-                  {t}
-                  <span>↗</span>
-                </button>
-              ))}
+              {providers.map((p) => {
+                const chosen = provider === p.id,
+                  ready = p.connected && !p.blockReason;
+                return (
+                  <button
+                    className={"provider-card " + p.id + (chosen ? " chosen" : "")}
+                    key={p.id}
+                    aria-pressed={chosen}
+                    onClick={() => setProvider(p.id)}
+                  >
+                    <strong>{p.name}</strong>
+                    <span className={ready ? "" : "warning"}>
+                      {!ready
+                        ? providerStatusLabel(p)
+                        : chosen && selectedModel
+                          ? [
+                              selectedModel.name,
+                              effort &&
+                                effort[0].toUpperCase() + effort.slice(1),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : chosen
+                            ? "Pick a model below"
+                            : "Ready"}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         ) : (
@@ -502,7 +491,7 @@ export function ChatPane({
               {workspacePeersLabel(peers)}
             </span>
           )}
-          {chat ? (
+          {chat && (
             <span
               className="history-scope"
               title="History access is fixed for this conversation. Set the default for new conversations in Connections & usage."
@@ -516,8 +505,6 @@ export function ChatPane({
                 }[chat.scope]
               }
             </span>
-          ) : (
-            <span>Code and history stay on your Windows host</span>
           )}
         </div>
       </div>

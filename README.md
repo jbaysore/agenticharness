@@ -59,7 +59,8 @@ included usage and edits an ignored fixture. Ordinary tests use no inference.
 
 All repository changes go directly to `main`, following [AGENTS.md](AGENTS.md).
 
-The app icon carries the UI's three white strokes onto a dark tile. Its editable
+The app icon carries the UI's three strokes, one in each agent's color (Codex
+blue, Claude Code orange, Cursor violet), onto a dark tile. Its editable
 source is `src/ui/icons/harness.svg`; `npm run build:icons` regenerates the committed
 PNG and multi-size Windows ICO assets using local Edge. Normal builds copy those
 assets for the browser, home-screen icon and installed desktop shortcut.

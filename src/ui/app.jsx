@@ -77,6 +77,9 @@ function App() {
     rightMax,
   } = useSidebarLayout(view.panes.length);
   const sidebarVisible = mobile ? sidebar : layout.leftOpen;
+  const usable = state.providers.filter(
+    (p) => p.connected && !p.blockReason,
+  ).length;
   const showPanel = docked ? layout.rightOpen : overlayPanel;
   const setShowPanel = (open) => {
     if (docked) setLayout((current) => ({ ...current, rightOpen: open }));
@@ -583,8 +586,7 @@ function App() {
       >
         <div className="brand">
           <Mark />
-          <span>Harness</span>
-          <span className="version">LOCAL</span>
+          <span className="wordmark">Harness</span>
           <button
             className="icon-button sidebar-close"
             aria-label="Collapse sidebar"
@@ -602,7 +604,7 @@ function App() {
           onClick={(e) => action(() => newChat(e.ctrlKey || e.metaKey))()}
         >
           <Icon name="plus" />
-          New conversation<span>＋</span>
+          New conversation
         </button>
         <button className="sidebar-action" onClick={() => setModal("search")}>
           <Icon name="search" />
@@ -610,7 +612,7 @@ function App() {
         </button>
         {active.length > 0 && (
           <>
-            <div className="section-label">ACTIVE</div>
+            <div className="section-label">Active</div>
             <div className="active-list" aria-label="Active chats">
               {active.map((c) =>
                 chatRow(
@@ -622,7 +624,7 @@ function App() {
           </>
         )}
         <div className="section-label">
-          PROJECTS
+          Projects
           <button
             className="icon-button"
             aria-label="Add project"
@@ -688,13 +690,12 @@ function App() {
           >
             <Icon name="settings" />
             <span>Connections & usage</span>
-            <span className="connection-count">
-              {
-                state.providers.filter((p) => p.connected && !p.blockReason)
-                  .length
-              }
-              /3
-            </span>
+            {/* Only worth a look when an agent can't work. */}
+            {usable < state.providers.length && (
+              <span className="connection-count attention">
+                {usable}/{state.providers.length}
+              </span>
+            )}
           </button>
           <button className="sidebar-action" onClick={() => setModal("rules")}>
             <Icon name="rules" />
@@ -703,12 +704,12 @@ function App() {
               {state.rules?.delegate.enabled ? "On" : ""}
             </span>
           </button>
-          <div className="host-status">
-            <span className={"status-dot " + (!online ? "offline" : "")} />
-            <span>
-              {online ? "Windows host connected" : "Reconnecting to host…"}
-            </span>
-          </div>
+          {!online && (
+            <div className="host-status">
+              <span className="status-dot offline" />
+              <span>Reconnecting to your PC…</span>
+            </div>
+          )}
         </div>
         <ResizeHandle
           side="left"
@@ -738,14 +739,6 @@ function App() {
             <b>/</b>
             <strong>{chat?.title ?? "New conversation"}</strong>
           </div>
-          {view.panes.length > shown.length && (
-            <span
-              className="badge"
-              title="Widen the window or collapse the sidebar to show every open chat."
-            >
-              {shown.length} of {view.panes.length} chats shown
-            </span>
-          )}
           {!mobile && (
             <button
               className="icon-button"

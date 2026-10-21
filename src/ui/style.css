@@ -315,12 +315,20 @@ small {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 18px;
-  letter-spacing: -0.4px;
+  gap: 10px;
   margin: 0 0 24px 6px;
-  font-weight: 600;
 }
+.wordmark {
+  font-family: var(--font-prose);
+  font-size: 23px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  line-height: 1;
+}
+.brand .sidebar-close {
+  margin-left: auto;
+}
+/* Three strokes, one per agent. */
 .brand-mark {
   position: relative;
   display: inline-flex;
@@ -335,64 +343,58 @@ small {
   height: 22px;
   width: 5px;
   display: block;
-  background: var(--text);
+  background: var(--codex);
   transform: skew(-15deg);
   border-radius: 2px;
 }
 .brand-mark i:nth-child(2) {
   height: 15px;
+  background: var(--claude);
 }
 .brand-mark i:nth-child(3) {
   height: 9px;
-}
-.version {
-  font-size: 12px;
-  letter-spacing: 1.3px;
-  margin-left: auto;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  padding: 4px 5px;
-  color: var(--text-2);
+  background: var(--cursor);
 }
 .new-chat {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 11px 12px;
+  padding: 10px 12px;
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: var(--surface-2);
+  border-radius: 10px;
+  background: var(--surface);
   text-align: left;
   width: 100%;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
 }
-.new-chat > span {
-  margin-left: auto;
-  color: var(--text-3);
+.new-chat:hover {
+  background: var(--surface-2);
 }
 .sidebar-action {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 10px 11px;
+  padding: 9px 11px;
   color: var(--text-2);
   width: 100%;
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
-  border-radius: 7px;
+  border-radius: 8px;
 }
 .sidebar-action:hover {
   background: var(--surface);
+  color: var(--text);
 }
 .section-label {
   color: var(--text-3);
   font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 1.5px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 31px 8px 7px 12px;
+  margin: 28px 8px 6px 12px;
 }
 .section-label button {
   width: 20px;
@@ -401,18 +403,20 @@ small {
 .project-list {
   overflow: auto;
   flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
 .project-row {
   display: flex;
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 9px 11px;
+  padding: 8px 11px;
   text-align: left;
   color: var(--text-2);
-  border-radius: 7px;
-  font-weight: 550;
-  font-size: 12px;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 13px;
 }
 .project-row > span {
   overflow: hidden;
@@ -423,10 +427,10 @@ small {
   margin-left: auto;
   color: var(--text-3);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .project-row.selected {
   color: var(--text);
-  background: var(--surface);
 }
 .chat-row {
   position: relative;
@@ -436,9 +440,9 @@ small {
   width: calc(100% - 17px);
   margin-left: 17px;
   padding-right: 9px;
-  font-size: 12px;
-  color: var(--text-3);
-  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+  border-radius: 8px;
 }
 .active-list .chat-row {
   width: 100%;
@@ -534,7 +538,11 @@ small {
   pointer-events: auto;
 }
 .chat-row.selected .row-actions {
-  background: linear-gradient(90deg, transparent, var(--surface-2) 14px);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--agent) 13%, var(--bg-sunken)) 14px
+  );
 }
 .row-actions .icon-button {
   width: 23px;
@@ -557,15 +565,15 @@ small {
 }
 .chat-row.selected {
   color: var(--text);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--agent) 13%, var(--bg-sunken));
 }
 .chat-row.open {
-  color: var(--text-2);
+  color: var(--text);
   background: var(--hover);
 }
 .chat-row .provider-dot {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
 }
 .sidebar-bottom {
   margin-top: auto;
@@ -575,14 +583,19 @@ small {
 .connection-count {
   margin-left: auto;
   font-size: 12px;
-  color: var(--text-2);
+  color: var(--text-3);
+}
+.connection-count.attention {
+  color: var(--signal);
+  font-weight: 600;
 }
 .host-status {
   display: flex;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--text-3);
-  padding: 11px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--danger-ink);
+  padding: 10px 11px;
 }
 .sidebar-hint {
   font-size: 12px;
@@ -659,25 +672,24 @@ small {
   .composer-area {
     padding: 8px 14px 14px;
   }
-  .welcome {
-    margin: 6vh auto 26px;
-  }
   .welcome h1 {
-    font-size: 26px;
+    font-size: 32px;
   }
   .welcome > p {
-    margin-bottom: 22px;
+    margin-bottom: 24px;
   }
   .provider-cards {
-    gap: 7px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    max-width: 340px;
   }
   .provider-card {
-    padding: 12px 10px;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
   }
-}
-.topbar .badge {
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 .topbar {
   height: 61px;
@@ -694,7 +706,7 @@ small {
   gap: 13px;
   min-width: 0;
   flex: 1;
-  font-size: 12px;
+  font-size: 13px;
 }
 .breadcrumbs > span {
   color: var(--text-2);
@@ -720,7 +732,7 @@ small {
   scrollbar-color: var(--line-strong) transparent;
 }
 .welcome {
-  max-width: 650px;
+  max-width: 640px;
   margin: clamp(32px, 11vh, 130px) auto 40px;
   text-align: center;
 }
@@ -734,151 +746,80 @@ small {
   margin: auto;
   width: 100%;
 }
-@media (max-height: 800px) {
-  .messages.empty {
-    padding-top: 18px;
-    padding-bottom: 18px;
-  }
-  .welcome .eyebrow {
-    margin-bottom: 12px;
-  }
-  .welcome > p,
-  .provider-cards {
-    margin-bottom: 20px;
-  }
+.welcome h1 {
+  font-family: var(--font-prose);
+  font-size: clamp(34px, 3.2vw, 46px);
+  font-weight: 400;
+  letter-spacing: -0.6px;
+  line-height: 1.1;
+  margin-bottom: 10px;
+  color: var(--text);
 }
-/* 1080p at 125% scaling leaves about 700px; tighten again so it still fits. */
+.welcome > p {
+  font-family: var(--font-prose);
+  font-style: italic;
+  font-size: 19px;
+  color: var(--text-2);
+  margin: 0 auto 34px;
+  line-height: 1.4;
+}
+.provider-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.provider-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px 16px 15px;
+  text-align: left;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  transition:
+    border-color var(--dur),
+    background var(--dur);
+}
+.provider-card:hover {
+  border-color: color-mix(in srgb, var(--agent) 50%, var(--line-strong));
+}
+.provider-card.chosen {
+  border-color: var(--agent);
+  background: color-mix(in srgb, var(--agent) 10%, var(--surface));
+}
+.provider-card strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--agent-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.provider-card > span {
+  font-size: 13px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.provider-card.chosen > span {
+  color: var(--text-2);
+}
+.provider-card > span.warning {
+  color: var(--signal);
+}
 @media (max-height: 720px) {
   .messages.empty {
     padding-top: 12px;
     padding-bottom: 12px;
   }
-  .welcome .eyebrow {
-    margin-bottom: 8px;
+  .welcome > p {
+    margin-bottom: 24px;
   }
-  .messages .welcome h1 {
-    font-size: 32px;
-    margin-bottom: 8px;
-  }
-  .welcome > p,
-  .welcome .provider-cards {
-    margin-bottom: 14px;
-  }
-  .welcome .provider-card {
-    padding: 11px 12px;
-  }
-  .welcome .provider-emblem {
-    height: 22px;
-    margin-bottom: 8px;
-  }
-  .welcome .starter-grid {
-    gap: 5px;
-  }
-  .welcome .starter-grid button {
-    padding: 9px 12px;
-  }
-}
-.eyebrow {
-  font-size: 12px;
-  letter-spacing: 2px;
-  color: var(--text-2);
-  font-weight: 600;
-  margin-bottom: 17px;
-}
-.welcome h1 {
-  font-size: clamp(28px, 2.6vw, 39px);
-  font-weight: 460;
-  letter-spacing: -1.4px;
-  margin-bottom: 13px;
-  color: var(--text);
-}
-.welcome > p {
-  color: var(--text-2);
-  font-size: 12px;
-  max-width: 390px;
-  margin: 0 auto 30px;
-  line-height: 1.8;
-}
-.provider-cards {
-  display: flex;
-  gap: 12px;
-  max-width: 445px;
-  margin: 0 auto 30px;
-}
-.provider-card {
-  flex: 1;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  border-radius: 10px;
-  text-align: left;
-  padding: 15px 14px;
-  min-width: 0;
-  transition:
-    border 0.15s,
-    background 0.15s;
-}
-.provider-card.chosen {
-  border-color: var(--text-3);
-  background: var(--surface-3);
-  box-shadow: 0 0 0 1px #52525222;
-}
-.provider-emblem {
-  font-size: 18px;
-  color: var(--text);
-  height: 25px;
-  display: block;
-  margin-bottom: 12px;
-  font-weight: 500;
-}
-.provider-emblem.claude {
-  color: var(--text-2);
-  font-size: 24px;
-  line-height: 1;
-}
-.provider-emblem.cursor {
-  color: var(--text);
-  font-size: 24px;
-  line-height: 1;
-}
-.provider-card strong {
-  display: block;
-  font-size: 12px;
-  font-weight: 550;
-  margin-bottom: 9px;
-  white-space: nowrap;
-}
-.provider-card > span:last-child {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--text-2);
-}
-.provider-card .status-dot {
-  width: 4px;
-  height: 4px;
-}
-.starter-grid {
-  display: grid;
-  gap: 7px;
-  max-width: 445px;
-  margin: auto;
-}
-.starter-grid button {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 12px;
-  color: var(--text-2);
-  text-align: left;
-  font-size: 12px;
-}
-.starter-grid button > span {
-  margin-left: auto;
-  color: var(--text-3);
 }
 /* A conversation reads like a document: the agent's replies are set in a serif and
    the byline appears once per turn. */
@@ -2401,9 +2342,6 @@ small {
   width: 100%;
 }
 @media (min-width: 1650px) {
-  .welcome {
-    margin-top: 16vh;
-  }
   .messages {
     padding-top: 45px;
   }
@@ -2426,17 +2364,8 @@ small {
     padding-left: 20px;
     padding-right: 20px;
   }
-  .provider-cards {
-    gap: 8px;
-  }
-  .provider-card {
-    padding: 13px;
-  }
 }
 @media (max-width: 700px) {
-  :root {
-    font-size: 13px;
-  }
   .workspace,
   .workspace.with-panel {
     display: flex;
@@ -2467,28 +2396,6 @@ small {
   }
   .messages {
     padding: 22px 18px;
-  }
-  .welcome {
-    margin: 8vh auto 30px;
-  }
-  .welcome h1 {
-    font-size: 30px;
-  }
-  .welcome > p {
-    max-width: 290px;
-    font-size: 12px;
-  }
-  .provider-cards {
-    gap: 7px;
-  }
-  .provider-card {
-    padding: 12px 10px;
-  }
-  .provider-card strong {
-    font-size: 12px;
-  }
-  .provider-card > span:last-child {
-    font-size: 12px;
   }
   .composer-area {
     padding: 8px 12px max(12px, env(safe-area-inset-bottom));

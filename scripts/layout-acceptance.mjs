@@ -18,7 +18,7 @@ try {
   app.store.addMessage({
     conversationId: chat.id,
     role: "user",
-    content: "Check the neutral workspace and adjustable sidebars.",
+    content: "Check the editorial workspace and adjustable sidebars.",
   });
   for (const title of ["Second chat", "Third chat"])
     app.store.addMessage({
@@ -102,7 +102,7 @@ try {
   await expect.poll(() => width(right)).toBe(460);
   await noOverflow();
   await page.screenshot({
-    path: ".local/screenshots/neutral-desktop.png",
+    path: ".local/screenshots/editorial-desktop.png",
     fullPage: true,
   });
 
@@ -188,7 +188,6 @@ try {
   await page.setViewportSize({ width: 1200, height: 900 });
   await expect(panes).toHaveCount(2);
   await expect(focused).toHaveAttribute("aria-label", "Second chat");
-  await expect(page.getByText("2 of 3 chats shown")).toBeVisible();
   await noOverflow();
   await page.setViewportSize({ width: 1920, height: 1000 });
   await expect(panes).toHaveCount(3);
@@ -235,7 +234,7 @@ try {
   await phone.getByLabel("Close work panel").click();
   await noOverflow(phone);
   await phone.screenshot({
-    path: ".local/screenshots/neutral-phone.png",
+    path: ".local/screenshots/editorial-phone.png",
     fullPage: true,
   });
 
