@@ -32,6 +32,11 @@ import {
   visiblePanes,
 } from "./panes.mjs";
 
+// The host names this page's script by the build it served (/app.js?v=…).
+const loadedBuild = new URL(
+  document.querySelector('script[src*="app.js"]')?.src ?? location.href,
+).searchParams.get("v");
+
 function App() {
   const [state, setState] = useState({
       projects: [],
@@ -108,7 +113,7 @@ function App() {
     limit = useRef(paneLimit),
     marking = useRef(new Set()),
     errorTimer = useRef(null),
-    build = useRef(null);
+    build = useRef(loadedBuild);
   limit.current = paneLimit;
   const report = useCallback((e) => {
     setError(e.message ?? String(e));
@@ -179,8 +184,9 @@ function App() {
     savePanes(view);
   }, [openIds.join(","), view.focused, ready]);
   useEffect(() => {
-    let ignore = false;
-    (async () => {
+    let ignore = false,
+      retry;
+    const start = async (attempt = 0) => {
       try {
         const fragment = new URLSearchParams(location.hash.slice(1));
         if (fragment.has("pair")) {
@@ -225,31 +231,49 @@ function App() {
             found.find((c) => c.id === focusedPane(restored).chatId).project_id,
           );
         }
+        setOnline(true);
         setReady(true);
       } catch (e) {
+        if (ignore) return;
         if (e.status === 401) setNeedsPair(true);
         else {
-          report(e);
-          setNeedsPair(true);
+          // An unreachable host is not a pairing problem; keep trying.
+          setOnline(false);
+          retry = setTimeout(
+            () => start(attempt + 1),
+            Math.min(1000 * 2 ** attempt, 10000),
+          );
         }
       }
-    })();
+    };
+    start();
     return () => {
       ignore = true;
+      clearTimeout(retry);
     };
   }, []);
   // A page keeps running the code it loaded with, so after a rebuild or a
   // restart from Hub it reloads itself. Drafts and unsent messages are saved.
+  // Hub rebuilds before it restarts the host, so a new build is trusted only
+  // once the same host has reported it twice, a few seconds apart.
   async function checkBuild() {
-    const latest = await fetch("/health", { cache: "no-store" })
-      .then((r) => r.json())
-      .then(
-        (h) => h.build,
-        () => null,
-      );
-    if (!latest) return;
-    if (build.current && build.current !== latest) location.reload();
-    else build.current = latest;
+    const health = () =>
+      fetch("/health", { cache: "no-store" })
+        .then((r) => r.json())
+        .then(
+          (h) => h.build && `${h.instanceId} ${h.build}`,
+          () => null,
+        );
+    const first = await health();
+    if (!first) return;
+    const latest = first.split(" ")[1];
+    if (!build.current) {
+      build.current = latest;
+      return;
+    }
+    if (build.current === latest) return;
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    if ((await health()) === first) location.reload();
   }
   useEffect(() => {
     const visible = () =>
@@ -502,7 +526,11 @@ function App() {
     return (
       <main className="pair-page">
         <Mark />
-        <p>Opening your workspace…</p>
+        <p>
+          {online
+            ? "Opening your workspace…"
+            : "Waiting for Harness on your Windows computer. It may be restarting; this page keeps trying."}
+        </p>
       </main>
     );
   return (
