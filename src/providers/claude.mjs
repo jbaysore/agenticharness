@@ -112,18 +112,20 @@ export async function inspectClaude(cwd) {
       connected: true,
       blockReason: verification.reason,
       usage: verification.usage,
-      models: models.map((m) => ({
-        id: m.value,
-        name: m.displayName,
-        resolvedModel: m.resolvedModel,
-        description: m.description,
-        efforts: m.supportedEffortLevels ?? [],
-        defaultEffort: m.supportedEffortLevels?.includes("medium")
-          ? "medium"
-          : null,
-        isDefault: m.value === "default",
-        billing: "Included usage · fast mode off",
-      })),
+      // The SDK's "Default (recommended)" entry only aliases another model.
+      models: models
+        .filter((m) => m.value !== "default")
+        .map((m) => ({
+          id: m.value,
+          name: m.displayName,
+          resolvedModel: m.resolvedModel,
+          description: m.description,
+          efforts: m.supportedEffortLevels ?? [],
+          defaultEffort: m.supportedEffortLevels?.includes("medium")
+            ? "medium"
+            : null,
+          billing: "Included usage · fast mode off",
+        })),
       capabilities: {
         nativeResume: true,
         nativeSubagents: true,
