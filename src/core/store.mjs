@@ -64,6 +64,10 @@ export class Store {
     if (!columns("runs").includes("error"))
       this.db.exec("ALTER TABLE runs ADD COLUMN error TEXT");
     const conversation = columns("conversations");
+    if (!conversation.includes("permissions"))
+      this.db.exec(
+        "ALTER TABLE conversations ADD COLUMN permissions TEXT NOT NULL DEFAULT 'manual'",
+      );
     if (!conversation.includes("archived_at"))
       this.db.exec("ALTER TABLE conversations ADD COLUMN archived_at TEXT");
     // Existing history starts out read; only later turns can mark a chat unread.
@@ -153,6 +157,7 @@ export class Store {
     provider = "codex",
     model = "",
     effort = null,
+    permissions = "manual",
     scope = "project",
     createdAt,
   }) {
@@ -160,9 +165,20 @@ export class Store {
       now = createdAt || this.now();
     this.db
       .prepare(
-        "INSERT INTO conversations(id,project_id,title,provider,model,effort,scope,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO conversations(id,project_id,title,provider,model,effort,permissions,scope,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
       )
-      .run(id, projectId, title, provider, model, effort, scope, now, now);
+      .run(
+        id,
+        projectId,
+        title,
+        provider,
+        model,
+        effort,
+        permissions,
+        scope,
+        now,
+        now,
+      );
     return this.conversation(id);
   }
   updateConversation(id, fields) {
@@ -171,6 +187,7 @@ export class Store {
       "provider",
       "model",
       "effort",
+      "permissions",
       "scope",
       "sessions",
     ]);

@@ -98,7 +98,12 @@ function App() {
   const tracked = useRef(new Set()),
     lastEvent = useRef(0),
     floors = useRef({}),
-    selection = useRef({ provider: "codex", model: "", effort: "" }),
+    selection = useRef({
+      provider: "codex",
+      model: "",
+      effort: "",
+      permissions: "manual",
+    }),
     paneRefs = useRef({}),
     limit = useRef(paneLimit),
     marking = useRef(new Set()),

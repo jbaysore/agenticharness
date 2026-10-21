@@ -101,6 +101,25 @@ export async function inspectCodex(cwd) {
     rpc.close();
   }
 }
+// Harness's permission modes in Codex's terms: its auto-review subagent decides
+// sandbox escapes in auto, and override drops both the prompts and the sandbox.
+const permissionModes = {
+  manual: {
+    approvalPolicy: "untrusted",
+    approvalsReviewer: "user",
+    sandbox: "workspace-write",
+  },
+  auto: {
+    approvalPolicy: "on-request",
+    approvalsReviewer: "auto_review",
+    sandbox: "workspace-write",
+  },
+  override: {
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    sandbox: "danger-full-access",
+  },
+};
 export async function runCodex(ctx) {
   const rpc = await openCodex(ctx.project.path);
   let turnId,
@@ -242,6 +261,20 @@ export async function runCodex(ctx) {
         itemId: p.itemId,
         delta: p.delta,
       });
+    if (method === "item/autoApprovalReview/completed")
+      ctx.emit("work", {
+        kind: "auto-review",
+        provider: "codex",
+        item: {
+          title: `Auto-review ${p.review?.status ?? "finished"}: ${p.action?.command ?? p.action?.program ?? p.action?.type ?? "agent action"}`,
+          description: [
+            p.review?.riskLevel && `${p.review.riskLevel} risk`,
+            p.review?.rationale,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        },
+      });
     if (method === "turn/plan/updated")
       ctx.emit("work", { kind: "plan", ...p });
     if (method === "thread/tokenUsage/updated")
@@ -268,9 +301,7 @@ export async function runCodex(ctx) {
       model: ctx.model,
       modelProvider: "openai",
       serviceTier: "default",
-      approvalPolicy: "untrusted",
-      approvalsReviewer: "user",
-      sandbox: "workspace-write",
+      ...permissionModes[ctx.permissions ?? "manual"],
       developerInstructions: ctx.instructions,
       config: {
         model_provider: "openai",

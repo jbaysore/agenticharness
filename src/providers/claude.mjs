@@ -27,6 +27,16 @@ export function claudeOptions(cwd) {
     extraArgs: { "forward-subagent-text": null },
   };
 }
+// Harness's permission modes in Claude Code's terms. Auto mode's classifier
+// still asks through canUseTool when it cannot decide.
+const permissionModes = {
+  manual: { permissionMode: "default" },
+  auto: { permissionMode: "auto" },
+  override: {
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
+  },
+};
 export function checkClaudeBilling(auth, usage) {
   if (
     !auth.loggedIn ||
@@ -254,6 +264,7 @@ export async function runClaude(ctx) {
     prompt: input,
     options: {
       ...claudeOptions(ctx.project.path),
+      ...permissionModes[ctx.permissions ?? "manual"],
       model: ctx.model,
       effort: ctx.effort || undefined,
       resume: ctx.session?.id,

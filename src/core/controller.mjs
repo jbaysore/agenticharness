@@ -25,6 +25,10 @@ import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { browserTitle } from "./browser.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 
+// Who answers an agent's permission requests: a provider's own reviewer (auto),
+// the user (manual), or nobody, because everything is allowed (override).
+export const PERMISSION_MODES = ["auto", "manual", "override"];
+
 export class Controller extends EventEmitter {
   constructor(store, { probePath, bridgeUrl, browser = null }) {
     super();
@@ -79,7 +83,7 @@ export class Controller extends EventEmitter {
     });
     return this.refreshing;
   }
-  send(chatId, { actionId, text, provider, model, effort }) {
+  send(chatId, { actionId, text, provider, model, effort, permissions }) {
     const chat = this.store.conversation(chatId);
     if (!chat) throw new Error("Conversation not found");
     if (typeof text !== "string" || !text.trim() || text.length > 250000)
@@ -88,6 +92,9 @@ export class Controller extends EventEmitter {
       throw new Error("A stable action ID is required");
     if (!["codex", "claude", "cursor"].includes(provider))
       throw new Error("Unknown agent");
+    permissions ??= chat.permissions;
+    if (!PERMISSION_MODES.includes(permissions))
+      throw new Error("Choose auto-review, manual review or override");
     const prior = this.store.runForAction(actionId);
     if (prior) {
       if (prior.conversation_id !== chatId)
@@ -118,6 +125,7 @@ export class Controller extends EventEmitter {
       provider,
       model,
       effort: effort || null,
+      permissions,
     });
     this.event(chatId, run.id, "run", { status: "starting", provider, model });
     const task = this.execute(run, text.trim(), effort, abort).catch(
@@ -136,7 +144,8 @@ export class Controller extends EventEmitter {
       this.providers
         .find((p) => p.id === run.provider)
         ?.models.find((m) => m.id === run.model)?.resolvedModel ?? run.model;
-    const token = randomBytes(32).toString("base64url");
+    const permissions = chat.permissions,
+      token = randomBytes(32).toString("base64url");
     this.bridgeTokens.set(token, chat.id);
     let status = "failed",
       error;
@@ -171,6 +180,29 @@ export class Controller extends EventEmitter {
       if (type === "usage") payload = { ...payload, provider: run.provider };
       this.event(chat.id, run.id, type, payload);
     };
+    // Override answers every permission request itself and logs it; questions
+    // for the user still reach the user.
+    const approve = (request) => {
+      if (permissions !== "override" || request.kind === "question")
+        return this.waitApproval(run, request, abort.signal);
+      emit("work", {
+        kind: "auto-approved",
+        item: {
+          title: `Allowed without review: ${request.title ?? "agent action"}`,
+          description: "Permissions are set to Override.",
+        },
+      });
+      return Promise.resolve({ allow: true, answers: {} });
+    };
+    if (permissions === "auto" && run.provider === "cursor")
+      emit("work", {
+        kind: "permissions-fallback",
+        item: {
+          title: "Cursor has no automatic reviewer",
+          description:
+            "Cursor's permission requests come to you this turn, as in Manual review.",
+        },
+      });
     const messages = this.store.messages(chat.id);
     const lastAgent = messages
       .filter((m) => m.role === "assistant")
@@ -265,11 +297,11 @@ export class Controller extends EventEmitter {
       const input = typeof args === "string" ? JSON.parse(args) : (args ?? {}),
         title = browserTitle(name, input);
       if (await this.browser.needsApproval(name)) {
-        const answer = await this.waitApproval(
-          run,
-          { kind: "permission", title, details: { tool: name, input } },
-          abort.signal,
-        );
+        const answer = await approve({
+          kind: "permission",
+          title,
+          details: { tool: name, input },
+        });
         if (!answer.allow)
           return {
             isError: true,
@@ -289,6 +321,7 @@ export class Controller extends EventEmitter {
       text,
       model: run.model,
       effort,
+      permissions,
       session,
       handoff: [notice, handoff].filter(Boolean).join("\n\n"),
       instructions:
@@ -327,7 +360,7 @@ export class Controller extends EventEmitter {
         });
         return result;
       },
-      approve: (request) => this.waitApproval(run, request, abort.signal),
+      approve,
       mcpServers: [
         {
           name: "harness-history",

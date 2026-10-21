@@ -6,7 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { Store } from "./core/store.mjs";
-import { Controller } from "./core/controller.mjs";
+import { Controller, PERMISSION_MODES } from "./core/controller.mjs";
 import {
   Authentication,
   onHost,
@@ -357,6 +357,9 @@ export async function createHarness({
             provider: body.provider ?? "codex",
             model: body.model ?? "",
             effort: body.effort ?? null,
+            permissions: PERMISSION_MODES.includes(body.permissions)
+              ? body.permissions
+              : "manual",
           });
           controller.event(chat.id, null, "chat", chat);
           return json(res, 201, chat);

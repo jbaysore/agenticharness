@@ -10,6 +10,20 @@ import {
   workspacePeersLabel,
 } from "./status.mjs";
 
+const permissionModes = [
+  [
+    "auto",
+    "Auto-review",
+    "The agent's own reviewer approves or declines risky actions. Claude Code uses auto mode and Codex its auto-review; Cursor and browser actions still ask you.",
+  ],
+  ["manual", "Manual review", "You approve each action the agent asks about."],
+  [
+    "override",
+    "Override",
+    "Everything is allowed without asking, including commands outside the sandbox. Questions from the agent still come to you.",
+  ],
+];
+
 export function ChatPane({
   ref,
   chat,
@@ -37,6 +51,9 @@ export function ChatPane({
     [effort, setEffort] = useState(
       chat ? (chat.effort ?? "") : selection.effort,
     ),
+    [permissions, setPermissions] = useState(
+      chat ? chat.permissions : selection.permissions,
+    ),
     [draft, setDraft] = useState(() => readDraft(draftKey)),
     [busy, setBusy] = useState(false);
   const bottom = useRef(null),
@@ -48,8 +65,8 @@ export function ChatPane({
     saveDraft(draftKey, draft);
   }, [draftKey, draft]);
   useEffect(() => {
-    onSelection({ provider, model, effort });
-  }, [provider, model, effort]);
+    onSelection({ provider, model, effort, permissions });
+  }, [provider, model, effort, permissions]);
   // A saved chat brings its own agent. An unconfirmed send is settled with the
   // host before its text is restored, so it is never submitted twice.
   useEffect(() => {
@@ -57,6 +74,7 @@ export function ChatPane({
     setProvider(chat.provider);
     setModel(chat.model);
     setEffort(chat.effort ?? "");
+    setPermissions(chat.permissions);
     const pending = readPending(chat.id);
     if (!pending || sending.current) return;
     let ignore = false;
@@ -72,6 +90,7 @@ export function ChatPane({
         setProvider(pending.provider);
         setModel(pending.model);
         setEffort(pending.effort ?? "");
+        if (pending.permissions) setPermissions(pending.permissions);
         report(
           new Error(
             "Your unconfirmed message was restored. Sending it again uses the same action ID.",
@@ -115,14 +134,16 @@ export function ChatPane({
     setBusy(true);
     sending.current = true;
     try {
-      const c = chat ?? (await ensureChat({ provider, model, effort }));
+      const c =
+        chat ?? (await ensureChat({ provider, model, effort, permissions }));
       if (!chat) saveDraft(draftKey, "");
       const prior = readPending(c.id);
       const body =
         prior &&
         prior.text === text &&
         prior.provider === provider &&
-        prior.model === model
+        prior.model === model &&
+        prior.permissions === permissions
           ? prior
           : {
               chatId: c.id,
@@ -131,6 +152,7 @@ export function ChatPane({
               provider,
               model,
               effort: effort || null,
+              permissions,
             };
       savePending(c.id, body);
       await api(`/api/chats/${c.id}/messages`, body);
@@ -433,6 +455,23 @@ export function ChatPane({
             <Icon name="check" size={12} />
             Subscription only
           </span>
+          <label
+            className={"permissions-control " + permissions}
+            title={permissionModes.find(([id]) => id === permissions)?.[2]}
+          >
+            <span>Permissions</span>
+            <select
+              aria-label="Permissions"
+              value={permissions}
+              onChange={(e) => setPermissions(e.target.value)}
+            >
+              {permissionModes.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
           {peers.length > 0 && (
             <span
               className="workspace-peers"

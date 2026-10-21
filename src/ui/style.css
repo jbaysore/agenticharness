@@ -1004,6 +1004,7 @@ small {
   gap: 5px;
 }
 .composer-footer label {
+  margin: 0;
   display: flex;
   gap: 4px;
   align-items: center;
@@ -1020,6 +1021,15 @@ small {
 }
 .keyboard-hint {
   margin-left: auto;
+}
+.permissions-control select {
+  field-sizing: content;
+  max-width: none;
+}
+/* Override skips every approval, so it reads louder than the other modes. */
+.permissions-control.override select {
+  color: #f5f5f5;
+  font-weight: 600;
 }
 .composer-footer .workspace-peers {
   color: #bdbdbd;
@@ -2050,6 +2060,9 @@ small {
   }
   .composer-controls {
     gap: 2px;
+  }
+  .permissions-control > span {
+    display: none;
   }
   .model-control {
     max-width: 65%;

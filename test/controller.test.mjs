@@ -120,3 +120,67 @@ test("cancelling pending approval expires it and unblocks the provider", async (
   assert.throws(() => controller.answer(id, { allow: true }), /expired/);
   store.close();
 });
+
+test("the chat's permission mode reaches the agent, and override answers permissions but not questions", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  const chat = store.createConversation({
+    projectId: store.addProject("fixture", "C:\permissions-fixture").id,
+  });
+  assert.equal(chat.permissions, "manual");
+  assert.throws(
+    () =>
+      controller.send(chat.id, {
+        actionId: "permissions-invalid-check",
+        text: "hi",
+        provider: "codex",
+        model: "m",
+        permissions: "yolo",
+      }),
+    /auto-review, manual review or override/,
+  );
+  const events = [];
+  controller.on("event", (e) => {
+    events.push(e);
+    if (e.type === "approval")
+      controller.answer(e.payload.id, { allow: false });
+  });
+  const turn = async (actionId, permissions) => {
+    let seen;
+    controller.runners.codex = async (ctx) => {
+      seen = {
+        permissions: ctx.permissions,
+        permission: await ctx.approve({ kind: "permission", title: "rm x" }),
+        question: await ctx.approve({ kind: "question", title: "Which?" }),
+      };
+      return { status: "completed" };
+    };
+    controller.send(chat.id, {
+      actionId,
+      text: "Clean up",
+      provider: "codex",
+      model: "m",
+      permissions,
+    });
+    await controller.active.get(chat.id).task;
+    return seen;
+  };
+  const override = await turn("permissions-override-check", "override");
+  assert.equal(override.permissions, "override");
+  assert.equal(override.permission.allow, true);
+  assert.equal(override.question.allow, false);
+  assert.equal(store.conversation(chat.id).permissions, "override");
+  assert.ok(
+    events.some(
+      (e) =>
+        e.payload.kind === "auto-approved" && /rm x/.test(e.payload.item.title),
+    ),
+  );
+  // A turn without a mode keeps the chat's last one.
+  assert.equal((await turn("permissions-kept-check")).permissions, "override");
+  const manual = await turn("permissions-manual-check", "manual");
+  assert.equal(manual.permission.allow, false);
+  assert.equal(store.conversation(chat.id).permissions, "manual");
+  store.close();
+});
