@@ -6,6 +6,8 @@ import {
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { AsyncQueue } from "../core/queue.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
@@ -68,6 +70,29 @@ export async function claudeAuth() {
     maxBuffer: 128 * 1024,
   });
   return JSON.parse(result.stdout);
+}
+// Harness keeps Claude Code's setting sources off, so it would read neither
+// CLAUDE.md nor AGENTS.md. Pass the project's AGENTS.md on, plus anything
+// Claude-only in a CLAUDE.md that imports it with @AGENTS.md.
+export async function projectInstructions(dir) {
+  const read = (name) =>
+    readFile(join(dir, name), "utf8").then(
+      (text) => text.trim().slice(0, 40000),
+      () => "",
+    );
+  const agents = await read("AGENTS.md");
+  let claude = (await read("CLAUDE.md"))
+    .split(/\r?\n/)
+    .filter((line) => !/^@(\.\/)?AGENTS\.md$/i.test(line.trim()))
+    .join("\n")
+    .trim();
+  if (claude === agents.replaceAll("\r\n", "\n")) claude = "";
+  return [
+    agents && "Project instructions from AGENTS.md:\n" + agents,
+    claude && "Project instructions from CLAUDE.md:\n" + claude,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 export async function usageOf(q) {
   const fn = q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
@@ -271,7 +296,9 @@ export async function runClaude(ctx) {
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        append: ctx.instructions,
+        append: [ctx.instructions, await projectInstructions(ctx.project.path)]
+          .filter(Boolean)
+          .join("\n\n"),
       },
       mcpServers: { harness: historyServer },
       canUseTool: async (name, args) => {
