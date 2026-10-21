@@ -12,6 +12,8 @@ import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
 import { ChatRow } from "./chat-row.jsx";
 import { RulesModal } from "./rules-modal.jsx";
+import { SkillsModal } from "./skills-modal.jsx";
+import { UsageGlance } from "./usage-glance.jsx";
 import {
   activeChats,
   attentionCount,
@@ -319,6 +321,7 @@ function App() {
           "approval-resolved",
           "rules",
           "settings",
+          "skills",
         ].includes(e.type)
       )
         refresh().catch(report);
@@ -486,10 +489,13 @@ function App() {
   }
   // The pane that asked keeps its key, so its composer survives the chat's creation.
   async function ensureChat(p, chosen) {
+    const { skillIds, ...fields } = chosen;
     const c = await api("/api/chats", {
       projectId: paneProject(p).id,
-      ...chosen,
+      ...fields,
     });
+    if (Array.isArray(skillIds))
+      await api(`/api/chats/${c.id}/skills`, { skillIds }, "PUT");
     const next = admit(await api("/api/chats/" + c.id));
     setView((v) => setPaneChat(v, p.key, c.id));
     return next;
@@ -706,6 +712,13 @@ function App() {
               {state.rules?.delegate.enabled ? "On" : ""}
             </span>
           </button>
+          <button className="sidebar-action" onClick={() => setModal("skills")}>
+            <Icon name="skill" />
+            <span>Skills</span>
+            <span className="connection-count">
+              {state.skills?.length ? state.skills.length : ""}
+            </span>
+          </button>
           {!online && (
             <div className="host-status">
               <span className="status-dot offline" />
@@ -741,6 +754,10 @@ function App() {
             <b>/</b>
             <strong>{chat?.title ?? "New conversation"}</strong>
           </div>
+          <UsageGlance
+            providers={state.providers}
+            onOpenConnections={() => setModal("connections")}
+          />
           {!mobile && (
             <button
               className="icon-button"
@@ -807,6 +824,8 @@ function App() {
                 followLink(id, beside, anchor).catch(report)
               }
               ensureChat={(chosen) => ensureChat(p, chosen)}
+              skills={state.skills ?? []}
+              onOpenSkills={() => setModal("skills")}
               reload={reload}
               refresh={refresh}
               report={report}
@@ -1151,6 +1170,13 @@ function App() {
           rules={state.rules}
           providers={state.providers}
           delegation={state.delegation ?? {}}
+          onSaved={refresh}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === "skills" && (
+        <SkillsModal
+          skills={state.skills ?? []}
           onSaved={refresh}
           onClose={() => setModal(null)}
         />

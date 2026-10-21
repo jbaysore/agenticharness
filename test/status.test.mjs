@@ -6,6 +6,9 @@ import {
   chatMarker,
   chatMarkerLabel,
   providerStatusLabel,
+  resetLabel,
+  usageGlance,
+  usageWindows,
 } from "../src/ui/status.mjs";
 
 test("a usage block is labeled separately from setup", () => {
@@ -96,4 +99,79 @@ test("the active list puts chats that need you first and leaves out archived one
   );
   assert.equal(attentionCount(conversations), 3);
   assert.equal(attentionCount([]), 0);
+});
+
+test("the header shows the tightest usage window for each provider", () => {
+  const codex = {
+    id: "codex",
+    connected: true,
+    usage: {
+      authoritative: true,
+      windows: [
+        {
+          bucket: "codex",
+          usedPercent: 40,
+          windowMinutes: 300,
+          resetsAt: 1800000000,
+        },
+        {
+          bucket: "codex",
+          usedPercent: 88.4,
+          windowMinutes: 10080,
+          resetsAt: null,
+        },
+      ],
+    },
+  };
+  assert.deepEqual(
+    usageWindows(codex).map((w) => [w.name, w.remaining, w.resetsAt]),
+    [
+      ["5-hour limit", 60, 1800000000000],
+      ["Weekly limit", 12, null],
+    ],
+  );
+  assert.deepEqual(usageGlance(codex), {
+    remaining: 12,
+    level: "low",
+    bars: [
+      { name: "5-hour limit", short: "5h", remaining: 60, level: "ok" },
+      { name: "Weekly limit", short: "wk", remaining: 12, level: "low" },
+    ],
+  });
+  assert.deepEqual(
+    usageGlance({
+      id: "cursor",
+      connected: true,
+      usage: { authoritative: false, windows: [] },
+    }),
+    {
+      remaining: null,
+      level: "unknown",
+      bars: [{ name: "Usage", short: "", remaining: null, level: "unknown" }],
+    },
+  );
+  assert.equal(
+    usageGlance({
+      id: "claude",
+      connected: true,
+      blockReason: "A Claude included-usage limit is exhausted.",
+      usage: { authoritative: false, windows: [] },
+    }).level,
+    "out",
+  );
+  assert.deepEqual(
+    usageWindows({
+      id: "claude",
+      usage: {
+        authoritative: true,
+        windows: [
+          { bucket: "five_hour", usedPercent: 10 },
+          { bucket: "seven_day_opus", usedPercent: 10 },
+          { bucket: "seven_day", label: "Sonnet", usedPercent: 10 },
+        ],
+      },
+    }).map((w) => w.name),
+    ["5-hour limit", "Opus · Weekly limit", "Sonnet · Weekly limit"],
+  );
+  assert.equal(resetLabel(Date.now() + 135 * 60000 + 1000), "Resets in 2h 15m");
 });

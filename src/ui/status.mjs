@@ -53,3 +53,97 @@ export function attentionCount(conversations) {
   return activeChats(conversations).filter((c) => chatMarker(c) !== "running")
     .length;
 }
+// Remaining included usage, one row per provider limit window.
+export function usageWindows(provider) {
+  if (!provider?.usage?.authoritative) return [];
+  return (provider.usage.windows ?? [])
+    .filter((w) => typeof w.usedPercent === "number")
+    .map((w) => {
+      // Claude names its windows five_hour, seven_day, seven_day_opus….
+      const [, claudeSpan, scope] =
+        /^(five_hour|seven_day)_?(.*)$/.exec(w.bucket ?? "") ?? [];
+      const minutes =
+        w.windowMinutes ?? { five_hour: 300, seven_day: 10080 }[claudeSpan];
+      const span = minutes
+        ? minutes >= 1440
+          ? minutes === 10080
+            ? "Weekly"
+            : Math.round(minutes / 1440) + "-day"
+          : Math.round(minutes / 60) + "-hour"
+        : null;
+      const bucket = claudeSpan ? scope : w.bucket !== provider.id && w.bucket;
+      const scopeName =
+        w.label ?? (bucket ? String(bucket).replaceAll("_", " ") : null);
+      return {
+        name:
+          [
+            scopeName && scopeName[0].toUpperCase() + scopeName.slice(1),
+            span && span + " limit",
+          ]
+            .filter(Boolean)
+            .join(" · ") || "Usage limit",
+        minutes: minutes ?? null,
+        scoped: Boolean(scopeName),
+        remaining: Math.max(0, Math.min(100, Math.round(100 - w.usedPercent))),
+        resetsAt:
+          w.resetsAt == null
+            ? null
+            : typeof w.resetsAt === "number"
+              ? w.resetsAt * 1000
+              : Date.parse(w.resetsAt) || null,
+      };
+    });
+}
+function usageLevel(remaining) {
+  return remaining === null
+    ? "unknown"
+    : remaining === 0
+      ? "out"
+      : remaining <= 15
+        ? "low"
+        : "ok";
+}
+// The tightest limit decides a provider's state. The header shows the 5-hour
+// and weekly limits side by side, or the tightest limit when neither exists.
+export function usageGlance(provider) {
+  const windows = usageWindows(provider);
+  const remaining = windows.length
+    ? Math.min(...windows.map((w) => w.remaining))
+    : null;
+  const level =
+    providerStatusLabel(provider) === "Out of usage"
+      ? "out"
+      : usageLevel(remaining);
+  const general = windows.filter((w) => !w.scoped && w.minutes);
+  const bars = [
+    general.find((w) => w.minutes < 1440),
+    general.find((w) => w.minutes >= 1440),
+  ]
+    .filter(Boolean)
+    .map((w) => ({
+      name: w.name,
+      short: w.minutes < 1440 ? Math.round(w.minutes / 60) + "h" : "wk",
+      remaining: w.remaining,
+      level: usageLevel(w.remaining),
+    }));
+  return {
+    remaining,
+    level,
+    bars: bars.length ? bars : [{ name: "Usage", short: "", remaining, level }],
+  };
+}
+export function resetLabel(at, now = Date.now()) {
+  if (!at) return "";
+  const minutes = Math.max(0, Math.round((at - now) / 60000));
+  if (minutes < 60) return `Resets in ${minutes}m`;
+  if (minutes < 1440)
+    return `Resets in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return (
+    "Resets " +
+    new Date(at).toLocaleString(undefined, {
+      weekday: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    })
+  );
+}
