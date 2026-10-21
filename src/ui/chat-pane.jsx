@@ -438,27 +438,19 @@ export function ChatPane({
             </span>
           )}
           {chat ? (
-            <label className="history-control">
-              History{" "}
-              <select
-                aria-label="Shared history scope"
-                value={chat.scope}
-                disabled={!!chat.activeRun}
-                onChange={(e) => {
-                  api(
-                    "/api/chats/" + chat.id,
-                    { scope: e.target.value },
-                    "PATCH",
-                  )
-                    .then(() => reload(chat.id))
-                    .catch(report);
-                }}
-              >
-                <option value="none">This conversation</option>
-                <option value="project">This project</option>
-                <option value="all">All projects</option>
-              </select>
-            </label>
+            <span
+              className="history-scope"
+              title="History access is fixed for this conversation. Set the default for new conversations in Connections & usage."
+            >
+              History:{" "}
+              {
+                {
+                  none: "This conversation",
+                  project: "This project",
+                  all: "All projects",
+                }[chat.scope]
+              }
+            </span>
           ) : (
             <span>Code and history stay on your Windows host</span>
           )}

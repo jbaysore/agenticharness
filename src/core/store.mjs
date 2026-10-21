@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+const historyScopes = ["none", "project", "all"];
+
 // A chat's newest run is its only possible active one: createRun refuses a second.
 const summary = `SELECT c.*, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
   (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals
@@ -38,7 +40,7 @@ export class Store {
     this.db.exec(`
       PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, repositories TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, effort TEXT, scope TEXT NOT NULL DEFAULT 'project', sessions TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, effort TEXT, scope TEXT NOT NULL DEFAULT 'all', sessions TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), action_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, native_turn_id TEXT, created_at TEXT NOT NULL, ended_at TEXT);
       CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), run_id TEXT REFERENCES runs(id), role TEXT NOT NULL, provider TEXT, model TEXT, content TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content, content='messages', content_rowid='rowid');
@@ -75,6 +77,8 @@ export class Store {
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN read_at TEXT; UPDATE conversations SET read_at=updated_at",
       );
+    if (this.setting("default-history-scope") === null)
+      this.setting("default-history-scope", "all");
   }
 
   close() {
@@ -96,6 +100,17 @@ export class Store {
       )
       .run(key, JSON.stringify(value));
     return value;
+  }
+  settings() {
+    return { defaultHistoryScope: this.setting("default-history-scope") };
+  }
+  saveSettings({ defaultHistoryScope }) {
+    if (defaultHistoryScope !== undefined) {
+      if (!historyScopes.includes(defaultHistoryScope))
+        throw new Error("Invalid history scope");
+      this.setting("default-history-scope", defaultHistoryScope);
+    }
+    return this.settings();
   }
   projects() {
     return this.db
@@ -158,9 +173,11 @@ export class Store {
     model = "",
     effort = null,
     permissions = "manual",
-    scope = "project",
+    scope = this.settings().defaultHistoryScope,
     createdAt,
   }) {
+    if (!historyScopes.includes(scope))
+      throw new Error("Invalid history scope");
     const id = randomUUID(),
       now = createdAt || this.now();
     this.db
@@ -182,13 +199,14 @@ export class Store {
     return this.conversation(id);
   }
   updateConversation(id, fields) {
+    if (Object.hasOwn(fields, "scope"))
+      throw new Error("History scope is fixed when a conversation is created");
     const allowed = new Set([
       "title",
       "provider",
       "model",
       "effort",
       "permissions",
-      "scope",
       "sessions",
     ]);
     const entries = Object.entries(fields).filter(([key]) => allowed.has(key));
@@ -526,6 +544,7 @@ export class Store {
   }
   snapshot() {
     return {
+      settings: this.settings(),
       projects: this.projects(),
       conversations: this.conversations(),
       lastEventId: this.latestEventId(),

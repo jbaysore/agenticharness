@@ -59,7 +59,8 @@ function App() {
     [sidebar, setSidebar] = useState(false),
     [modal, setModal] = useState(null),
     [online, setOnline] = useState(true),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [savingHistory, setSavingHistory] = useState(false);
   const {
     layout,
     setLayout,
@@ -308,6 +309,7 @@ function App() {
           "approval",
           "approval-resolved",
           "rules",
+          "settings",
         ].includes(e.type)
       )
         refresh().catch(report);
@@ -1038,6 +1040,37 @@ function App() {
               </section>
             ))}
           </div>
+          <section className="history-settings">
+            <h3>Conversation history</h3>
+            <label>
+              History for new conversations
+              <select
+                value={state.settings?.defaultHistoryScope ?? "all"}
+                disabled={savingHistory}
+                aria-describedby="history-settings-help"
+                onChange={(e) => {
+                  setSavingHistory(true);
+                  api(
+                    "/api/settings",
+                    { defaultHistoryScope: e.target.value },
+                    "PATCH",
+                  )
+                    .then((settings) => setState((s) => ({ ...s, settings })))
+                    .catch(report)
+                    .finally(() => setSavingHistory(false));
+                }}
+              >
+                <option value="none">This conversation</option>
+                <option value="project">This project</option>
+                <option value="all">All projects</option>
+              </select>
+            </label>
+            <p id="history-settings-help">
+              Choose which saved conversations agents can search. Saved on this
+              host and applied to new conversations. Existing conversations keep
+              their current history access.
+            </p>
+          </section>
           <section className="remote-settings">
             <h3>Remote access</h3>
             <p>

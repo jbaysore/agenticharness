@@ -1112,7 +1112,7 @@ small {
   color: #a3a3a3;
   max-width: 103px;
 }
-.composer-footer .history-control {
+.composer-footer .history-scope {
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -1912,6 +1912,22 @@ small {
 .remote-settings p {
   font-size: 11px;
   color: #a3a3a3;
+}
+.history-settings {
+  border-top: 1px solid #525252;
+  padding-top: 18px;
+  margin-top: 22px;
+}
+.history-settings select {
+  display: block;
+  margin-top: 7px;
+  width: 100%;
+  max-width: 320px;
+}
+.history-settings p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 10px 0 0;
 }
 .export-link {
   display: block;

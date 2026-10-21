@@ -248,6 +248,14 @@ export async function createHarness({
             expiresInMinutes: 10,
             remoteOrigin: publicOrigin,
           });
+        if (path === "/api/settings") {
+          if (method === "GET") return json(res, 200, store.settings());
+          if (method === "PATCH") {
+            const settings = store.saveSettings(await readJson(req));
+            controller.event(null, null, "settings", settings);
+            return json(res, 200, settings);
+          }
+        }
         if (path === "/api/state" && method === "GET")
           return json(res, 200, {
             ...store.snapshot(),
@@ -384,14 +392,11 @@ export async function createHarness({
               fields = {};
             if (body.title !== undefined)
               fields.title = String(body.title).slice(0, 120);
-            if (body.scope !== undefined) {
-              if (!["none", "project", "all"].includes(body.scope))
-                throw new Error("Invalid history scope");
-              if (controller.active.has(id))
-                throw new Error("Stop the turn before changing history scope");
-              fields.scope = body.scope;
-              fields.sessions = {};
-            }
+            if (Object.hasOwn(body, "scope"))
+              return json(res, 409, {
+                error:
+                  "History scope is fixed for this conversation. Change the default for new conversations in Connections & usage.",
+              });
             if (body.archived !== undefined) {
               if (controller.active.has(id))
                 throw new Error("Stop the turn before archiving this chat");

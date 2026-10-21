@@ -256,9 +256,13 @@ Search results link to the source conversation and retain provider attribution.
 Agents can call `history_search`, `history_read`, and `project_notes` on demand,
 and `workspace_activity` to see which other chats are working in the same folder.
 
-The History selector controls agent access: **This conversation**, **This project**,
-or **All projects**. Reducing/changing scope starts fresh native sessions so an old
-native context cannot silently retain broader access. The transcript stays saved.
+In **Connections & usage → Conversation history**, choose **This conversation**,
+**This project**, or **All projects** as the history access for new conversations.
+The default is **All projects** and is saved in the host's SQLite settings across
+browser refreshes and host restarts. Each conversation keeps the scope it was
+created with; its footer shows that scope without a selector. Changing the default
+does not change existing conversations, reset their native sessions, or delete
+their transcripts. Conversations created before this setting retain their scope.
 
 Switching agent in the same chat creates an attributed, bounded text handoff with
 recent messages, saved decisions and review comments. Earlier messages remain

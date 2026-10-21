@@ -98,8 +98,8 @@ test("history tools enforce none/project/all scopes with source attribution", ()
   const db = new Store(":memory:"),
     a = db.addProject("A", "C:\\a"),
     b = db.addProject("B", "C:\\b");
-  const ca = db.createConversation({ projectId: a.id }),
-    ca2 = db.createConversation({ projectId: a.id }),
+  const ca = db.createConversation({ projectId: a.id, scope: "project" }),
+    ca2 = db.createConversation({ projectId: a.id, scope: "none" }),
     cb = db.createConversation({ projectId: b.id });
   for (const c of [ca, ca2, cb])
     db.addMessage({
@@ -116,29 +116,27 @@ test("history tools enforce none/project/all scopes with source attribution", ()
     () => historyCall(db, ca.id, "history_read", { conversationId: cb.id }),
     /outside/,
   );
-  db.updateConversation(ca.id, { scope: "none" });
   assert.equal(
-    historyCall(db, ca.id, "history_search", { query: "SQLite" }).length,
+    historyCall(db, ca2.id, "history_search", { query: "SQLite" }).length,
     1,
   );
   db.addNote({
     projectId: a.id,
-    conversationId: ca2.id,
+    conversationId: ca.id,
     content: "Another conversation decision",
     evidence: ["source"],
   });
-  assert.equal(historyCall(db, ca.id, "project_notes", {}).length, 0);
+  assert.equal(historyCall(db, ca2.id, "project_notes", {}).length, 0);
   assert.doesNotMatch(
-    handoffContext(db, db.conversation(ca.id), "claude"),
+    handoffContext(db, ca2, "claude"),
     /Another conversation decision/,
   );
-  db.updateConversation(ca.id, { scope: "all" });
   assert.equal(
-    historyCall(db, ca.id, "history_search", { query: "SQLite" }).length,
+    historyCall(db, cb.id, "history_search", { query: "SQLite" }).length,
     3,
   );
   assert.match(
-    historyCall(db, ca.id, "history_search", { query: "SQLite" })[0].source,
+    historyCall(db, cb.id, "history_search", { query: "SQLite" })[0].source,
     /harness:\/\/conversation\//,
   );
   db.close();
@@ -203,10 +201,13 @@ test("workspace peers are the other active chats in the same or a nested folder"
     apart = db.addProject("Apart", "C:\\work\\apart");
   const mine = db.createConversation({ projectId: repo.id, title: "Mine" }),
     busy = db.createConversation({ projectId: repo.id, title: "Busy" }),
-    secret = db.createConversation({ projectId: repo.id, title: "Private" }),
+    secret = db.createConversation({
+      projectId: repo.id,
+      title: "Private",
+      scope: "none",
+    }),
     idle = db.createConversation({ projectId: repo.id, title: "Idle" }),
     far = db.createConversation({ projectId: apart.id, title: "Far" });
-  db.updateConversation(secret.id, { scope: "none" });
   const run = (chat, text) =>
     db.createRun({
       conversationId: chat.id,
@@ -327,6 +328,8 @@ test("an existing workspace gains the chat columns with its history already read
   old.close();
   let db = new Store(path);
   const chat = db.conversation("c");
+  assert.equal(chat.scope, "project");
+  assert.deepEqual(db.settings(), { defaultHistoryScope: "all" });
   assert.equal(chat.read_at, "2026-01-02T00:00:00.000Z");
   assert.equal(chat.archived_at, null);
   assert.deepEqual(

@@ -12,6 +12,7 @@
     "test:layout": "npm run build && node scripts/layout-acceptance.mjs",
     "test:scroll": "npm run build && node scripts/scroll-acceptance.mjs",
     "test:models": "npm run build && node scripts/model-picker-acceptance.mjs",
+    "test:history": "npm run build && node scripts/history-settings-acceptance.mjs",
     "probe:codex": "node scripts/probe-codex.mjs",
     "build:icons": "node scripts/build-icons.mjs",
     "build": "node scripts/build.mjs",

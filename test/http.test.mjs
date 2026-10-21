@@ -98,6 +98,107 @@ test("real local HTTP server admits the host PC without pairing, enforces same-o
   }
 });
 
+test("history defaults persist across restarts and apply only to new conversations without resetting sessions", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-history-settings-"));
+  let app = await createHarness({
+    dataDir: dir,
+    port: 0,
+    startProviders: false,
+  });
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Harness-Client": "1",
+  };
+  const call = async (path, body, method = "POST") => {
+    const response = await fetch(app.runtime.origin + path, {
+      method,
+      headers,
+      body: body && JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const project = app.store.addProject("History defaults", dir);
+    assert.deepEqual((await call("/api/settings", undefined, "GET")).body, {
+      defaultHistoryScope: "all",
+    });
+    const original = (await call("/api/chats", { projectId: project.id })).body;
+    assert.equal(original.scope, "all");
+    const sessions = {
+      codex: { id: "keep-codex-thread" },
+      claude: { id: "keep-claude-session" },
+      cursor: { id: "keep-cursor-session" },
+    };
+    app.store.updateConversation(original.id, { sessions });
+    const run = app.store.createRun({
+      conversationId: original.id,
+      actionId: "history-setting-active-turn",
+      provider: "codex",
+      model: "fixture",
+      text: "Keep my context",
+    });
+    const originalTitle = app.store.conversation(original.id).title;
+    for (const active of [true, false]) {
+      if (!active) app.store.setRun(run.id, "completed");
+      const rejected = await call(
+        "/api/chats/" + original.id,
+        { scope: "project", title: "Must not rename" },
+        "PATCH",
+      );
+      assert.equal(rejected.status, 409);
+      assert.match(rejected.body.error, /new conversations/);
+      assert.equal(app.store.conversation(original.id).title, originalTitle);
+      assert.deepEqual(app.store.conversation(original.id).sessions, sessions);
+      // The global default can be changed even while a turn is active.
+      assert.equal(
+        (
+          await call(
+            "/api/settings",
+            { defaultHistoryScope: active ? "project" : "none" },
+            "PATCH",
+          )
+        ).status,
+        200,
+      );
+      const next = (await call("/api/chats", { projectId: project.id })).body;
+      assert.equal(next.scope, active ? "project" : "none");
+      assert.equal(app.store.conversation(original.id).scope, "all");
+      assert.deepEqual(app.store.conversation(original.id).sessions, sessions);
+    }
+    const invalid = await call(
+      "/api/settings",
+      { defaultHistoryScope: "invalid" },
+      "PATCH",
+    );
+    assert.equal(invalid.status, 400);
+    assert.equal(app.store.settings().defaultHistoryScope, "none");
+    assert.throws(
+      () => app.store.updateConversation(original.id, { scope: "project" }),
+      /fixed/,
+    );
+    assert.ok(app.store.events().some((e) => e.type === "settings"));
+    await app.close();
+    app = await createHarness({ dataDir: dir, port: 0, startProviders: false });
+    const state = (await call("/api/state", undefined, "GET")).body;
+    assert.deepEqual(state.settings, { defaultHistoryScope: "none" });
+    assert.equal(app.store.conversation(original.id).scope, "all");
+    assert.deepEqual(app.store.conversation(original.id).sessions, sessions);
+    assert.equal(app.store.messages(original.id)[0].content, "Keep my context");
+    assert.equal(
+      (await call("/api/chats", { projectId: project.id })).body.scope,
+      "none",
+    );
+    await call("/api/settings", { defaultHistoryScope: "all" }, "PATCH");
+    assert.equal(
+      (await call("/api/chats", { projectId: project.id })).body.scope,
+      "all",
+    );
+  } finally {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("a chat can be renamed, archived and marked read, and each change is announced", async () => {
   const dir = await mkdtemp(join(tmpdir(), "harness-http-")),
     app = await createHarness({ dataDir: dir, port: 0, startProviders: false });

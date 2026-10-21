@@ -48,6 +48,11 @@ across reload after both a lost response and an unreceived request.
 - `node scripts/multichat-acceptance.mjs`: real Edge/HTTP with an explicitly
   simulated provider; several chats running side by side and in the background.
 - `npm run test:layout`: real Edge, no provider; sidebars and one to three panes.
+- `npm run test:history`: real Edge and isolated SQLite fixtures, no provider;
+  desktop/mobile history defaults, browser refresh, updates across open browsers,
+  and new conversations retaining their scope without resetting existing sessions.
+  `npm test` also checks host-restart persistence and rejects scope changes to an
+  existing conversation through both the API and storage layer.
 - `node scripts/rules-acceptance.mjs`: real Edge/HTTP with an explicitly simulated
   provider and worker; the Agent rules screen, a delegated search and each fallback.
 
