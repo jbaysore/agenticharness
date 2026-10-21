@@ -86,7 +86,7 @@ const permissionModes = [
   [
     "auto",
     "Auto-review",
-    "Claude Code and Codex use their native reviewers. Cursor uses a separate Codex subscription reviewer; connect Codex to enable it. Browser actions still ask you.",
+    "Claude Code and Codex use their native reviewers. Cursor uses the reviewer models chosen in Agent rules, with Claude fallback when enabled. Browser actions still ask you.",
   ],
   ["manual", "Manual review", "You approve each action the agent asks about."],
   [

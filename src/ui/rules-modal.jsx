@@ -10,6 +10,11 @@ import {
 } from "../core/rules.mjs";
 import { ACTIONS, ACTION_NAMES } from "../core/delegation.mjs";
 import { PRICES_AS_OF, priceOf } from "../core/prices.mjs";
+import {
+  cursorReviewer,
+  reviewerModel,
+  reviewSettings,
+} from "../core/review-policy.mjs";
 
 // A worker can take work only if its provider can run and its price is known.
 const standing = (worker, providers) => {
@@ -52,13 +57,23 @@ export function delegationRoute(enabled, workers, providers) {
     .join(" ")}`;
 }
 
-function WorkerPicker({ label, empty, worker, exclude, providers, onChange }) {
-  const offered = providers.filter((p) => WORKER_PROVIDERS.includes(p.id)),
+function WorkerPicker({
+  label,
+  empty,
+  worker,
+  exclude,
+  providers,
+  onChange,
+  providerIds = WORKER_PROVIDERS,
+  availability = standing,
+  showIds = false,
+}) {
+  const offered = providers.filter((p) => providerIds.includes(p.id)),
     model = offered
       .find((p) => p.id === worker?.provider)
       ?.models?.find((m) => m.id === worker.model),
     provider = providers.find((p) => p.id === worker?.provider),
-    status = worker && standing(worker, providers);
+    status = worker && availability(worker, providers);
   return (
     <div className="rule-worker">
       <label>
@@ -72,7 +87,7 @@ function WorkerPicker({ label, empty, worker, exclude, providers, onChange }) {
           }}
         >
           <option value="">{empty}</option>
-          {worker && !model && (
+          {worker && (!model || model.disabled) && (
             <option value={workerKey(worker)}>
               {worker.model} · no longer offered
             </option>
@@ -90,6 +105,7 @@ function WorkerPicker({ label, empty, worker, exclude, providers, onChange }) {
                       disabled={value === exclude}
                     >
                       {p.name} · {m.name}
+                      {showIds ? ` (${m.resolvedModel ?? m.id})` : ""}
                     </option>
                   );
                 })}
@@ -108,6 +124,11 @@ function WorkerPicker({ label, empty, worker, exclude, providers, onChange }) {
             }
           >
             <option value="">Provider default</option>
+            {worker.effort && !model.efforts.includes(worker.effort) && (
+              <option value={worker.effort}>
+                {worker.effort} · no longer offered
+              </option>
+            )}
             {model.efforts.map((effort) => (
               <option key={effort} value={effort}>
                 {effort[0].toUpperCase() + effort.slice(1)}
@@ -128,8 +149,90 @@ function WorkerPicker({ label, empty, worker, exclude, providers, onChange }) {
   );
 }
 
+function ReviewerSettings({ value, providers, onChange }) {
+  const ids = ["codex", ...(value.claudeFallback ? ["claude"] : [])],
+    reasons = [];
+  let route = "";
+  for (const id of ids) {
+    try {
+      const reviewer = cursorReviewer(providers, value[id], id);
+      route = `Cursor reviews use ${reviewer.name}${reviewer.effort ? ` · ${reviewer.effort} effort` : ""}.`;
+      if (reasons.length) route += " " + reasons.join(" ");
+      break;
+    } catch (error) {
+      reasons.push(error.message);
+    }
+  }
+  if (!route)
+    route =
+      "No reviewer is available; you will be asked to approve actions. " +
+      reasons.join(" ");
+  return (
+    <section className="connection">
+      <header>
+        <h3>Cursor automatic reviewer</h3>
+      </header>
+      <p>
+        Choose the Codex model that reviews Cursor actions in Auto-review mode.
+        If Codex cannot review, the Claude model below takes over using its
+        included subscription usage. Both receive the task, recent user
+        instructions and refusals, project rules, and exact action details.
+      </p>
+      {["codex", "claude"].map((id) => {
+        const automatic = reviewerModel(providers, id, null),
+          label =
+            id === "codex" ? "Codex reviewer model" : "Claude fallback model";
+        return (
+          <WorkerPicker
+            key={id}
+            label={label}
+            empty={
+              automatic
+                ? `Provider default: ${automatic.name ?? automatic.id} (${automatic.resolvedModel ?? automatic.id})`
+                : "Provider default (no models available)"
+            }
+            worker={value[id] && { provider: id, ...value[id] }}
+            providers={providers}
+            providerIds={[id]}
+            availability={workerAvailability}
+            showIds
+            onChange={(next) =>
+              onChange({
+                ...value,
+                [id]: next && { model: next.model, effort: next.effort },
+              })
+            }
+          />
+        );
+      })}
+      <label className="rule-toggle">
+        <input
+          type="checkbox"
+          aria-label="Use Claude fallback"
+          checked={value.claudeFallback}
+          onChange={(e) =>
+            onChange({ ...value, claudeFallback: e.target.checked })
+          }
+        />
+        Use Claude fallback
+      </label>
+      <p className="rule-route" role="status">
+        {route}
+      </p>
+      <p className="muted small">
+        Pinned choices stay fixed until you change them. Saving applies to the
+        next review, including during an active turn. A reviewer&rsquo;s deny or
+        request for your input is final. If neither reviewer can run, you
+        approve the action yourself. API billing and paid extra usage remain
+        disabled.
+      </p>
+    </section>
+  );
+}
+
 export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
   const [instructions, setInstructions] = useState(rules.instructions),
+    [review, setReview] = useState(() => reviewSettings(rules.review)),
     [enabled, setEnabled] = useState(rules.delegate.enabled),
     [primary, setPrimary] = useState(rules.delegate.workers[0] ?? null),
     [fallback, setFallback] = useState(rules.delegate.workers[1] ?? null),
@@ -145,6 +248,7 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
         "/api/rules",
         {
           instructions,
+          review,
           delegate: {
             enabled: enabled && !!primary,
             actions,
@@ -158,7 +262,9 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
         "PUT",
       );
       await onSaved();
-      setNotice({ text: "Saved. New turns use these rules." });
+      setNotice({
+        text: "Saved. Reviewer choices apply to the next review; other rules apply to new turns.",
+      });
     } catch (error) {
       setNotice({ text: error.message, failed: true });
     } finally {
@@ -191,6 +297,11 @@ export function RulesModal({ rules, providers, delegation, onSaved, onClose }) {
             onChange={(e) => setInstructions(e.target.value)}
           />
         </section>
+        <ReviewerSettings
+          value={review}
+          providers={providers}
+          onChange={setReview}
+        />
         <section className="connection">
           <header>
             <h3>Hand off work to a cheaper model</h3>

@@ -56,6 +56,7 @@ test("nothing is chosen until the user chooses, and a saved choice is kept", () 
   const store = new Store(":memory:");
   assert.deepEqual(readRules(store), {
     instructions: "",
+    review: { codex: null, claude: null, claudeFallback: true },
     delegate: { enabled: false, actions: allActions, workers: [] },
   });
   const saved = saveRules(

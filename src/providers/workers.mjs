@@ -55,48 +55,65 @@ export function allowsCodexChange(changes, cwd, editPath) {
   );
 }
 
-export async function runClaudeWorker({
-  cwd,
-  model,
-  effort,
-  task,
-  signal,
-  mode = "search",
-  editPath,
-}) {
+export async function runClaudeWorker(
+  { cwd, model, effort, task, signal, mode = "search", editPath },
+  {
+    queryFn = query,
+    readAuth = claudeAuth,
+    baseOptions = claudeOptions,
+    readUsage = usageOf,
+    pollIntervalMs = 15000,
+  } = {},
+) {
   const input = new AsyncQueue();
-  const q = query({
-    prompt: input,
-    options: {
-      ...claudeOptions(cwd),
-      model,
-      effort: effort || undefined,
-      // A short prompt of its own keeps a hand-off's fixed cost small.
-      systemPrompt: workerPrompts[mode],
-      tools: {
-        inline: [],
-        search: ["Read", "Grep", "Glob"],
-        edit: ["Read", "Edit"],
-      }[mode],
-      includePartialMessages: false,
-      persistSession: false,
-      maxTurns: mode === "inline" ? 2 : 40,
-      canUseTool: async (name, args) =>
-        mode === "edit" && allowsClaudeTool(name, args, cwd, editPath)
-          ? { behavior: "allow", updatedInput: args }
-          : {
-              behavior: "deny",
-              message:
-                mode === "edit"
-                  ? "This worker may only edit the one file it was given."
-                  : "This worker is read-only.",
-            },
-    },
-  });
-  const stop = () => q.interrupt().catch(() => q.close());
+  const options = baseOptions(cwd),
+    q = queryFn({
+      prompt: input,
+      options: {
+        ...options,
+        model,
+        effort: effort || undefined,
+        // A short prompt of its own keeps a hand-off's fixed cost small.
+        systemPrompt: workerPrompts[mode],
+        tools: {
+          review: [],
+          inline: [],
+          search: ["Read", "Grep", "Glob"],
+          edit: ["Read", "Edit"],
+        }[mode],
+        includePartialMessages: false,
+        persistSession: false,
+        maxTurns: ["inline", "review"].includes(mode) ? 2 : 40,
+        ...(mode === "review" && {
+          outputFormat: { type: "json_schema", schema: REVIEW_SCHEMA },
+          permissionMode: "dontAsk",
+          mcpServers: {},
+          plugins: [],
+          hooks: {},
+          settings: { ...options.settings, disableAllHooks: true },
+        }),
+        canUseTool: async (name, args) =>
+          (mode === "edit" && allowsClaudeTool(name, args, cwd, editPath)) ||
+          (mode === "review" && name === "StructuredOutput")
+            ? { behavior: "allow", updatedInput: args }
+            : {
+                behavior: "deny",
+                message:
+                  mode === "edit"
+                    ? "This worker may only edit the one file it was given."
+                    : "This worker is read-only.",
+              },
+      },
+    });
+  let quotaTimer,
+    checkingQuota = false,
+    boundaryError;
+  const stop = () =>
+    mode === "review" ? q.close() : q.interrupt().catch(() => q.close());
   signal.addEventListener("abort", stop, { once: true });
   try {
-    const reason = checkClaudeBilling(await claudeAuth(), await usageOf(q));
+    const auth = await readAuth(),
+      reason = checkClaudeBilling(auth, await readUsage(q));
     if (reason) throw new WorkerUnavailable(reason);
     if (signal.aborted) throw cancelled();
     input.push({
@@ -105,7 +122,33 @@ export async function runClaudeWorker({
       parent_tool_use_id: null,
       session_id: "",
     });
+    if (mode === "review")
+      quotaTimer = setInterval(async () => {
+        if (checkingQuota) return;
+        checkingQuota = true;
+        try {
+          const blocked = checkClaudeBilling(auth, await readUsage(q));
+          if (blocked) throw new WorkerUnavailable(blocked);
+        } catch (error) {
+          boundaryError = error;
+          q.close();
+        } finally {
+          checkingQuota = false;
+        }
+      }, pollIntervalMs);
     for await (const event of q) {
+      if (boundaryError) throw boundaryError;
+      if (
+        mode === "review" &&
+        event.type === "assistant" &&
+        event.message?.content?.some(
+          (block) =>
+            block.type === "tool_use" && block.name !== "StructuredOutput",
+        )
+      )
+        throw new Error(
+          "The reviewer attempted to use a tool instead of returning a decision.",
+        );
       if (
         event.type === "rate_limit_event" &&
         (event.rate_limit_info?.isUsingOverage ||
@@ -115,13 +158,21 @@ export async function runClaudeWorker({
         throw new WorkerUnavailable("Claude reported a usage boundary");
       if (event.type !== "result") continue;
       if (signal.aborted) throw cancelled();
-      if (event.is_error || typeof event.result !== "string")
+      const text =
+        mode === "review"
+          ? JSON.stringify(event.structured_output)
+          : event.result;
+      if (event.is_error || typeof text !== "string")
         throw new Error(
           event.errors?.join("\n") || "The worker ended without an answer",
         );
+      if (mode === "review") {
+        const blocked = checkClaudeBilling(auth, await readUsage(q));
+        if (blocked) throw new WorkerUnavailable(blocked);
+      }
       const used = Object.values(event.modelUsage ?? {});
       return {
-        text: event.result,
+        text,
         model: Object.keys(event.modelUsage ?? {})[0] ?? model,
         usage: {
           input: used.reduce(
@@ -137,7 +188,10 @@ export async function runClaudeWorker({
       };
     }
     throw new Error("The worker ended without an answer");
+  } catch (error) {
+    throw boundaryError ?? error;
   } finally {
+    clearInterval(quotaTimer);
     signal.removeEventListener("abort", stop);
     input.end();
     q.close();

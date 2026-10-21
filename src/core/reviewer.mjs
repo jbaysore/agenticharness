@@ -1,17 +1,16 @@
-// Cursor's ACP permission requests are reviewed in a separate Codex session.
+// Cursor's ACP permission requests are reviewed in separate subscription sessions.
 // The user authorized sharing task instructions, rules, refusals and the action.
 import { randomUUID } from "node:crypto";
 import { agentInstructions } from "./history.mjs";
 import { readRepositoryFile } from "./repository.mjs";
 import { readRules } from "./rules.mjs";
-import { skillInstructions, skillsForTurn } from "./skills.mjs";
 import { cursorReviewer, parseReview } from "./review-policy.mjs";
 
 export class CursorReviewer {
   constructor({ controller, run, project, chat, text, signal }) {
     Object.assign(this, { controller, run, project, chat, text, signal });
     this.queue = Promise.resolve();
-    this.unavailable = null;
+    this.unavailable = new Map();
   }
   review(request) {
     // Parallel ACP requests still get individual decisions, in request order.
@@ -49,9 +48,7 @@ export class CursorReviewer {
     const task = JSON.stringify({
       hostPolicies: agentInstructions(project, chat),
       standingInstructions: readRules(controller.store).instructions,
-      skillInstructions: skillInstructions(
-        skillsForTurn(controller.store, chat.id),
-      ),
+      turnInstructions: this.instructions ?? "",
       projectRules,
       userMessages: controller.store
         .messages(chat.id)
@@ -69,6 +66,44 @@ export class CursorReviewer {
       );
     return task;
   }
+  async attempt(reviewer, task) {
+    const { controller, signal } = this,
+      limit = new AbortController(),
+      stop = () => limit.abort();
+    let timer, onStopped;
+    signal.addEventListener("abort", stop, { once: true });
+    try {
+      if (signal.aborted) throw new Error("The turn was stopped.");
+      const stopped = new Promise((_, reject) => {
+        onStopped = () =>
+          reject(
+            new Error(
+              signal.aborted
+                ? "The turn was stopped."
+                : "The reviewer timed out.",
+            ),
+          );
+        limit.signal.addEventListener("abort", onStopped, { once: true });
+      });
+      timer = setTimeout(stop, controller.reviewerTimeoutMs);
+      return await Promise.race([
+        controller.workers[reviewer.provider]({
+          cwd: this.project.path,
+          model: reviewer.model,
+          effort: reviewer.effort,
+          mode: "review",
+          task,
+          signal: limit.signal,
+        }),
+        stopped,
+      ]);
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", stop);
+      if (onStopped) limit.signal.removeEventListener("abort", onStopped);
+      limit.abort();
+    }
+  }
   async decide(request) {
     const { controller, run, chat, signal } = this,
       id = randomUUID(),
@@ -82,62 +117,56 @@ export class CursorReviewer {
         });
     if (signal.aborted)
       return { decision: "deny", reason: "The turn was stopped." };
-    const limit = new AbortController(),
-      stop = () => limit.abort();
-    let timer, onStopped;
-    signal.addEventListener("abort", stop, { once: true });
     try {
-      if (this.unavailable) throw new Error(this.unavailable);
-      const reviewer = cursorReviewer(controller.providers),
-        task = await this.context(request);
-      if (signal.aborted) throw new Error("The turn was stopped.");
-      note(
-        "running",
-        "Auto-reviewing Cursor action",
-        `${reviewer.name}: ${request.title}`,
-        { reviewer },
-      );
-      const stopped = new Promise((_, reject) => {
-        onStopped = () =>
-          reject(
-            new Error(
-              signal.aborted
-                ? "The turn was stopped."
-                : "The reviewer timed out.",
-            ),
+      const settings = readRules(controller.store).review,
+        candidates = ["codex", ...(settings.claudeFallback ? ["claude"] : [])],
+        task = await this.context(request),
+        reasons = [];
+      for (const provider of candidates) {
+        if (signal.aborted) throw new Error("The turn was stopped.");
+        try {
+          if (this.unavailable.has(provider))
+            throw new Error(this.unavailable.get(provider));
+          const reviewer = cursorReviewer(
+            controller.providers,
+            settings[provider],
+            provider,
           );
-        limit.signal.addEventListener("abort", onStopped, { once: true });
-      });
-      timer = setTimeout(stop, controller.reviewerTimeoutMs);
-      const result = await Promise.race([
-        controller.workers.codex({
-          cwd: this.project.path,
-          model: reviewer.model,
-          effort: reviewer.effort,
-          mode: "review",
-          task,
-          signal: limit.signal,
-        }),
-        stopped,
-      ]);
-      if (signal.aborted) throw new Error("The turn was stopped.");
-      const decision = parseReview(result.text),
-        label = {
-          allow: "allowed",
-          deny: "declined",
-          ask: "needs your input for",
-        }[decision.decision];
-      note(
-        decision.decision,
-        `Auto-review ${label} Cursor action`,
-        decision.reason,
-        {
-          reviewer,
-          decision: decision.decision,
-          usage: result.usage,
-        },
-      );
-      return decision;
+          note(
+            "running",
+            "Auto-reviewing Cursor action",
+            `${reviewer.name}: ${request.title}`,
+            { reviewer },
+          );
+          const result = await this.attempt(reviewer, task);
+          if (signal.aborted) throw new Error("The turn was stopped.");
+          const decision = parseReview(result.text),
+            label = {
+              allow: "allowed",
+              deny: "declined",
+              ask: "needs your input for",
+            }[decision.decision];
+          note(
+            decision.decision,
+            `Auto-review ${label} Cursor action`,
+            decision.reason,
+            {
+              reviewer,
+              decision: decision.decision,
+              usage: result.usage,
+            },
+          );
+          // A valid deny or ask is final. Fallback is only for failed reviews.
+          return decision;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          if (error.unavailable) this.unavailable.set(provider, error.message);
+          const name = provider === "codex" ? "Codex" : "Claude Code";
+          reasons.push(`${name}: ${error.message}`);
+          note("fallback", `${name} could not review`, error.message);
+        }
+      }
+      throw new Error(reasons.join(" "));
     } catch (error) {
       if (signal.aborted) {
         note(
@@ -147,14 +176,8 @@ export class CursorReviewer {
         );
         return { decision: "deny", reason: "The turn was stopped." };
       }
-      if (error.unavailable) this.unavailable = error.message;
       note("ask", "Auto-review needs your input", error.message);
       return { decision: "ask", reason: error.message };
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", stop);
-      if (onStopped) limit.signal.removeEventListener("abort", onStopped);
-      limit.abort();
     }
   }
 }

@@ -38,11 +38,15 @@ selection immediately, including during a turn. Harness pauses the agent and
 resumes its native session under the new mode, keeping the same conversation,
 turn and completed work. **Override** bypasses permission review; questions still
 require your input. Existing conversations keep their saved mode.
-Cursor's **Auto-review** uses a separate read-only Codex session on the connected
-ChatGPT subscription's default available model. It reviews each proposed action
+Cursor's **Auto-review** uses a separate Codex session, with a Claude subscription
+fallback if Codex cannot review. Choose each model and effort in **Agent rules →
+Cursor automatic reviewer**. Unpinned defaults show their current model names;
+pinned choices never silently change. Saving applies to the next review, even
+during a running turn. The reviewer evaluates each proposed action
 against your request and project rules, then allows, declines, or asks you when
 authorization is unclear. The activity log records its decisions. No worker setup
-is needed; a missing connection, usage limit, or failed review falls back to you.
+is needed. An explicit deny or request for your input is final. If neither
+reviewer can run, the action falls back to you; paid extra usage remains blocked.
 Remote access runs through a Cloudflare Tunnel behind Cloudflare Access; real
 endpoint and physical laptop/iPhone validation are pending. See [daily-use instructions](docs/OPERATIONS.md),
 [acceptance evidence](docs/ACCEPTANCE.md), [the delivery plan](docs/PLAN.md), and

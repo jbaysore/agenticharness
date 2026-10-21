@@ -11,6 +11,7 @@ import {
   WorkerUnavailable,
 } from "../src/providers/workers.mjs";
 import { REVIEW_SCHEMA } from "../src/core/review-policy.mjs";
+import { saveRules } from "../src/core/rules.mjs";
 
 const waitFor = async (condition) => {
   const deadline = Date.now() + 3000;
@@ -122,6 +123,7 @@ test("Cursor auto-review allows routine work with task/rules context and records
   const context = JSON.parse(f.jobs[0].task);
   assert.equal(context.currentRequest, "Run the tests");
   assert.equal(context.standingInstructions, "Keep edits small.");
+  assert.equal(context.turnInstructions, f.ctx.instructions);
   assert.match(context.projectRules, /Commit and push/);
   assert.equal(context.userRefusals[0].request.title, "erase unrelated work");
   assert.equal(context.proposedAction.details.rawInput.command, "npm test");
@@ -292,6 +294,175 @@ test("parallel Cursor requests get separate serialized reviews", async (t) => {
   replies[1](decision("deny"));
   assert.equal((await second).allow, false);
   assert.deepEqual(seen, ["first", "second"]);
+});
+
+function addClaude(f) {
+  const calls = [];
+  f.controller.providers.push({
+    id: "claude",
+    name: "Claude Code",
+    connected: true,
+    models: [
+      {
+        id: "claude-review",
+        name: "Claude reviewer",
+        efforts: ["low", "high"],
+        isDefault: true,
+      },
+    ],
+  });
+  f.controller.workers.claude = async (job) => {
+    calls.push(job);
+    return decision("allow");
+  };
+  return calls;
+}
+
+for (const problem of [
+  "quota",
+  "disconnected",
+  "blocked",
+  "timeout",
+  "malformed",
+  "error",
+  "missing-model",
+])
+  test(`Codex ${problem} uses the selected Claude fallback`, async (t) => {
+    const f = await fixture(t),
+      claude = addClaude(f);
+    f.controller.reviewerTimeoutMs = 20;
+    f.store.setting("agent-rules", {
+      review: {
+        codex:
+          problem === "missing-model"
+            ? { model: "unavailable", effort: null }
+            : null,
+        claude: { model: "claude-review", effort: "high" },
+        claudeFallback: true,
+      },
+    });
+    let starts = 0,
+      stopped = false;
+    f.controller.workers.codex = async (job) => {
+      starts++;
+      if (problem === "quota")
+        throw new WorkerUnavailable("Included quota exhausted");
+      if (problem === "timeout") {
+        job.signal.addEventListener(
+          "abort",
+          () => {
+            stopped = true;
+          },
+          { once: true },
+        );
+        return new Promise(() => {});
+      }
+      if (problem === "malformed") return { text: "not a verdict" };
+      throw new Error("Primary failed");
+    };
+    if (problem === "disconnected") f.controller.providers[1].connected = false;
+    if (problem === "blocked")
+      f.controller.providers[1].blockReason = "No included usage";
+    assert.equal((await f.ctx.approve(action())).allow, true);
+    assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
+    assert.equal(claude[0].model, "claude-review");
+    assert.equal(claude[0].effort, "high");
+    assert.equal(claude[0].mode, "review");
+    assert.equal(JSON.parse(claude[0].task).currentRequest, "Run the tests");
+    if (problem === "timeout") assert.equal(stopped, true);
+    if (problem === "quota") {
+      await f.ctx.approve(action("another action"));
+      assert.equal(starts, 1);
+      assert.equal(claude.length, 2);
+    }
+    const final = f.store
+      .events()
+      .filter((e) => e.payload.decision === "allow")
+      .at(-1);
+    assert.equal(final.payload.reviewer.provider, "claude");
+  });
+
+for (const verdict of ["deny", "ask"])
+  test(`a valid Codex ${verdict} never asks Claude for a different answer`, async (t) => {
+    const f = await fixture(t),
+      claude = addClaude(f);
+    f.controller.workers.codex = async () => decision(verdict);
+    const response = f.ctx.approve(action());
+    if (verdict === "ask") {
+      await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
+      f.controller.answer(f.store.pendingApprovals(f.chat.id)[0].id, {
+        allow: false,
+      });
+    }
+    assert.equal((await response).allow, false);
+    assert.equal(claude.length, 0);
+  });
+
+test("both providers exhausted ask the user and are not retried that turn", async (t) => {
+  const f = await fixture(t);
+  addClaude(f);
+  let calls = 0;
+  for (const provider of ["codex", "claude"])
+    f.controller.workers[provider] = async () => {
+      calls++;
+      throw new WorkerUnavailable(provider + " exhausted");
+    };
+  for (let n = 0; n < 2; n++) {
+    const response = f.ctx.approve(action());
+    await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
+    const approval = f.store.pendingApprovals(f.chat.id)[0];
+    assert.match(approval.request.reviewReason, /codex exhausted/);
+    assert.match(approval.request.reviewReason, /claude exhausted/);
+    f.controller.answer(approval.id, { allow: false });
+    assert.equal((await response).allow, false);
+  }
+  assert.equal(calls, 2);
+});
+
+test("Claude fallback can be switched off", async (t) => {
+  const f = await fixture(t),
+    claude = addClaude(f);
+  saveRules(
+    f.store,
+    { review: { claudeFallback: false } },
+    f.controller.providers,
+  );
+  f.controller.providers[1].blockReason = "No Codex quota";
+  const response = f.ctx.approve(action());
+  await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
+  f.controller.answer(f.store.pendingApprovals(f.chat.id)[0].id, {
+    allow: false,
+  });
+  await response;
+  assert.equal(claude.length, 0);
+});
+
+test("saving a pinned model and effort affects the next review of the same active turn", async (t) => {
+  const f = await fixture(t);
+  f.controller.providers[1].models.push({
+    id: "chosen",
+    name: "Chosen",
+    efforts: ["low", "high"],
+    isDefault: false,
+  });
+  saveRules(
+    f.store,
+    { review: { codex: { model: "chosen", effort: "high" } } },
+    f.controller.providers,
+  );
+  await f.ctx.approve(action());
+  assert.equal(f.jobs[0].model, "chosen");
+  assert.equal(f.jobs[0].effort, "high");
+  f.controller.providers[1].models[0].isDefault = true;
+  saveRules(
+    f.store,
+    { review: { codex: { model: "chosen", effort: "low" } } },
+    f.controller.providers,
+  );
+  await f.ctx.approve(action());
+  assert.equal(f.jobs[1].model, "chosen");
+  assert.equal(f.jobs[1].effort, "low");
+  assert.equal(f.store.activeRun(f.chat.id).id, f.run.id);
 });
 
 const includedUsage = () => ({

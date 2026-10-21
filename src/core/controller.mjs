@@ -446,6 +446,7 @@ export class Controller extends EventEmitter {
         },
       ],
     };
+    if (reviewer) reviewer.instructions = ctx.instructions;
     try {
       this.store.setRun(run.id, "running");
       this.event(chat.id, run.id, "run", {

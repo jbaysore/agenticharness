@@ -9,6 +9,7 @@ import {
   offeredTools,
 } from "./delegation.mjs";
 import { priceOf } from "./prices.mjs";
+import { reviewSettings, validateReviewSettings } from "./review-policy.mjs";
 
 const RULES_KEY = "agent-rules",
   STATS_KEY = "delegation-runs";
@@ -46,6 +47,7 @@ export function readRules(store) {
   return {
     instructions:
       typeof saved.instructions === "string" ? saved.instructions : "",
+    review: reviewSettings(saved.review),
     delegate: {
       enabled: saved.delegate?.enabled === true,
       actions: actionsFrom(saved.delegate?.actions),
@@ -98,6 +100,9 @@ export function saveRules(store, input, providers) {
     throw new Error("Choose a worker model before turning this rule on");
   const rules = {
     instructions,
+    review: Object.hasOwn(input, "review")
+      ? validateReviewSettings(input.review, providers, readRules(store).review)
+      : readRules(store).review,
     delegate: {
       enabled,
       actions: actionsFrom(input.delegate?.actions),

@@ -103,7 +103,15 @@ try {
   await page.goto(app.runtime.origin + "/#pair=" + app.auth.pairing());
   const rulesButton = page.getByRole("button", { name: /^Agent rules/ }),
     dialog = page.getByRole("dialog", { name: "Agent rules" }),
-    route = dialog.locator(".rule-route"),
+    route = dialog
+      .locator(".connection")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Hand off work to a cheaper model",
+          exact: true,
+        }),
+      })
+      .locator(".rule-route"),
     toggle = dialog.getByLabel("Hand off work to a cheaper model"),
     worker = dialog.getByLabel("Worker model", { exact: true }),
     fallback = dialog.getByLabel("Fallback worker", { exact: true }),
