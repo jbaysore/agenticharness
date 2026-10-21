@@ -17,6 +17,7 @@ import { UsageGlance } from "./usage-glance.jsx";
 import {
   activeChats,
   attentionCount,
+  usageVerificationLabel,
   workspacePeers,
   workspacePeersLabel,
 } from "./status.mjs";
@@ -999,7 +1000,12 @@ function App() {
                   {p.route} <span className="muted">· {p.plan}</span>
                 </p>
                 {p.blockReason && <p className="error-text">{p.blockReason}</p>}
-                {p.usage?.authoritative ? (
+                {usageVerificationLabel(p) && (
+                  <p className="muted small" role="status" title={p.usage.lastConfirmedAt}>
+                    {usageVerificationLabel(p)}
+                  </p>
+                )}
+                {p.usage?.authoritative || p.usage?.lastConfirmedAt ? (
                   p.usage.windows.map((w, i) => (
                     <div className="usage-meter" key={i}>
                       <div>
@@ -1014,6 +1020,7 @@ function App() {
                         </span>
                         <strong>
                           {Math.max(0, 100 - w.usedPercent)}% remaining
+                          {p.usage?.verificationStatus === "unknown" && " (last confirmed)"}
                         </strong>
                       </div>
                       <progress

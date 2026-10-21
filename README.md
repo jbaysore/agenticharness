@@ -63,8 +63,12 @@ endpoint and physical laptop/iPhone validation are pending. See [daily-use instr
   reliable quota meter. Auto is omitted from the picker. Models that offer Fast
   are pinned to standard speed.
 
-Connection checks and live catalogs adapt to plan changes. Unknown or exhausted
-quota stops Codex/Claude. Cursor's account-level disabled on-demand setting is the
+Connection checks and live catalogs adapt to plan changes. Claude turns require
+verified subscription-only usage before starting. If a later usage lookup is
+incomplete, the turn continues while the meter shows Unknown and the last
+confirmation time. Complete readings restore the meter automatically; confirmed
+exhausted limits or enabled paid usage still stop the turn with a visible reason.
+Unknown or exhausted quota stops Codex. Cursor's account-level disabled on-demand setting is the
 billing boundary. The app never supplies an inference API key or buys credits.
 
 ## Development

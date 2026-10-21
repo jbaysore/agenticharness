@@ -98,7 +98,7 @@ test("Claude requires explicit user-disabled extra usage, not an empty credit ba
   assert.match(checkClaudeBilling(auth, u), /temporarily empty/);
   u.rate_limits.extra_usage.user_disabled = true;
   u.rate_limits.extra_usage.is_enabled = true;
-  assert.match(checkClaudeBilling(auth, u), /could not verify/);
+  assert.match(checkClaudeBilling(auth, u), /extra usage is enabled/);
 });
 test("account confirmation stays with the account and does not expire", () => {
   const c = { fingerprint: "account-a", disabled: true, verifiedAt: 1000 };

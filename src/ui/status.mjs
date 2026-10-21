@@ -5,7 +5,17 @@ export function providerStatusLabel(provider) {
   )
     return "Out of usage";
   if (provider?.blockReason) return "Setup needed";
+  if (provider?.connected && provider.usage?.verificationStatus === "unknown")
+    return "Usage unknown";
   return provider?.connected ? "Connected" : "Checking…";
+}
+export function usageVerificationLabel(provider) {
+  if (provider?.usage?.verificationStatus !== "unknown") return null;
+  const at = provider.usage.lastConfirmedAt;
+  if (!at) return "Unknown · no confirmed reading";
+  return "Unknown · last confirmed at " + new Date(at).toLocaleTimeString(undefined, {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
 }
 // What a chat is asking of you right now, most pressing first. A turn that
 // failed or finished stops being marked once the chat has been looked at.
@@ -55,7 +65,7 @@ export function attentionCount(conversations) {
 }
 // Remaining included usage, one row per provider limit window.
 export function usageWindows(provider) {
-  if (!provider?.usage?.authoritative) return [];
+  if (!provider?.usage?.authoritative && !provider?.usage?.lastConfirmedAt) return [];
   return (provider.usage.windows ?? [])
     .filter((w) => typeof w.usedPercent === "number")
     .map((w) => {
@@ -106,8 +116,9 @@ function usageLevel(remaining) {
 // The tightest limit decides a provider's state. The header shows the 5-hour
 // and weekly limits side by side, or the tightest limit when neither exists.
 export function usageGlance(provider) {
-  const windows = usageWindows(provider);
-  const remaining = windows.length
+  const windows = usageWindows(provider),
+    unknown = provider?.usage?.verificationStatus === "unknown";
+  const remaining = !unknown && windows.length
     ? Math.min(...windows.map((w) => w.remaining))
     : null;
   const level =
@@ -123,8 +134,8 @@ export function usageGlance(provider) {
     .map((w) => ({
       name: w.name,
       short: w.minutes < 1440 ? Math.round(w.minutes / 60) + "h" : "wk",
-      remaining: w.remaining,
-      level: usageLevel(w.remaining),
+      remaining: unknown ? null : w.remaining,
+      level: unknown ? "unknown" : usageLevel(w.remaining),
     }));
   return {
     remaining,

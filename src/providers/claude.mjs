@@ -12,6 +12,8 @@ import { AsyncQueue } from "../core/queue.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
+import { checkClaudeBilling, createClaudeUsageMonitor } from "../security/claude-usage.mjs";
+export { checkClaudeBilling };
 const exec = promisify(execFile);
 
 export function claudeOptions(cwd) {
@@ -39,27 +41,6 @@ const permissionModes = {
     allowDangerouslySkipPermissions: true,
   },
 };
-export function checkClaudeBilling(auth, usage) {
-  if (
-    !auth.loggedIn ||
-    auth.authMethod !== "claude.ai" ||
-    auth.apiProvider !== "firstParty" ||
-    !["pro", "max", "team"].includes(auth.subscriptionType)
-  )
-    return "Sign in to Claude Code with an included-usage Claude subscription. API, gateway and usage-based accounts are blocked.";
-  if (
-    usage?.rate_limits_available !== true ||
-    usage?.rate_limits?.extra_usage?.is_enabled !== false
-  )
-    return "The Claude CLI could not verify that paid extra usage is disabled.";
-  if (usage.rate_limits.extra_usage.user_disabled !== true)
-    return "Disable Claude usage credits at the account level; a temporarily empty credit balance is not sufficient.";
-  if (!Array.isArray(usage.rate_limits.limits))
-    return "Current Claude subscription quota is unavailable.";
-  if (usage.rate_limits.limits.some((w) => w.percent >= 100))
-    return "A Claude included-usage limit is exhausted.";
-  return null;
-}
 export async function claudeAuth() {
   const path = executable("claude");
   if (!path) throw new Error("Claude Code is not installed");
@@ -103,20 +84,6 @@ export async function usageOf(q) {
     return null;
   }
 }
-function publicUsage(usage) {
-  return {
-    source: "Claude Code native usage control (experimental, version checked)",
-    authoritative: usage?.rate_limits_available === true,
-    windows: (usage?.rate_limits?.limits ?? []).map((w) => ({
-      bucket: w.kind,
-      label: w.scope?.model?.display_name ?? w.group,
-      usedPercent: w.percent,
-      resetsAt: w.resets_at,
-      windowMinutes: null,
-    })),
-    extraUsageEnabled: usage?.rate_limits?.extra_usage?.is_enabled ?? null,
-  };
-}
 export async function inspectClaude(cwd) {
   const auth = await claudeAuth();
   if (!auth.loggedIn)
@@ -133,15 +100,15 @@ export async function inspectClaude(cwd) {
     q = query({ prompt: input, options: { ...claudeOptions(cwd), tools: [] } });
   try {
     const models = await q.supportedModels(),
-      usage = await usageOf(q);
+      verification = createClaudeUsageMonitor(auth).update(await usageOf(q));
     return {
       id: "claude",
       name: "Claude Code",
       route: "Claude subscription",
       plan: auth.subscriptionType,
       connected: true,
-      blockReason: checkClaudeBilling(auth, usage),
-      usage: publicUsage(usage),
+      blockReason: verification.reason,
+      usage: verification.usage,
       models: models.map((m) => ({
         id: m.value,
         name: m.displayName,
@@ -196,7 +163,13 @@ const browserShape = (schema) => {
     return null;
   }
 };
-export async function runClaude(ctx) {
+export async function runClaude(ctx, {
+  queryFn = query,
+  readAuth = claudeAuth,
+  readUsage = usageOf,
+  baseOptions = claudeOptions,
+  pollIntervalMs = 20000,
+} = {}) {
   const input = new AsyncQueue();
   let currentId = "initial";
   const historyServer = createSdkMcpServer({
@@ -285,10 +258,10 @@ export async function runClaude(ctx) {
         ),
     ],
   });
-  const q = query({
+  const q = queryFn({
     prompt: input,
     options: {
-      ...claudeOptions(ctx.project.path),
+      ...baseOptions(ctx.project.path),
       ...permissionModes[ctx.permissions ?? "auto"],
       model: ctx.model,
       effort: ctx.effort || undefined,
@@ -328,17 +301,19 @@ export async function runClaude(ctx) {
   let timer,
     killTimer,
     polling = false,
-    stopped = false;
+    finished = false,
+    stopped = null;
   const cancel = () => {
     q.interrupt().catch(() => q.close());
     killTimer ??= setTimeout(() => q.close(), 8000);
   };
   ctx.signal.addEventListener("abort", cancel, { once: true });
   try {
-    const auth = await claudeAuth(),
-      usage = await usageOf(q),
-      reason = checkClaudeBilling(auth, usage);
-    if (reason) throw new Error(reason);
+    const auth = await readAuth(),
+      monitor = createClaudeUsageMonitor(auth),
+      initial = monitor.update(await readUsage(q));
+    ctx.emit("usage", initial.usage);
+    if (initial.reason) throw new Error(initial.reason);
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");
     input.push({
@@ -353,21 +328,23 @@ export async function runClaude(ctx) {
       session_id: ctx.session?.id ?? "",
     });
     timer = setInterval(async () => {
-      if (polling) return;
+      if (polling || finished || stopped || ctx.signal.aborted) return;
       polling = true;
       try {
-        const next = await usageOf(q);
-        ctx.emit("usage", publicUsage(next));
-        const blocked = checkClaudeBilling(auth, next);
-        if (blocked) {
-          stopped = true;
-          ctx.emit("work", { kind: "billing-stop", reason: blocked });
+        // A failed lookup is telemetry loss, not evidence of a billing change.
+        const reading = await readUsage(q).catch(() => null);
+        if (finished || ctx.signal.aborted) return;
+        const next = monitor.update(reading);
+        ctx.emit("usage", next.usage);
+        if (next.reason) {
+          stopped = next.reason;
+          ctx.emit("work", { kind: "billing-stop", reason: stopped });
           cancel();
         }
       } finally {
         polling = false;
       }
-    }, 20000);
+    }, pollIntervalMs);
     for await (const event of q) {
       if (event.session_id) ctx.saveSession({ id: event.session_id });
       if (event.type === "system" && event.subtype === "init" && event.model)
@@ -462,12 +439,9 @@ export async function runClaude(ctx) {
           event.rate_limit_info?.overageInUse ||
           event.rate_limit_info?.status === "rejected")
       ) {
-        stopped = true;
+        stopped = "Claude reported a usage boundary";
         cancel();
-        ctx.emit("work", {
-          kind: "billing-stop",
-          reason: "Claude reported a usage boundary",
-        });
+        ctx.emit("work", { kind: "billing-stop", reason: stopped });
       }
       if (event.type === "result") {
         ctx.emit("work", {
@@ -478,17 +452,21 @@ export async function runClaude(ctx) {
         });
         return {
           status:
-            ctx.signal.aborted || stopped
+            ctx.signal.aborted
               ? "cancelled"
-              : event.is_error
+              : stopped || event.is_error
                 ? "failed"
                 : "completed",
-          error: event.errors?.join("\n"),
+          error: stopped || event.errors?.join("\n"),
         };
       }
     }
-    throw new Error("Claude ended without a final result");
+    throw new Error(stopped || "Claude ended without a final result");
+  } catch (error) {
+    if (stopped) return { status: "failed", error: stopped };
+    throw error;
   } finally {
+    finished = true;
     clearInterval(timer);
     clearTimeout(killTimer);
     ctx.signal.removeEventListener("abort", cancel);

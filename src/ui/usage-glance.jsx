@@ -4,6 +4,7 @@ import {
   resetLabel,
   usageGlance,
   usageWindows,
+  usageVerificationLabel,
 } from "./status.mjs";
 
 // Included usage left for each agent, at a glance in the top bar. Clicking it
@@ -41,7 +42,8 @@ export function UsageGlance({ providers, onOpenConnections }) {
           <span
             className={`usage-chip ${p.id} ${g.level}`}
             key={p.id}
-            aria-label={`${p.name}: ${g.bars
+            title={usageVerificationLabel(p) ?? undefined}
+            aria-label={`${p.name}: ${usageVerificationLabel(p) ?? g.bars
               .map((b) =>
                 b.remaining === null
                   ? "usage unknown"
@@ -87,17 +89,22 @@ export function UsageGlance({ providers, onOpenConnections }) {
                         : g.level === "low"
                           ? "Running low"
                           : p.connected && !p.blockReason
-                            ? "No quota meter"
+                            ? p.usage?.verificationStatus === "unknown" ? "Unknown" : "No quota meter"
                             : providerStatusLabel(p)}
                     </span>
                   )}
                 </header>
+                {usageVerificationLabel(p) && (
+                  <p className="muted small" role="status" title={p.usage.lastConfirmedAt}>
+                    {usageVerificationLabel(p)}
+                  </p>
+                )}
                 {windows.length ? (
                   windows.map((w, i) => (
                     <div className="usage-meter" key={i}>
                       <div>
                         <span>{w.name}</span>
-                        <strong>{w.remaining}% left</strong>
+                        <strong>{w.remaining}% left{p.usage?.verificationStatus === "unknown" && " (last confirmed)"}</strong>
                       </div>
                       <progress max="100" value={w.remaining} />
                       {w.resetsAt && <small>{resetLabel(w.resetsAt)}</small>}

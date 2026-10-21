@@ -211,7 +211,13 @@ export class Controller extends EventEmitter {
       }
       if (type === "nativeTurn")
         this.store.setRun(run.id, "running", payload.id);
-      if (type === "usage") payload = { ...payload, provider: run.provider };
+      if (type === "usage") {
+        // Reloading the page must keep the latest reading, including stale status.
+        this.providers = this.providers.map((p) =>
+          p.id === run.provider ? { ...p, usage: payload } : p,
+        );
+        payload = { ...payload, provider: run.provider };
+      }
       this.event(chat.id, run.id, type, payload);
     };
     // Override answers every permission request itself and logs it; questions
