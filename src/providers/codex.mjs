@@ -128,14 +128,36 @@ export async function runCodex(ctx) {
     rejectDone,
     resolveDone,
     polling = false,
-    killTimer;
+    killTimer,
+    // A goal runs turn after turn until Codex marks it met, blocked or paused.
+    goalStatus = null,
+    goalWait,
+    onTurnStarted;
+  const goal = ctx.mode === "goal";
   const done = new Promise((resolve, reject) => {
     resolveDone = resolve;
     rejectDone = reject;
   });
   done.catch(() => {});
+  const nextTurn = (ms) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), ms);
+      onTurnStarted = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+    });
   const cancel = async () => {
     killTimer ??= setTimeout(() => rpc.close(), 8000);
+    // Stopping pauses the goal, as interrupting it does in Codex.
+    if (goal && threadId && !rpc.closed)
+      await rpc
+        .call(
+          "thread/goal/set",
+          { threadId, status: "paused", origin: "user" },
+          5000,
+        )
+        .catch(() => {});
     if (threadId && turnId && !rpc.closed) {
       try {
         await rpc.call("turn/interrupt", { threadId, turnId }, 5000);
@@ -232,19 +254,38 @@ export async function runCodex(ctx) {
     }
     if (method === "turn/started") {
       turnId = p.turn.id;
+      clearTimeout(goalWait);
+      onTurnStarted?.();
       ctx.emit("nativeTurn", { id: turnId });
     }
     if (method === "item/agentMessage/delta")
       ctx.emit("text", { nativeId: p.itemId, delta: p.delta });
-    if (method === "item/completed" && p.item?.type === "agentMessage")
+    // A plan-mode turn ends with its proposed plan, shown as a reply.
+    if (
+      method === "item/completed" &&
+      ["agentMessage", "plan"].includes(p.item?.type)
+    )
       ctx.emit("text", {
         nativeId: p.item.id,
         text: p.item.text,
         phase: p.item.phase,
       });
+    if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
+      goalStatus = p.goal?.status ?? null;
+      ctx.emit("work", {
+        kind: "goal",
+        provider: "codex",
+        item: p.goal
+          ? {
+              title: `Goal ${{ active: "active", paused: "paused", blocked: "blocked", usageLimited: "stopped at a usage limit", budgetLimited: "stopped at its budget", complete: "met" }[p.goal.status] ?? p.goal.status}: ${p.goal.objective}`,
+            }
+          : { title: "Goal cleared" },
+      });
+    }
     if (
       ["item/started", "item/completed"].includes(method) &&
       p.item?.type !== "agentMessage" &&
+      p.item?.type !== "plan" &&
       p.item?.type !== "userMessage" &&
       p.item?.type !== "reasoning"
     )
@@ -281,8 +322,14 @@ export async function runCodex(ctx) {
       ctx.emit("work", { kind: "token-usage", ...p });
     if (method === "error") ctx.emit("work", { kind: "error", error: p.error });
     if (method === "turn/completed") {
-      finished = true;
-      resolveDone({ status: p.turn.status, error: p.turn.error });
+      const finish = () => {
+        finished = true;
+        resolveDone({ status: p.turn.status, error: p.turn.error });
+      };
+      // Codex starts the goal's next turn itself; the run lasts until it stops.
+      if (goal && goalStatus === "active" && p.turn.status === "completed")
+        goalWait = setTimeout(finish, 5000);
+      else finish();
     }
   });
   let timer;
@@ -328,21 +375,44 @@ export async function runCodex(ctx) {
     ctx.saveSession({ id: threadId });
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");
-    const start = await rpc.call("turn/start", {
-      threadId,
-      model: ctx.model,
-      effort: ctx.effort || undefined,
-      serviceTierForTurn: "default",
-      input: [
-        {
-          type: "text",
-          text: [ctx.handoff, ctx.text]
-            .filter(Boolean)
-            .join("\n\nCurrent request:\n"),
+    // Setting a goal can start its first turn; start one only if it did not.
+    let started = false;
+    if (goal && !ctx.continuing) {
+      const soon = nextTurn(2000);
+      const { goal: set } = await rpc.call("thread/goal/set", {
+        threadId,
+        objective: ctx.text,
+        status: "active",
+        origin: "user",
+      });
+      goalStatus = set.status;
+      started = await soon;
+    }
+    if (!started) {
+      const start = await rpc.call("turn/start", {
+        threadId,
+        model: ctx.model,
+        effort: ctx.effort || undefined,
+        serviceTierForTurn: "default",
+        collaborationMode: {
+          mode: ctx.mode === "plan" ? "plan" : "default",
+          settings: {
+            model: ctx.model,
+            reasoning_effort: ctx.effort || null,
+            developer_instructions: null,
+          },
         },
-      ],
-    });
-    turnId = start.turn.id;
+        input: [
+          {
+            type: "text",
+            text: [ctx.handoff, ctx.text]
+              .filter(Boolean)
+              .join("\n\nCurrent request:\n"),
+          },
+        ],
+      });
+      turnId = start.turn.id;
+    }
     timer = setInterval(async () => {
       if (polling || finished || rpc.closed) return;
       polling = true;
@@ -369,6 +439,7 @@ export async function runCodex(ctx) {
     finished = true;
     clearInterval(timer);
     clearTimeout(killTimer);
+    clearTimeout(goalWait);
     ctx.signal.removeEventListener("abort", cancel);
     rpc.close();
   }

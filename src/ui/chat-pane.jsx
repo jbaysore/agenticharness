@@ -97,6 +97,21 @@ const permissionModes = [
     "Everything is allowed without asking, including commands outside the sandbox. Questions from the agent still come to you.",
   ],
 ];
+// Each mode is the agent's own: Claude Code's plan mode and /goal, Codex's
+// Plan collaboration mode and thread goals, Cursor's Plan mode.
+const chatModes = [
+  ["default", "Default", "The agent works on your message as usual."],
+  [
+    "plan",
+    "Plan",
+    "The agent researches and proposes a plan without changing anything. Approve the plan to have it built.",
+  ],
+  [
+    "goal",
+    "Goal",
+    "Your message becomes a goal. The agent keeps working, turn after turn, until it is met. Not available for Cursor.",
+  ],
+];
 
 export function ChatPane({
   ref,
@@ -134,6 +149,8 @@ export function ChatPane({
     [draft, setDraft] = useState(() => readDraft(draftKey)),
     [busy, setBusy] = useState(false),
     [permissionsBusy, setPermissionsBusy] = useState(false),
+    [mode, setMode] = useState(chat?.mode ?? "default"),
+    [modeBusy, setModeBusy] = useState(false),
     [caret, setCaret] = useState(0);
   const messages = useChatScroll(chat),
     input = useRef(null),
@@ -155,6 +172,7 @@ export function ChatPane({
     setModel(chat.model);
     setEffort(chat.effort ?? "");
     setPermissions(chat.permissions);
+    setMode(chat.mode ?? "default");
     const pending = readPending(chat.id);
     if (!pending || sending.current) return;
     let ignore = false;
@@ -171,6 +189,7 @@ export function ChatPane({
         setModel(pending.model);
         setEffort(pending.effort ?? "");
         if (pending.permissions) setPermissions(pending.permissions);
+        if (pending.mode) setMode(pending.mode);
         report(
           new Error(
             "Your unconfirmed message was restored. Sending it again uses the same action ID.",
@@ -185,6 +204,12 @@ export function ChatPane({
   useEffect(() => {
     if (chat && !permissionsBusy) setPermissions(chat.permissions);
   }, [chat?.id, chat?.permissions, permissionsBusy]);
+  useEffect(() => {
+    if (chat && !modeBusy) setMode(chat.mode ?? "default");
+  }, [chat?.id, chat?.mode, modeBusy]);
+  useEffect(() => {
+    if (provider === "cursor" && mode === "goal") setMode("default");
+  }, [provider, mode]);
   useEffect(() => {
     if (!connected?.models?.length) return;
     const available = connected.models.some(
@@ -213,9 +238,27 @@ export function ChatPane({
       setPermissionsBusy(false);
     }
   }
+  async function changeMode(next) {
+    setMode(next);
+    if (!chat) return;
+    setModeBusy(true);
+    try {
+      await api(`/api/chats/${chat.id}`, { mode: next }, "PATCH");
+      await reload(chat.id);
+    } catch (e) {
+      await reload(chat.id).catch(() => {});
+      report(e);
+    } finally {
+      setModeBusy(false);
+    }
+  }
   function pickSkill(command) {
     const field = input.current;
-    const next = applyCommand(field?.value ?? draft, field?.selectionStart ?? caret, command);
+    const next = applyCommand(
+      field?.value ?? draft,
+      field?.selectionStart ?? caret,
+      command,
+    );
     flushSync(() => {
       setDraft(next.text);
       setCaret(next.cursor);
@@ -223,13 +266,14 @@ export function ChatPane({
     field?.focus();
     field?.setSelectionRange(next.cursor, next.cursor);
   }
-  async function send(override) {
+  async function send(override, turnMode = mode) {
     const text = typeof override === "string" ? override : draft;
     if (
       !text.trim() ||
       !project ||
       busy ||
       permissionsBusy ||
+      modeBusy ||
       chat?.activeRun ||
       !model ||
       (selectedModel?.efforts?.length && !effort)
@@ -240,7 +284,13 @@ export function ChatPane({
     try {
       const c =
         chat ??
-        (await ensureChat({ provider, model, effort, permissions }));
+        (await ensureChat({
+          provider,
+          model,
+          effort,
+          permissions,
+          mode: turnMode,
+        }));
       if (!chat) saveDraft(draftKey, "");
       const prior = readPending(c.id);
       const body =
@@ -248,7 +298,8 @@ export function ChatPane({
         prior.text === text &&
         prior.provider === provider &&
         prior.model === model &&
-        prior.permissions === permissions
+        prior.permissions === permissions &&
+        prior.mode === turnMode
           ? prior
           : {
               chatId: c.id,
@@ -258,6 +309,7 @@ export function ChatPane({
               model,
               effort: effort || null,
               permissions,
+              mode: turnMode,
             };
       savePending(c.id, body);
       await api(`/api/chats/${c.id}/messages`, body);
@@ -435,6 +487,26 @@ export function ChatPane({
             Send a message to continue after resolving the issue.
           </div>
         )}
+        {/* After a plan turn, building it leaves plan mode, as accepting a
+            plan does in Codex and Cursor. */}
+        {chat &&
+          !chat.activeRun &&
+          mode === "plan" &&
+          chat.runs?.[0]?.status === "completed" && (
+            <div className="plan-ready">
+              <span>Happy with the plan?</span>
+              <button
+                className="primary"
+                disabled={busy || modeBusy}
+                onClick={act(async () => {
+                  await changeMode("default");
+                  await send("Implement the plan.", "default");
+                })}
+              >
+                Build this plan
+              </button>
+            </div>
+          )}
         {chat?.approvals?.map((a) => (
           <Approval
             key={a.id}
@@ -523,6 +595,7 @@ export function ChatPane({
                 disabled={
                   busy ||
                   permissionsBusy ||
+                  modeBusy ||
                   !draft.trim() ||
                   !project ||
                   !model ||
@@ -548,6 +621,27 @@ export function ChatPane({
             >
               {permissionModes.map(([id, label]) => (
                 <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label
+            className={"mode-control " + mode}
+            title={chatModes.find(([id]) => id === mode)?.[2]}
+          >
+            <select
+              aria-label="Mode"
+              value={mode}
+              disabled={busy || modeBusy || !!chat?.activeRun}
+              onChange={(e) => changeMode(e.target.value)}
+            >
+              {chatModes.map(([id, label]) => (
+                <option
+                  key={id}
+                  value={id}
+                  disabled={id === "goal" && provider === "cursor"}
+                >
                   {label}
                 </option>
               ))}

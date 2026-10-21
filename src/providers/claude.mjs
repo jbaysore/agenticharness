@@ -12,7 +12,10 @@ import { AsyncQueue } from "../core/queue.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
-import { checkClaudeBilling, createClaudeUsageMonitor } from "../security/claude-usage.mjs";
+import {
+  checkClaudeBilling,
+  createClaudeUsageMonitor,
+} from "../security/claude-usage.mjs";
 export { checkClaudeBilling };
 const exec = promisify(execFile);
 
@@ -163,14 +166,18 @@ const browserShape = (schema) => {
     return null;
   }
 };
-export async function runClaude(ctx, {
-  queryFn = query,
-  readAuth = claudeAuth,
-  readUsage = usageOf,
-  baseOptions = claudeOptions,
-  pollIntervalMs = 20000,
-} = {}) {
-  const input = new AsyncQueue();
+export async function runClaude(
+  ctx,
+  {
+    queryFn = query,
+    readAuth = claudeAuth,
+    readUsage = usageOf,
+    baseOptions = claudeOptions,
+    pollIntervalMs = 20000,
+  } = {},
+) {
+  const input = new AsyncQueue(),
+    goal = ctx.mode === "goal";
   let currentId = "initial";
   const historyServer = createSdkMcpServer({
     name: "harness",
@@ -263,13 +270,19 @@ export async function runClaude(ctx, {
     options: {
       ...baseOptions(ctx.project.path),
       ...permissionModes[ctx.permissions ?? "auto"],
+      ...(ctx.mode === "plan" && { permissionMode: "plan" }),
       model: ctx.model,
       effort: ctx.effort || undefined,
       resume: ctx.session?.id,
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        append: [ctx.instructions, await projectInstructions(ctx.project.path)]
+        // /goal has to open the message, so a goal turn's hand-off goes here.
+        append: [
+          ctx.instructions,
+          goal && ctx.handoff,
+          await projectInstructions(ctx.project.path),
+        ]
           .filter(Boolean)
           .join("\n\n"),
       },
@@ -277,6 +290,34 @@ export async function runClaude(ctx, {
       canUseTool: async (name, args) => {
         if (name.startsWith("mcp__harness__"))
           return { behavior: "allow", updatedInput: args };
+        // Approving a plan leaves plan mode for the chat's permission mode,
+        // as accepting one does in Claude Code.
+        if (name === "ExitPlanMode") {
+          const answer = await ctx.approve({
+            kind: "plan",
+            title: "Review the plan before anything changes",
+            plan: args.plan,
+            details: args,
+          });
+          if (!answer.allow)
+            return {
+              behavior: "deny",
+              message:
+                "The user wants to keep planning. Stay in plan mode and ask what to change.",
+            };
+          ctx.planApproved?.();
+          return {
+            behavior: "allow",
+            updatedInput: args,
+            updatedPermissions: [
+              {
+                type: "setMode",
+                mode: permissionModes[ctx.permissions ?? "auto"].permissionMode,
+                destination: "session",
+              },
+            ],
+          };
+        }
         const answer = await ctx.approve({
           kind: name === "AskUserQuestion" ? "question" : "permission",
           title: name,
@@ -320,9 +361,12 @@ export async function runClaude(ctx, {
       type: "user",
       message: {
         role: "user",
-        content: [ctx.handoff, ctx.text]
-          .filter(Boolean)
-          .join("\n\nCurrent request:\n"),
+        content:
+          goal && !ctx.continuing
+            ? "/goal " + ctx.text
+            : [ctx.handoff, ctx.text]
+                .filter(Boolean)
+                .join("\n\nCurrent request:\n"),
       },
       parent_tool_use_id: null,
       session_id: ctx.session?.id ?? "",
@@ -347,6 +391,22 @@ export async function runClaude(ctx, {
     }, pollIntervalMs);
     for await (const event of q) {
       if (event.session_id) ctx.saveSession({ id: event.session_id });
+      if (event.type === "active_goal")
+        ctx.emit("work", {
+          kind: "goal",
+          provider: "claude",
+          item: event.value
+            ? {
+                title: `Goal: ${event.value.condition}`,
+                description: [
+                  `Checked ${event.value.iterations} ${event.value.iterations === 1 ? "time" : "times"}`,
+                  event.value.last_reason,
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+              }
+            : { title: "Goal met" },
+        });
       if (event.type === "system" && event.subtype === "init" && event.model)
         ctx.emit("nativeModel", { model: event.model, requested: ctx.model });
       if (event.type === "stream_event" && !event.parent_tool_use_id) {
@@ -451,12 +511,11 @@ export async function runClaude(ctx, {
           label: "Provider token/cost estimate; not a charge or quota meter",
         });
         return {
-          status:
-            ctx.signal.aborted
-              ? "cancelled"
-              : stopped || event.is_error
-                ? "failed"
-                : "completed",
+          status: ctx.signal.aborted
+            ? "cancelled"
+            : stopped || event.is_error
+              ? "failed"
+              : "completed",
           error: stopped || event.errors?.join("\n"),
         };
       }

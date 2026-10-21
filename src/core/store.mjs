@@ -71,6 +71,11 @@ export class Store {
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN permissions TEXT NOT NULL DEFAULT 'auto'",
       );
+    // Default, plan or goal: how the next turn runs, in the agent's own terms.
+    if (!conversation.includes("mode"))
+      this.db.exec(
+        "ALTER TABLE conversations ADD COLUMN mode TEXT NOT NULL DEFAULT 'default'",
+      );
     if (!conversation.includes("archived_at"))
       this.db.exec("ALTER TABLE conversations ADD COLUMN archived_at TEXT");
     // Existing history starts out read; only later turns can mark a chat unread.
@@ -174,6 +179,7 @@ export class Store {
     model = "",
     effort = null,
     permissions = "auto",
+    mode = "default",
     scope = this.settings().defaultHistoryScope,
     createdAt,
   }) {
@@ -183,7 +189,7 @@ export class Store {
       now = createdAt || this.now();
     this.db
       .prepare(
-        "INSERT INTO conversations(id,project_id,title,provider,model,effort,permissions,scope,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO conversations(id,project_id,title,provider,model,effort,permissions,mode,scope,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       )
       .run(
         id,
@@ -193,6 +199,7 @@ export class Store {
         model,
         effort,
         permissions,
+        mode,
         scope,
         now,
         now,
@@ -208,6 +215,7 @@ export class Store {
       "model",
       "effort",
       "permissions",
+      "mode",
       "sessions",
     ]);
     const entries = Object.entries(fields).filter(([key]) => allowed.has(key));

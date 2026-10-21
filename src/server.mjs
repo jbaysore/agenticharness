@@ -6,7 +6,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { Store } from "./core/store.mjs";
-import { Controller, PERMISSION_MODES } from "./core/controller.mjs";
+import {
+  CHAT_MODES,
+  Controller,
+  PERMISSION_MODES,
+} from "./core/controller.mjs";
 import {
   Authentication,
   onHost,
@@ -298,7 +302,11 @@ export async function createHarness({
         const skillMatch = path.match(/^\/api\/skills\/([^/]+)$/);
         if (skillMatch) {
           if (method === "PATCH") {
-            const skill = updateSkill(store, skillMatch[1], await readJson(req));
+            const skill = updateSkill(
+              store,
+              skillMatch[1],
+              await readJson(req),
+            );
             controller.event(null, null, "skills", {});
             return json(res, 200, skill);
           }
@@ -410,6 +418,7 @@ export async function createHarness({
             permissions: PERMISSION_MODES.includes(body.permissions)
               ? body.permissions
               : "auto",
+            mode: CHAT_MODES.includes(body.mode) ? body.mode : "default",
           });
           controller.event(chat.id, null, "chat", chat);
           return json(res, 201, chat);
@@ -437,6 +446,7 @@ export async function createHarness({
             }
             if (Object.hasOwn(body, "permissions"))
               controller.setPermissions(id, body.permissions);
+            if (Object.hasOwn(body, "mode")) controller.setMode(id, body.mode);
             const chat = store.updateConversation(id, fields);
             controller.event(id, null, "chat", chat);
             return json(res, 200, chat);

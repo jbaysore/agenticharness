@@ -1370,9 +1370,16 @@ small {
   margin-left: auto;
   flex-shrink: 0;
 }
-.permissions-control select {
+.permissions-control select,
+.mode-control select {
   field-sizing: content;
   max-width: none;
+}
+/* Plan and goal change how the agent works, so they read like Override. */
+.mode-control.plan select,
+.mode-control.goal select {
+  color: var(--text);
+  font-weight: 600;
 }
 /* Override skips every approval, so it reads louder than the other modes. */
 .permissions-control.override select {
@@ -2466,6 +2473,24 @@ small {
 }
 .approval label {
   margin: 12px 0;
+}
+.approval .plan-body {
+  max-height: 420px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 4px 16px;
+}
+.plan-ready {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  max-width: 760px;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--text-2);
 }
 .toast {
   position: fixed;

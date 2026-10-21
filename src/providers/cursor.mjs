@@ -255,10 +255,12 @@ export async function runCursor(ctx) {
                 : { outcome: "cancelled" },
           });
       } else if (m.method === "cursor/create_plan") {
+        // In plan mode the plan is the user's to accept, as it is in Cursor.
         const answer = await ctx.approve({
-          kind: "permission",
+          kind: ctx.mode === "plan" ? "plan" : "permission",
           method: m.method,
           title: m.params.name ?? "Review Cursor plan",
+          plan: m.params.plan ?? m.params.overview,
           details: m.params,
         });
         if (!rpc.closed)
@@ -333,6 +335,11 @@ export async function runCursor(ctx) {
         "Choose an available standard Cursor preset from the live ACP catalog",
       );
     await configureCursorModel(rpc, sessionId, ctx.model);
+    // Cursor's own read-only Plan mode; a saved session keeps its last mode.
+    await rpc.call("session/set_mode", {
+      sessionId,
+      modeId: ctx.mode === "plan" ? "plan" : "agent",
+    });
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");
     live = true;

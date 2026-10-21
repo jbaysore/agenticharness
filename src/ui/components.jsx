@@ -143,13 +143,19 @@ export function Approval({ approval, onAnswer }) {
       <div className="eyebrow">
         {r.kind === "question"
           ? `${providerName(approval.provider)} has a question`
-          : `${providerName(approval.provider)} needs you`}
+          : r.kind === "plan"
+            ? `${providerName(approval.provider)} has a plan`
+            : `${providerName(approval.provider)} needs you`}
       </div>
       <h3>{r.title}</h3>
       {r.reviewReason && (
         <p className="muted small">Auto-review: {r.reviewReason}</p>
       )}
-      {r.kind === "question" ? (
+      {r.kind === "plan" && r.plan ? (
+        <div className="plan-body">
+          <Markdown text={r.plan} />
+        </div>
+      ) : r.kind === "question" ? (
         r.questions?.map((q) => (
           <label key={questionId(q)}>
             {q.question ?? q.header}
@@ -204,7 +210,7 @@ export function Approval({ approval, onAnswer }) {
           disabled={submitting}
           onClick={() => respond({ allow: false })}
         >
-          Decline
+          {r.kind === "plan" ? "Keep planning" : "Decline"}
         </button>
         <button
           className="primary"
@@ -219,7 +225,11 @@ export function Approval({ approval, onAnswer }) {
           }
           onClick={() => respond({ allow: true, answers })}
         >
-          {r.kind === "question" ? "Send answer" : "Allow once"}
+          {r.kind === "question"
+            ? "Send answer"
+            : r.kind === "plan"
+              ? "Approve plan"
+              : "Allow once"}
         </button>
       </div>
     </section>

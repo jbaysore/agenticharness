@@ -30,6 +30,15 @@ import { CursorReviewer } from "./reviewer.mjs";
 // Who answers permission requests: a native or separate reviewer (auto),
 // the user (manual), or nobody, because everything is allowed (override).
 export const PERMISSION_MODES = ["auto", "manual", "override"];
+// How a turn runs, in each agent's own terms: plan proposes before changing
+// anything; goal keeps working until the message's condition is met.
+export const CHAT_MODES = ["default", "plan", "goal"];
+export function checkMode(mode, provider) {
+  if (!CHAT_MODES.includes(mode))
+    throw new Error("Choose the default, plan or goal mode");
+  if (mode === "goal" && provider === "cursor")
+    throw new Error("Cursor has no goal mode. Choose Codex or Claude Code.");
+}
 
 export class Controller extends EventEmitter {
   constructor(store, { probePath, bridgeUrl, browser = null }) {
@@ -86,7 +95,7 @@ export class Controller extends EventEmitter {
     });
     return this.refreshing;
   }
-  send(chatId, { actionId, text, provider, model, effort, permissions }) {
+  send(chatId, { actionId, text, provider, model, effort, permissions, mode }) {
     const chat = this.store.conversation(chatId);
     if (!chat) throw new Error("Conversation not found");
     if (typeof text !== "string" || !text.trim() || text.length > 250000)
@@ -98,6 +107,8 @@ export class Controller extends EventEmitter {
     permissions ??= chat.permissions;
     if (!PERMISSION_MODES.includes(permissions))
       throw new Error("Choose auto-review, manual review or override");
+    mode ??= chat.mode;
+    checkMode(mode, provider);
     const prior = this.store.runForAction(actionId);
     if (prior) {
       if (prior.conversation_id !== chatId)
@@ -129,6 +140,7 @@ export class Controller extends EventEmitter {
       model,
       effort: effort || null,
       permissions,
+      mode,
     });
     this.event(chatId, run.id, "run", { status: "starting", provider, model });
     const task = this.execute(run, text.trim(), effort, abort).catch(
@@ -169,6 +181,13 @@ export class Controller extends EventEmitter {
       });
     }
     return updated;
+  }
+  // A new mode applies from the next message, as switching it does natively.
+  setMode(chatId, mode) {
+    const chat = this.store.conversation(chatId);
+    if (!chat) throw new Error("Conversation not found");
+    checkMode(mode, chat.provider);
+    return this.store.updateConversation(chatId, { mode });
   }
   async execute(run, text, effort, abort, continuing = false) {
     const chat = this.store.conversation(run.conversation_id),
@@ -252,7 +271,10 @@ export class Controller extends EventEmitter {
           abort.signal,
         );
       }
-      if (permissions !== "override" || request.kind === "question")
+      if (
+        permissions !== "override" ||
+        ["question", "plan"].includes(request.kind)
+      )
         return this.waitApproval(run, request, abort.signal);
       emit("work", {
         kind: "auto-approved",
@@ -400,6 +422,16 @@ export class Controller extends EventEmitter {
       model: run.model,
       effort,
       permissions,
+      mode: chat.mode,
+      continuing,
+      // An approved plan ends plan mode, so the chat goes on to build it.
+      planApproved: () =>
+        this.event(
+          chat.id,
+          null,
+          "chat",
+          this.store.updateConversation(chat.id, { mode: "default" }),
+        ),
       session,
       handoff: [notice, handoff].filter(Boolean).join("\n\n"),
       instructions:
