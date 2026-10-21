@@ -711,6 +711,37 @@ small {
     margin-bottom: 20px;
   }
 }
+/* 1080p at 125% scaling leaves about 700px; tighten again so it still fits. */
+@media (max-height: 720px) {
+  .messages.empty {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .welcome .eyebrow {
+    margin-bottom: 8px;
+  }
+  .messages .welcome h1 {
+    font-size: 32px;
+    margin-bottom: 8px;
+  }
+  .welcome > p,
+  .welcome .provider-cards {
+    margin-bottom: 14px;
+  }
+  .welcome .provider-card {
+    padding: 11px 12px;
+  }
+  .welcome .provider-emblem {
+    height: 22px;
+    margin-bottom: 8px;
+  }
+  .welcome .starter-grid {
+    gap: 5px;
+  }
+  .welcome .starter-grid button {
+    padding: 9px 12px;
+  }
+}
 .eyebrow {
   font-size: 11px;
   letter-spacing: 2px;
