@@ -459,7 +459,6 @@ export function ChatPane({
             className={"permissions-control " + permissions}
             title={permissionModes.find(([id]) => id === permissions)?.[2]}
           >
-            <span>Permissions</span>
             <select
               aria-label="Permissions"
               value={permissions}
