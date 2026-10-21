@@ -275,6 +275,9 @@ are recorded in SQLite. Search conversations by words, filenames or decisions.
 Search results link to the source conversation and retain provider attribution.
 Agents can call `history_search`, `history_read`, and `project_notes` on demand,
 and `workspace_activity` to see which other chats are working in the same folder.
+On a chat's first message the agent is asked to call `rename_chat` with a short
+summary title. It works once and never replaces a title you set yourself; you can
+still rename any chat from its menu.
 
 In **Connections & usage → Conversation history**, choose **This conversation**,
 **This project**, or **All projects** as the history access for new conversations.

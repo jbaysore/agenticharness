@@ -46,7 +46,46 @@ export const historyTools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "rename_chat",
+    description:
+      "Give this chat a concise title that summarizes the user's first message. Works once, and never replaces a title the user chose.",
+    inputSchema: {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+      additionalProperties: false,
+    },
+  },
 ];
+
+// The title a chat gets from its first message until it is renamed.
+export function provisionalTitle(text) {
+  return text.slice(0, 70);
+}
+
+// Asked on a chat's first turn only.
+export const renameInstructions =
+  "\nThis is the chat's first message. Early in this turn, call rename_chat once with a concise title of at most six words summarizing what the user asked for: plain text, no quotes or trailing punctuation.";
+
+function renameChat(store, chat, title) {
+  const first = store.messages(chat.id).find((m) => m.role === "user");
+  const clean = String(title ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^["'`]+|["'`.]+$/g, "")
+    .slice(0, 80);
+  if (!clean) throw new Error("Title is empty");
+  if (!first || chat.title !== provisionalTitle(first.content))
+    return {
+      renamed: false,
+      title: chat.title,
+      reason:
+        "This chat already has a title from the user or an earlier rename. Leave it.",
+    };
+  store.updateConversation(chat.id, { title: clean });
+  return { renamed: true, title: clean };
+}
 
 // Sent with every notice as well as the standing instructions, because a
 // resumed native session may not re-read its instructions.
@@ -113,6 +152,7 @@ export function historyCall(store, conversationId, name, args) {
   if (!chat) throw new Error("Conversation not found");
   if (name === "workspace_activity")
     return workspacePeers(store, conversationId);
+  if (name === "rename_chat") return renameChat(store, chat, args.title);
   if (name === "project_notes")
     return store
       .notes(chat.project_id)

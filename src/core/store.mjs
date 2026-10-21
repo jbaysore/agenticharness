@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { buildSteps, settle } from "./steps.mjs";
+import { provisionalTitle } from "./history.mjs";
 
 const historyScopes = ["none", "project", "all"];
 
@@ -373,7 +374,8 @@ export class Store {
       });
       const c = this.conversation(conversationId);
       this.updateConversation(conversationId, {
-        title: c.title === "New conversation" ? text.slice(0, 70) : c.title,
+        title:
+          c.title === "New conversation" ? provisionalTitle(text) : c.title,
         provider,
         model,
       });

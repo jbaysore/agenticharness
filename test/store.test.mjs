@@ -342,3 +342,42 @@ test("an existing workspace gains the chat columns with its history already read
   db.close();
   await rm(directory, { recursive: true, force: true });
 });
+
+test("an agent names a chat once from its first message and never replaces the user's title", () => {
+  const db = new Store(":memory:"),
+    p = db.addProject("Project", "C:\example");
+  const start = (chat, text) =>
+    db.createRun({
+      conversationId: chat.id,
+      actionId: "rename-" + chat.id,
+      provider: "claude",
+      model: "m",
+      text,
+    });
+  const named = db.createConversation({ projectId: p.id });
+  start(
+    named,
+    "Could you please look into why the sidebar flickers on resize?",
+  );
+  assert.deepEqual(
+    historyCall(db, named.id, "rename_chat", {
+      title: ' "Fix sidebar flicker." ',
+    }),
+    { renamed: true, title: "Fix sidebar flicker" },
+  );
+  assert.equal(db.conversation(named.id).title, "Fix sidebar flicker");
+  const again = historyCall(db, named.id, "rename_chat", { title: "Other" });
+  assert.equal(again.renamed, false);
+  assert.equal(db.conversation(named.id).title, "Fix sidebar flicker");
+
+  const mine = db.createConversation({ projectId: p.id });
+  start(mine, "Some request");
+  db.updateConversation(mine.id, { title: "My name" });
+  assert.equal(
+    historyCall(db, mine.id, "rename_chat", { title: "Agent name" }).renamed,
+    false,
+  );
+  assert.equal(db.conversation(mine.id).title, "My name");
+  assert.throws(() => historyCall(db, named.id, "rename_chat", { title: " " }));
+  assert.ok(historyTools.some((t) => t.name === "rename_chat"));
+});

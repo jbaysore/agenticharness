@@ -9,6 +9,7 @@ import {
   handoffContext,
   historyCall,
   historyTools,
+  renameInstructions,
   workspaceNotice,
   workspacePeers,
 } from "./history.mjs";
@@ -438,6 +439,7 @@ export class Controller extends EventEmitter {
         agentInstructions(project, chat) +
         rulesInstructions(rules, plan, this.providers, COMMAND_SHELL) +
         skillInstructions(skills),
+      firstTurn: messages.filter((m) => m.role === "user").length === 1,
       tools: [...historyTools, ...plan.tools, ...browserTools],
       browser,
       signal: abort.signal,
@@ -461,6 +463,8 @@ export class Controller extends EventEmitter {
                 instruction: "Do this yourself.",
               };
         const result = historyCall(this.store, chat.id, name, input);
+        if (name === "rename_chat" && result.renamed)
+          this.event(chat.id, null, "chat", this.store.conversation(chat.id));
         emit("work", {
           kind: "history-tool",
           name,
@@ -485,6 +489,8 @@ export class Controller extends EventEmitter {
       ],
     };
     if (reviewer) reviewer.instructions = ctx.instructions;
+    // Only the agent doing the work names the chat, not its reviewer.
+    if (ctx.firstTurn) ctx.instructions += renameInstructions;
     try {
       this.store.setRun(run.id, "running");
       this.event(chat.id, run.id, "run", {

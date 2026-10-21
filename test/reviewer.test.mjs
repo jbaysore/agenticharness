@@ -12,6 +12,7 @@ import {
 } from "../src/providers/workers.mjs";
 import { REVIEW_SCHEMA } from "../src/core/review-policy.mjs";
 import { saveRules } from "../src/core/rules.mjs";
+import { renameInstructions } from "../src/core/history.mjs";
 
 const waitFor = async (condition) => {
   const deadline = Date.now() + 3000;
@@ -123,7 +124,11 @@ test("Cursor auto-review allows routine work with task/rules context and records
   const context = JSON.parse(f.jobs[0].task);
   assert.equal(context.currentRequest, "Run the tests");
   assert.equal(context.standingInstructions, "Keep edits small.");
-  assert.equal(context.turnInstructions, f.ctx.instructions);
+  // Naming the chat is the working agent's job, not the reviewer's.
+  assert.equal(
+    context.turnInstructions + renameInstructions,
+    f.ctx.instructions,
+  );
   assert.match(context.projectRules, /Commit and push/);
   assert.equal(context.userRefusals[0].request.title, "erase unrelated work");
   assert.equal(context.proposedAction.details.rawInput.command, "npm test");

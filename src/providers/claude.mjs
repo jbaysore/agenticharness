@@ -237,6 +237,19 @@ export async function runClaude(
           ],
         }),
       ),
+      tool(
+        "rename_chat",
+        "Give this chat a concise title summarizing the user's first message. Works once and never replaces a title the user chose.",
+        { title: z.string() },
+        async (args) => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(await ctx.history("rename_chat", args)),
+            },
+          ],
+        }),
+      ),
       // Offered only on turns where the user's rules allow a hand-off.
       ...(ctx.tools ?? [])
         .filter((t) => delegationShapes[t.name])

@@ -202,6 +202,8 @@ export async function createHarness({
           body.name,
           body.arguments ?? {},
         );
+        if (body.name === "rename_chat" && result.renamed)
+          controller.event(chatId, null, "chat", store.conversation(chatId));
         controller.event(chatId, store.activeRun(chatId)?.id ?? null, "work", {
           kind: "history-tool",
           name: body.name,
