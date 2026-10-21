@@ -209,6 +209,7 @@ export async function runCursor(ctx) {
       if (m.method === "session/request_permission") {
         const answer = await ctx.approve({
           kind: "permission",
+          method: m.method,
           title: m.params.toolCall?.title ?? "Cursor tool request",
           details: m.params.toolCall,
           options: m.params.options,
@@ -256,6 +257,7 @@ export async function runCursor(ctx) {
       } else if (m.method === "cursor/create_plan") {
         const answer = await ctx.approve({
           kind: "permission",
+          method: m.method,
           title: m.params.name ?? "Review Cursor plan",
           details: m.params,
         });
@@ -263,7 +265,10 @@ export async function runCursor(ctx) {
           rpc.respond(m.id, {
             outcome: answer.allow
               ? { outcome: "accepted" }
-              : { outcome: "rejected", reason: "The user declined this plan." },
+              : {
+                  outcome: "rejected",
+                  reason: answer.reason ?? "The user declined this plan.",
+                },
           });
       } else rpc.reject(m.id);
     } catch (error) {

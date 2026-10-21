@@ -146,6 +146,9 @@ export function Approval({ approval, onAnswer }) {
           : `${providerName(approval.provider)} needs you`}
       </div>
       <h3>{r.title}</h3>
+      {r.reviewReason && (
+        <p className="muted small">Auto-review: {r.reviewReason}</p>
+      )}
       {r.kind === "question" ? (
         r.questions?.map((q) => (
           <label key={questionId(q)}>

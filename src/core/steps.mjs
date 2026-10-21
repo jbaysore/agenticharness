@@ -184,7 +184,17 @@ export function applyWork(steps, p) {
     };
     return copy;
   };
-  if (p.provider === "codex" && (p.kind === "tool" || p.kind === "native-subagent")) {
+  if (p.kind === "permission-review") {
+    step = {
+      id: "review:" + p.item.id,
+      verb: "other",
+      target: p.item.title,
+      status:
+        p.status === "running"
+          ? "running"
+          : ["deny", "cancelled"].includes(p.status) ? "failed" : "ok",
+    };
+  } else if (p.provider === "codex" && (p.kind === "tool" || p.kind === "native-subagent")) {
     if (p.item?.type === "collabAgentToolCall" || p.item?.type === "agentMessage") return steps;
     step = codexStep(p);
   } else if (p.provider === "claude") {

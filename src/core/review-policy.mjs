@@ -37,7 +37,12 @@ export function cursorReviewer(providers) {
 export function parseReview(text) {
   if (typeof text !== "string" || text.length > 4000)
     throw new Error("The reviewer returned an invalid decision.");
-  const value = JSON.parse(text);
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error("The reviewer returned an invalid decision.");
+  }
   if (
     !value ||
     !["allow", "deny", "ask"].includes(value.decision) ||

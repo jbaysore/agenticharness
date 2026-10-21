@@ -3,6 +3,7 @@
 //   inline: answers from material given in the task, with no tools
 //   search: may search, list and read files in the project
 //   edit:   may read the project and change exactly one named file
+//   review: returns a decision from supplied context, with execution disabled
 import { resolve } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AsyncQueue } from "../core/queue.mjs";
@@ -14,8 +15,14 @@ import {
   usageOf,
 } from "./claude.mjs";
 import { checkCodexRoute, openCodex } from "./codex.mjs";
+import {
+  REVIEW_PROMPT,
+  REVIEW_SCHEMA,
+  reviewConfig,
+} from "../core/review-policy.mjs";
 
 export const workerPrompts = {
+  review: REVIEW_PROMPT,
   inline:
     "You answer one request from another coding agent using only the material in the message. Do not use tools. Quote file content verbatim with its line numbers; never paraphrase code or invent lines. Include whole logical blocks rather than fragments. If the material does not contain the answer, say so plainly. Do not ask questions.",
   search:
@@ -137,23 +144,20 @@ export async function runClaudeWorker({
   }
 }
 
-export async function runCodexWorker({
-  cwd,
-  model,
-  effort,
-  task,
-  signal,
-  mode = "search",
-  editPath,
-}) {
-  const rpc = await openCodex(cwd);
+export async function runCodexWorker(
+  { cwd, model, effort, task, signal, mode = "search", editPath },
+  { open = openCodex } = {},
+) {
+  const rpc = await open(cwd);
   let threadId,
     turnId,
     text = "",
     usage = { input: 0, output: 0 },
     finished = false,
     resolveDone,
-    rejectDone;
+    rejectDone,
+    quotaTimer,
+    checkingQuota = false;
   const proposed = new Map();
   const done = new Promise((resolve, reject) => {
     resolveDone = resolve;
@@ -189,6 +193,24 @@ export async function runCodexWorker({
   });
   rpc.on("notification", ({ method, params: p }) => {
     if (p?.threadId && threadId && p.threadId !== threadId) return;
+    if (
+      mode === "review" &&
+      method === "item/started" &&
+      ![
+        "agentMessage",
+        "reasoning",
+        "userMessage",
+        "contextCompaction",
+      ].includes(p.item?.type)
+    ) {
+      rejectDone(
+        new Error(
+          "The reviewer attempted to use a tool instead of returning a decision.",
+        ),
+      );
+      stop();
+      return;
+    }
     if (method === "turn/started") turnId = p.turn.id;
     if (method === "item/started" && p.item?.type === "fileChange")
       proposed.set(p.item.id, p.item.changes);
@@ -211,9 +233,8 @@ export async function runCodexWorker({
         await rpc.call("account/rateLimits/read"),
       );
     if (blocked) throw new WorkerUnavailable(blocked);
-    const route = checkCodexRoute(
-      (await rpc.call("config/read", { includeLayers: false })).config,
-    );
+    const { config } = await rpc.call("config/read", { includeLayers: false }),
+      route = checkCodexRoute(config);
     if (route) throw new WorkerUnavailable(route);
     const { thread } = await rpc.call("thread/start", {
       cwd,
@@ -229,9 +250,14 @@ export async function runCodexWorker({
         model_provider: "openai",
         forced_login_method: "chatgpt",
         service_tier: "default",
+        ...(mode === "review" && reviewConfig(config)),
       },
       ephemeral: true,
       allowProviderModelFallback: false,
+      ...(mode === "review" && {
+        baseInstructions: REVIEW_PROMPT,
+        dynamicTools: [],
+      }),
     });
     threadId = thread.id;
     if (signal.aborted) throw cancelled();
@@ -241,18 +267,44 @@ export async function runCodexWorker({
         model,
         effort: effort || undefined,
         serviceTierForTurn: "default",
+        ...(mode === "review" && { outputSchema: REVIEW_SCHEMA }),
         input: [{ type: "text", text: task }],
       })
     ).turn.id;
+    if (mode === "review")
+      quotaTimer = setInterval(async () => {
+        if (finished || checkingQuota || rpc.closed) return;
+        checkingQuota = true;
+        try {
+          const reason = checkCodexBilling(
+            account,
+            await rpc.call("account/rateLimits/read"),
+          );
+          if (reason) throw new WorkerUnavailable(reason);
+        } catch (error) {
+          rejectDone(error);
+          await stop();
+        } finally {
+          checkingQuota = false;
+        }
+      }, 15000);
     const turn = await done;
     if (signal.aborted) throw cancelled();
     if (turn.status !== "completed" || !text)
       throw new Error(
         turn.error?.message ?? "The worker ended without an answer",
       );
+    if (mode === "review") {
+      const boundary = checkCodexBilling(
+        account,
+        await rpc.call("account/rateLimits/read"),
+      );
+      if (boundary) throw new WorkerUnavailable(boundary);
+    }
     return { text, model, usage };
   } finally {
     finished = true;
+    clearInterval(quotaTimer);
     signal.removeEventListener("abort", stop);
     rpc.close();
   }

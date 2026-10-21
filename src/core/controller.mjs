@@ -25,8 +25,9 @@ import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { browserTitle } from "./browser.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
+import { CursorReviewer } from "./reviewer.mjs";
 
-// Who answers an agent's permission requests: a provider's own reviewer (auto),
+// Who answers permission requests: a native or separate reviewer (auto),
 // the user (manual), or nobody, because everything is allowed (override).
 export const PERMISSION_MODES = ["auto", "manual", "override"];
 
@@ -45,6 +46,7 @@ export class Controller extends EventEmitter {
     this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
     this.workerTimeoutMs = 5 * 60 * 1000;
+    this.reviewerTimeoutMs = 60 * 1000;
     this.runCommand = runCommand;
     store.recover();
   }
@@ -214,8 +216,36 @@ export class Controller extends EventEmitter {
     };
     // Override answers every permission request itself and logs it; questions
     // for the user still reach the user.
-    const approve = (request) => {
+    const reviewer =
+      permissions === "auto" && run.provider === "cursor"
+        ? new CursorReviewer({
+            controller: this,
+            run,
+            project,
+            chat,
+            text,
+            signal: abort.signal,
+          })
+        : null;
+    const approve = async (request) => {
       if (abort.signal.aborted) return Promise.resolve({ allow: false });
+      if (
+        reviewer &&
+        request.kind === "permission" &&
+        ["session/request_permission", "cursor/create_plan"].includes(
+          request.method,
+        )
+      ) {
+        const result = await reviewer.review(request);
+        if (abort.signal.aborted) return { allow: false };
+        if (result.decision !== "ask")
+          return { allow: result.decision === "allow", reason: result.reason };
+        return this.waitApproval(
+          run,
+          { ...request, reviewReason: result.reason },
+          abort.signal,
+        );
+      }
       if (permissions !== "override" || request.kind === "question")
         return this.waitApproval(run, request, abort.signal);
       emit("work", {
@@ -227,15 +257,6 @@ export class Controller extends EventEmitter {
       });
       return Promise.resolve({ allow: true, answers: {} });
     };
-    if (permissions === "auto" && run.provider === "cursor")
-      emit("work", {
-        kind: "permissions-fallback",
-        item: {
-          title: "Cursor has no automatic reviewer",
-          description:
-            "Cursor's permission requests come to you this turn, as in Manual review.",
-        },
-      });
     const messages = this.store.messages(chat.id);
     const lastAgent = messages
       .filter((m) => m.role === "assistant")
