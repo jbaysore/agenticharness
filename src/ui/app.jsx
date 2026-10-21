@@ -19,6 +19,7 @@ import {
   workspacePeersLabel,
 } from "./status.mjs";
 import { readAllPending } from "./outbox.mjs";
+import { applyWork, verbLabels } from "../core/steps.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
 import {
   closePane,
@@ -359,6 +360,21 @@ function App() {
                 ? c.messages.map((m) => (m.id === next.id ? next : m))
                 : [...c.messages, next],
             },
+          };
+        });
+      if (
+        e.type === "work" &&
+        e.runId &&
+        e.id > (floors.current[e.conversationId] ?? 0)
+      )
+        setChats((all) => {
+          const c = all[e.conversationId],
+            steps = c?.steps?.[e.runId] ?? [],
+            next = c && applyWork(steps, e.payload);
+          if (!c || next === steps) return all;
+          return {
+            ...all,
+            [c.id]: { ...c, steps: { ...c.steps, [e.runId]: next } },
           };
         });
       if (["run", "approval", "approval-resolved", "chat"].includes(e.type))
@@ -800,6 +816,11 @@ function App() {
               refresh={refresh}
               report={report}
               onOpenConnections={() => setModal("connections")}
+              onOpenWork={() => {
+                setView((v) => focusPane(v, p.key));
+                setPanel("activity");
+                setShowPanel(true);
+              }}
             />
           ))}
         </div>
@@ -1299,7 +1320,8 @@ function WorkspacePanel({
         {events.length ? (
           events.map((e, i) => {
             const p = e.payload,
-              item = p.item ?? {};
+              item = p.item ?? {},
+              step = applyWork([], p)[0];
             return (
               <details className="work-item" key={e.id ?? i}>
                 <summary>
@@ -1316,16 +1338,19 @@ function WorkspacePanel({
                   </span>
                   <span>
                     <strong>
-                      {p.kind === "native-subagent"
-                        ? "Native subagent"
-                        : (item.title ??
-                          item.name ??
-                          p.kind ??
-                          p.status ??
-                          e.type)}
+                      {step
+                        ? verbLabels[step.verb]
+                        : p.kind === "native-subagent"
+                          ? "Native subagent"
+                          : (item.title ??
+                            item.name ??
+                            p.kind ??
+                            p.status ??
+                            e.type)}
                     </strong>
                     <small>
-                      {item.command ??
+                      {step?.target ??
+                        item.command ??
                         item.description ??
                         p.error ??
                         p.reason ??

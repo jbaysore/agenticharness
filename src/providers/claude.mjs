@@ -387,15 +387,30 @@ export async function runClaude(ctx) {
                 ? "native-subagent"
                 : "tool",
             provider: "claude",
+            ...(event.parent_tool_use_id && {
+              parentId: event.parent_tool_use_id,
+            }),
             item: block,
           });
       }
-      if (event.type === "user" && event.tool_use_result)
+      if (event.type === "user" && event.tool_use_result) {
+        // The result names its tool call, so the chat can mark that step done or failed.
+        const result = Array.isArray(event.message?.content)
+          ? event.message.content.find((c) => c.type === "tool_result")
+          : null;
         ctx.emit("work", {
           kind: "tool-result",
           provider: "claude",
+          ...(result && {
+            toolUseId: result.tool_use_id,
+            isError: !!result.is_error,
+          }),
+          ...(event.parent_tool_use_id && {
+            parentId: event.parent_tool_use_id,
+          }),
           item: event.tool_use_result,
         });
+      }
       if (
         event.type === "system" &&
         [

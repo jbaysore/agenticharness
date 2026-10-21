@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { buildSteps, settle } from "./steps.mjs";
 
 const historyScopes = ["none", "project", "all"];
 
@@ -550,6 +551,32 @@ export class Store {
       lastEventId: this.latestEventId(),
     };
   }
+  // What each recent turn did, normalised so the chat can summarise it inline.
+  steps(conversationId) {
+    const byRun = {};
+    for (const e of this.db
+      .prepare(
+        `SELECT e.run_id, e.payload, r.status FROM events e JOIN runs r ON r.id=e.run_id
+        WHERE e.run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
+        AND e.type='work' AND json_extract(e.payload,'$.kind') NOT IN ('command-output','token-usage')
+        ORDER BY e.id`,
+      )
+      .all(conversationId)) {
+      const run = (byRun[e.run_id] ??= { status: e.status, payloads: [] });
+      run.payloads.push(JSON.parse(e.payload));
+    }
+    return Object.fromEntries(
+      Object.entries(byRun).map(([runId, { status, payloads }]) => {
+        const steps = buildSteps(payloads);
+        return [
+          runId,
+          ["running", "starting", "waiting"].includes(status)
+            ? steps
+            : settle(steps),
+        ];
+      }),
+    );
+  }
   conversationSnapshot(id) {
     return {
       ...this.conversation(id),
@@ -567,6 +594,7 @@ export class Store {
           "SELECT * FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30",
         )
         .all(id),
+      steps: this.steps(id),
       lastEventId: this.latestEventId(),
     };
   }

@@ -12,9 +12,11 @@ import {
   workspacePeersLabel,
 } from "./status.mjs";
 import { elapsed, providerName, workingLine } from "./voice.mjs";
+import { StepSummary } from "./steps.jsx";
 
 // A turn's byline names the agent once, and the model only when it changed.
-function Conversation({ chat }) {
+// What the turn did sits under the byline as one summary line.
+function Conversation({ chat, onOpenWork }) {
   let lastModel = null;
   return chat.messages.map((m, i) => {
     if (m.role !== "assistant") return <UserTurn key={m.id} message={m} />;
@@ -39,6 +41,13 @@ function Conversation({ chat }) {
               <Icon name="link" size={13} />
             </a>
           </div>
+        )}
+        {!sameTurn && m.run_id && (
+          <StepSummary
+            steps={chat.steps?.[m.run_id]}
+            active={chat.activeRun?.id === m.run_id}
+            onOpenWork={onOpenWork}
+          />
         )}
         <Markdown text={m.content} />
       </article>
@@ -104,6 +113,7 @@ export function ChatPane({
   refresh,
   report,
   onOpenConnections,
+  onOpenWork,
 }) {
   const draftKey = chat?.id ?? "new:" + (project?.id ?? "");
   const [provider, setProvider] = useState(
@@ -333,8 +343,21 @@ export function ChatPane({
             </div>
           </div>
         ) : (
-          <Conversation chat={chat} />
+          <Conversation chat={chat} onOpenWork={onOpenWork} />
         )}
+        {chat?.activeRun &&
+          chat.steps?.[chat.activeRun.id]?.length > 0 &&
+          !chat.messages.some(
+            (m) => m.role === "assistant" && m.run_id === chat.activeRun.id,
+          ) && (
+            <div className={"pending-steps " + chat.activeRun.provider}>
+              <StepSummary
+                steps={chat.steps?.[chat.activeRun.id]}
+                active
+                onOpenWork={onOpenWork}
+              />
+            </div>
+          )}
         {chat?.activeRun && !chat.approvals?.length && (
           <div
             className={

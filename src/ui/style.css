@@ -959,6 +959,140 @@ small {
 .message-byline a:focus-visible {
   opacity: 1;
 }
+/* What a turn did: one quiet line that opens into the steps. */
+.steps {
+  margin: -2px 0 12px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.pending-steps {
+  max-width: 760px;
+}
+.steps-line {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 0;
+  text-align: left;
+  color: inherit;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.steps-count {
+  flex-shrink: 0;
+}
+/* One line; a narrow pane truncates it, and opening it shows every step. */
+.steps-parts {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.steps-line:hover {
+  color: var(--text-2);
+}
+.steps-line .pulse-dot {
+  margin-right: 8px;
+}
+.steps-count {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.steps-part::before {
+  content: "·";
+  margin: 0 7px;
+  color: var(--text-3);
+}
+.steps-part.failed {
+  color: var(--danger-ink);
+}
+.steps-part.now {
+  color: var(--agent-ink);
+}
+.delta {
+  margin-left: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.delta ins,
+.delta del {
+  text-decoration: none;
+}
+.delta ins {
+  color: var(--add);
+}
+.delta del {
+  color: var(--remove);
+  margin-left: 4px;
+}
+.steps-chevron {
+  flex-shrink: 0;
+  margin-left: 7px;
+  transition: transform var(--dur) var(--ease);
+}
+.steps.open .steps-chevron {
+  transform: rotate(180deg);
+}
+.steps-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur) var(--ease);
+}
+.steps.open .steps-body {
+  grid-template-rows: 1fr;
+}
+.steps-body > div {
+  overflow: hidden;
+}
+.steps-list {
+  list-style: none;
+  margin: 6px 0 4px;
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid color-mix(in srgb, var(--agent) 45%, transparent);
+  border-radius: 0;
+}
+.step {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  min-width: 0;
+}
+.step-verb {
+  flex: 0 0 64px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.step-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.step .delta {
+  margin-left: 0;
+}
+.step-meta {
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.step.failed .step-target,
+.step.failed .step-meta {
+  color: var(--danger-ink);
+}
+.steps-log {
+  margin: 4px 0 0 14px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.steps-log:hover {
+  color: var(--text);
+}
 .markdown {
   overflow-wrap: anywhere;
   color: var(--text);
