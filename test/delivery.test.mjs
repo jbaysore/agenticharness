@@ -28,7 +28,7 @@ const proxyFetch = (url, options = {}) =>
     req.end(options.body);
   });
 
-test("remote origin requires the owner's Cloudflare Access token, in addition to pairing", async () => {
+test("remote origin admits the owner's Cloudflare Access sign-in on its own, and no one else", async () => {
   const dir = await mkdtemp(join(tmpdir(), "harness-remote-"));
   const { publicKey, privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
@@ -85,19 +85,7 @@ test("remote origin requires the owner's Cloudflare Access token, in addition to
     );
     assert.equal(await status(token({ ...owner, aud: ["another-app"] })), 403);
     assert.equal(await status(token({ ...owner, exp: owner.exp - 600 })), 403);
-    assert.equal(await status(token(owner)), 401);
-    const result = await proxyFetch(app.runtime.origin + "/api/pair", {
-      method: "POST",
-      headers: {
-        ...headers,
-        "Cf-Access-Jwt-Assertion": token(owner),
-        "X-Harness-Client": "1",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ code: app.auth.pairing() }),
-    });
-    assert.equal(result.status, 200);
-    assert.match(result.headers.get("set-cookie"), /Secure/);
+    assert.equal(await status(token(owner)), 200);
   } finally {
     await app.close();
     await rm(dir, { recursive: true, force: true });

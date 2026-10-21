@@ -94,8 +94,7 @@ function App() {
     [results, setResults] = useState([]),
     [searchScope, setSearchScope] = useState("project");
   const [projectName, setProjectName] = useState(""),
-    [projectDirectory, setProjectDirectory] = useState(""),
-    [remoteCode, setRemoteCode] = useState(null);
+    [projectDirectory, setProjectDirectory] = useState("");
   const tracked = useRef(new Set()),
     lastEvent = useRef(0),
     floors = useRef({}),
@@ -995,23 +994,6 @@ function App() {
                 "This host is currently available only on this computer. Secure remote access setup is pending."
               )}
             </p>
-            {state.remoteOrigin && (
-              <button
-                className="secondary"
-                onClick={action(async () =>
-                  setRemoteCode(await api("/api/pairing-code", {})),
-                )}
-              >
-                Pair another browser
-              </button>
-            )}
-            {remoteCode && (
-              <p>
-                <code>{remoteCode.code}</code>
-                <br />
-                <small>Expires in 10 minutes. Keep this code private.</small>
-              </p>
-            )}
             <button
               className="secondary"
               onClick={action(async () => {
@@ -1044,15 +1026,6 @@ function App() {
             <a className="export-link" href="/api/export" download>
               Export conversation history ↓
             </a>
-            <button
-              className="text-button"
-              onClick={action(async () => {
-                await api("/api/browsers/revoke", {});
-                location.reload();
-              })}
-            >
-              Revoke all paired browsers
-            </button>
           </section>
         </Modal>
       )}

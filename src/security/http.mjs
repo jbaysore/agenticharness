@@ -64,6 +64,18 @@ export class Authentication {
     }
   }
 }
+// A browser on the host PC itself needs no pairing: it reached the loopback-only
+// port directly, with the local host name. Tunnel traffic also arrives over
+// loopback, but carries the public host name and Cloudflare's headers.
+export function onHost(req, localOrigin) {
+  const host = new URL(localOrigin).host;
+  return (
+    ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress) &&
+    [host, host.replace("127.0.0.1", "localhost")].includes(req.headers.host) &&
+    !req.headers["cf-connecting-ip"] &&
+    !req.headers["cf-access-jwt-assertion"]
+  );
+}
 export function safeOrigin(req, localOrigin, publicOrigin) {
   const origins = [
     localOrigin,

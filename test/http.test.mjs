@@ -5,12 +5,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHarness } from "../src/server.mjs";
 
-test("real local HTTP server requires pairing, enforces same-origin writes, and keeps stored history", async () => {
+test("real local HTTP server admits the host PC without pairing, enforces same-origin writes, and keeps stored history", async () => {
   const dir = await mkdtemp(join(tmpdir(), "harness-http-")),
     app = await createHarness({ dataDir: dir, port: 0, startProviders: false });
   const url = app.runtime.origin;
   try {
-    assert.equal((await fetch(url + "/api/state")).status, 401);
+    assert.equal((await fetch(url + "/api/state")).status, 200);
+    assert.equal(
+      (await fetch(url.replace("127.0.0.1", "localhost") + "/api/state"))
+        .status,
+      200,
+    );
+    // Tunnel traffic also arrives over loopback; it is not the host PC.
+    assert.equal(
+      (
+        await fetch(url + "/api/state", {
+          headers: { "Cf-Connecting-IP": "203.0.113.9" },
+        })
+      ).status,
+      401,
+    );
     const code = app.auth.pairing(),
       headers = { "Content-Type": "application/json", "X-Harness-Client": "1" };
     const paired = await fetch(url + "/api/pair", {

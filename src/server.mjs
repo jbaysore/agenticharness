@@ -7,7 +7,12 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { Store } from "./core/store.mjs";
 import { Controller } from "./core/controller.mjs";
-import { Authentication, safeOrigin, readJson } from "./security/http.mjs";
+import {
+  Authentication,
+  onHost,
+  safeOrigin,
+  readJson,
+} from "./security/http.mjs";
 import { accessVerifier } from "./security/access.mjs";
 import {
   projectPath,
@@ -114,12 +119,15 @@ export async function createHarness({
         return json(res, 403, {
           error: "Unrecognized host or cross-site request",
         });
+      // The owner's verified Access sign-in is enough on its own remotely.
+      let owner = false;
       if (publicOrigin && req.headers.host === new URL(publicOrigin).host) {
         if (!(await ownerSignedIn?.(req.headers["cf-access-jwt-assertion"])))
           return json(res, 403, {
             error:
               "Sign in through Cloudflare Access as the Windows host owner.",
           });
+        owner = true;
       }
       const url = new URL(req.url, localOrigin),
         path = url.pathname,
@@ -182,7 +190,7 @@ export async function createHarness({
             },
           );
         }
-        if (!auth.authenticated(req))
+        if (!owner && !onHost(req, localOrigin) && !auth.authenticated(req))
           return json(res, 401, {
             error: "Pair this browser with the Windows host",
           });

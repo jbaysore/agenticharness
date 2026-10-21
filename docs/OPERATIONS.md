@@ -282,8 +282,8 @@ The host remains bound to loopback. A Cloudflare Tunnel, started and stopped wit
 the host, publishes it at an HTTPS hostname on the owner's domain. Cloudflare
 Access requires the owner to sign in before any request reaches this PC. The app
 then verifies the signed Access token on every remote request (issuer, application
-audience, expiry and owner email) and additionally requires browser pairing. No
-app is needed on the remote device.
+audience, expiry and owner email). That verified sign-in is all a remote browser
+needs; there is no pairing code. No app is needed on the remote device.
 
 One-time setup on the delivery PC:
 
@@ -299,11 +299,17 @@ Setup creates the tunnel and its DNS record, and refuses to replace an existing
 record. Only a hash of the owner email is stored.
 
 The address is shown in **Connections & usage → Remote access** on the delivery
-PC. Open that address in the laptop browser or iPhone Safari and sign in through
-Cloudflare Access. Generate a separate one-time code
-with **Pair another browser** for each browser. Codes expire after 10 minutes;
-paired browser sessions expire after seven days. On iPhone, optionally add the
-page to the Home Screen using Safari's Share menu.
+PC. Open that address in any browser (Chrome, laptop, iPhone Safari) and sign in
+through Cloudflare Access. The sign-in lasts for the Access application's session
+duration, set in the Zero Trust dashboard. Because that sign-in is the only gate,
+use an identity provider with two-step verification rather than one-time email
+codes. On iPhone, optionally add the page to the Home Screen using Safari's Share
+menu.
+
+On the host PC itself, any browser can open `http://127.0.0.1:47831` (or
+`localhost`) directly. Requests from this computer need no pairing; tunnel traffic,
+which also arrives over loopback, is told apart by its host name and Cloudflare
+headers.
 
 The Windows host must remain awake, connected, and running Harness. Browser
 disconnects do not cancel work. Event IDs replay missed updates. Retrying the
@@ -313,9 +319,8 @@ storage. After a reload the app checks whether its action was accepted; it eithe
 shows the accepted run or restores the draft with the original action ID. Nothing
 is automatically resubmitted. An interrupted turn is never automatically re-executed.
 
-**Revoke all paired browsers** invalidates all browser sessions, including your
-current one. Relaunch the desktop shortcut to pair locally again. Revocation is
-useful after losing a device. Provider account logins are not affected.
+After losing a device, revoke its sessions in the Cloudflare Zero Trust dashboard
+and sign it out of the identity provider. Provider account logins are not affected.
 
 The only recurring cost is the owner's domain registration; the Cloudflare
 Tunnel and Access plans used are free. The Cloudflare endpoint has not yet been
@@ -340,7 +345,7 @@ restore. Local provider transcripts are copied with **Import local conversations
 To restore: stop active work and the host, preserve the existing data folder as a
 rollback copy, then put the chosen SQLite snapshot at
 `%LOCALAPPDATA%\AgenticHarness\workspace.sqlite`. Do not mix it with WAL/SHM files
-from another database. Relaunch and pair browsers again. Native session resumption
+from another database, then relaunch. Native session resumption
 also requires the provider's own saved session to still exist; otherwise use a new
 conversation and consult the restored history.
 
