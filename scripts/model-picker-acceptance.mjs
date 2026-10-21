@@ -206,6 +206,33 @@ try {
     ),
   ).toBe(true);
 
+  // A welcome card opens straight onto its agent's models and sets up the composer.
+  const fresh = await browser.newPage({
+    viewport: { width: 1512, height: 982 },
+  });
+  fresh.on("pageerror", (e) => errors.push(e.message));
+  await fresh.goto(`${app.runtime.origin}/#pair=${app.auth.pairing()}`);
+  const freshMenu = fresh.getByRole("menu");
+  await fresh
+    .getByRole("button", { name: "Choose a Claude Code model", exact: true })
+    .click();
+  await expect(freshMenu).toHaveAttribute("aria-label", "Choose model");
+  await expect(fresh.getByLabel("Back to providers")).toHaveCount(0);
+  await freshMenu
+    .getByRole("menuitem", { name: "Thoughtful", exact: true })
+    .click();
+  await freshMenu
+    .getByRole("menuitemradio", { name: "High", exact: true })
+    .click();
+  await expect(fresh.locator(".model-summary")).toHaveText(
+    "Claude Code · Thoughtful · High",
+  );
+  await expect(fresh.locator(".provider-card.chosen")).toContainText(
+    "Thoughtful · High",
+  );
+  await expect(fresh.getByLabel("Message your coding agent")).toBeFocused();
+  await fresh.close();
+
   // An empty catalog can still be backed out of or opened in Connections.
   app.controller.providers = app.controller.providers.map((p) =>
     p.id === "cursor" ? { ...p, models: [] } : p,

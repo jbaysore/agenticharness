@@ -4,6 +4,8 @@ import { Icon } from "./components.jsx";
 
 const effortLabel = (effort) => effort[0].toUpperCase() + effort.slice(1);
 
+// The composer's trigger opens at the provider list. A welcome card passes its
+// own trigger and a root, so it opens straight onto that provider's models.
 export function ModelPicker({
   providers,
   provider,
@@ -11,6 +13,9 @@ export function ModelPicker({
   effort,
   onChange,
   onOpenConnections,
+  root = [],
+  className = "model-control",
+  renderTrigger,
 }) {
   const [path, setPath] = useState(null),
     [placement, setPlacement] = useState({}),
@@ -40,7 +45,8 @@ export function ModelPicker({
     onChange({ provider: p.id, model: m.id, effort: value });
     close();
   };
-  const back = () => setPath((current) => current.slice(0, -1));
+  const back = () => setPath((current) => current.slice(0, -1)),
+    canGoBack = open && path.length > root.length;
   const rows = browsingModel
     ? (browsingModel.efforts ?? []).map((value) => ({
         id: value,
@@ -133,7 +139,7 @@ export function ModelPicker({
       close();
       return;
     }
-    if (event.key === "ArrowLeft" && path.length) {
+    if (event.key === "ArrowLeft" && canGoBack) {
       event.preventDefault();
       back();
       return;
@@ -160,34 +166,41 @@ export function ModelPicker({
             items.length;
     items[next]?.focus();
   };
+  const triggerProps = {
+    ref: trigger,
+    type: "button",
+    "aria-haspopup": "menu",
+    "aria-expanded": open,
+    "aria-controls": open ? menuId : undefined,
+    onClick: () => (open ? close() : setPath(root)),
+    onKeyDown: (event) => {
+      if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+        event.preventDefault();
+        setPath(root);
+      }
+    },
+  };
   return (
-    <div className="model-control">
-      <button
-        ref={trigger}
-        type="button"
-        className="model-trigger"
-        aria-label="Agent and model"
-        aria-describedby={menuId + "-selection"}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        title={summary}
-        onClick={() => (open ? close() : setPath([]))}
-        onKeyDown={(event) => {
-          if (["ArrowDown", "ArrowUp"].includes(event.key)) {
-            event.preventDefault();
-            setPath([]);
-          }
-        }}
-      >
-        <span className={"provider-dot " + provider} />
-        <span className="model-summary" id={menuId + "-selection"}>
-          {summary}
-        </span>
-        <span className="model-chevron" aria-hidden="true">
-          ⌄
-        </span>
-      </button>
+    <div className={className}>
+      {renderTrigger ? (
+        renderTrigger(triggerProps)
+      ) : (
+        <button
+          {...triggerProps}
+          className="model-trigger"
+          aria-label="Agent and model"
+          aria-describedby={menuId + "-selection"}
+          title={summary}
+        >
+          <span className={"provider-dot " + provider} />
+          <span className="model-summary" id={menuId + "-selection"}>
+            {summary}
+          </span>
+          <span className="model-chevron" aria-hidden="true">
+            ⌄
+          </span>
+        </button>
+      )}
       {open &&
         createPortal(
           <div
@@ -206,7 +219,7 @@ export function ModelPicker({
             }}
           >
             <div className="model-menu-header">
-              {path.length > 0 && (
+              {canGoBack && (
                 <button
                   type="button"
                   tabIndex={-1}

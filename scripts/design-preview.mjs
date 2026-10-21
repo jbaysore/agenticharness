@@ -151,6 +151,9 @@ try {
   });
   await shoot("three-panes", `/?chat=${codex.id},${claude.id},${cursor.id}`, { viewport: { width: 1920, height: 1000 } });
   await shoot("welcome", "/", { viewport: { width: 1536, height: 730 } });
+  await shoot("welcome-menu", "/", { viewport: { width: 1536, height: 730 } }, (page) =>
+    page.getByRole("button", { name: "Choose a Codex model" }).click(),
+  );
   await shoot("phone", `/?chat=${claude.id}`, { ...devices["iPhone 13"], defaultBrowserType: undefined });
 } finally {
   await browser?.close();

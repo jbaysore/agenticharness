@@ -770,7 +770,12 @@ small {
   max-width: 560px;
   margin: 0 auto;
 }
+.provider-card-slot {
+  display: flex;
+  min-width: 0;
+}
 .provider-card {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -784,7 +789,8 @@ small {
     border-color var(--dur),
     background var(--dur);
 }
-.provider-card:hover {
+.provider-card:hover,
+.provider-card[aria-expanded="true"] {
   border-color: color-mix(in srgb, var(--agent) 50%, var(--line-strong));
 }
 .provider-card.chosen {

@@ -299,34 +299,56 @@ export function ChatPane({
           <div className="welcome">
             <h1>{greeting()}</h1>
             <p>{project ? "Who's on this one?" : "Add a project to begin."}</p>
+            {/* Each card opens its agent's models; choosing one sets the
+                composer up and puts the cursor in it. */}
             <div className="provider-cards">
               {providers.map((p) => {
-                const chosen = provider === p.id,
-                  ready = p.connected && !p.blockReason;
+                const chosen = provider === p.id && !!selectedModel,
+                  ready = p.connected && !p.blockReason,
+                  count = p.models?.filter((m) => !m.disabled).length ?? 0;
                 return (
-                  <button
-                    className={"provider-card " + p.id + (chosen ? " chosen" : "")}
+                  <ModelPicker
                     key={p.id}
-                    aria-pressed={chosen}
-                    onClick={() => setProvider(p.id)}
-                  >
-                    <strong>{p.name}</strong>
-                    <span className={ready ? "" : "warning"}>
-                      {!ready
-                        ? providerStatusLabel(p)
-                        : chosen && selectedModel
-                          ? [
-                              selectedModel.name,
-                              effort &&
-                                effort[0].toUpperCase() + effort.slice(1),
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")
-                          : chosen
-                            ? "Pick a model below"
-                            : "Ready"}
-                    </span>
-                  </button>
+                    className="provider-card-slot"
+                    root={[p.id]}
+                    providers={providers}
+                    provider={provider}
+                    model={model}
+                    effort={effort}
+                    onChange={(choice) => {
+                      setProvider(choice.provider);
+                      setModel(choice.model);
+                      setEffort(choice.effort);
+                      requestAnimationFrame(() => input.current?.focus());
+                    }}
+                    onOpenConnections={onOpenConnections}
+                    renderTrigger={(props) => (
+                      <button
+                        {...props}
+                        className={
+                          "provider-card " + p.id + (chosen ? " chosen" : "")
+                        }
+                        aria-label={`Choose a ${p.name} model`}
+                      >
+                        <strong>{p.name}</strong>
+                        <span className={ready ? "" : "warning"}>
+                          {!ready
+                            ? providerStatusLabel(p)
+                            : chosen
+                              ? [
+                                  selectedModel.name,
+                                  effort &&
+                                    effort[0].toUpperCase() + effort.slice(1),
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")
+                              : count === 1
+                                ? p.models.find((m) => !m.disabled).name
+                                : `${count} models`}
+                        </span>
+                      </button>
+                    )}
+                  />
                 );
               })}
             </div>
