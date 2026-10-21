@@ -103,6 +103,18 @@ uses the tools, that a real worker answers well, or that tokens are saved.
 | A real agent using the tools, the quality of real worker answers, and real token use with the rule on versus off                                                         | Requires included usage                                              | Not run                                                                        |
 | A real usage limit triggering the fallback                                                                                                                               | Would require exhausting a subscription                              | Not run; simulated only                                                        |
 
+## Skills — 2026-10-21
+
+The provider was simulated. No real agent was asked to follow a skill, so this
+is not evidence that Codex, Claude Code, or Cursor obeys one.
+
+| Check                                                                                                                                          | Kind                                                   | Result  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------- |
+| Create, edit, turn on for one chat, include the text on the next message, keep that choice across reload, leave it off a new chat, and delete | Real Edge (`node scripts/skills-acceptance.mjs`)       | Passed  |
+| Name and length checks, the six-skill limit, and deleting a skill removes it from chats                                                       | Unit tests (`test/skills.test.mjs`)                    | Passed  |
+| Codex, Claude Code, and Cursor turns receive the skill text; a chat without it does not; an edit is included on the next turn                 | Unit tests with stubbed providers (`test/skills.test.mjs`) | Passed  |
+| A real agent following a skill                                                                                                                 | Requires included usage                                | Not run |
+
 ## Bugs found through dogfooding
 
 1. Official Codex default endpoint was mistaken for a custom gateway — fixed.

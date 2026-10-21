@@ -5,6 +5,7 @@ import { readPending, savePending } from "./outbox.mjs";
 import { readDraft, saveDraft } from "./drafts.mjs";
 import { useChatScroll } from "./chat-scroll.jsx";
 import { ModelPicker } from "./model-picker.jsx";
+import { SkillPicker } from "./skills-modal.jsx";
 import {
   chatMarker,
   chatMarkerLabel,
@@ -109,6 +110,8 @@ export function ChatPane({
   onClose,
   onOpenChat,
   ensureChat,
+  skills = [],
+  onOpenSkills,
   reload,
   refresh,
   report,
@@ -128,7 +131,9 @@ export function ChatPane({
     ),
     [draft, setDraft] = useState(() => readDraft(draftKey)),
     [busy, setBusy] = useState(false),
-    [permissionsBusy, setPermissionsBusy] = useState(false);
+    [permissionsBusy, setPermissionsBusy] = useState(false),
+    [skillIds, setSkillIds] = useState(chat?.skillIds ?? []),
+    [skillsBusy, setSkillsBusy] = useState(false);
   const messages = useChatScroll(chat),
     input = useRef(null),
     sending = useRef(false);
@@ -178,6 +183,19 @@ export function ChatPane({
   useEffect(() => {
     if (chat && !permissionsBusy) setPermissions(chat.permissions);
   }, [chat?.id, chat?.permissions, permissionsBusy]);
+  const skillKey = chat?.skillIds?.join("\n") ?? "";
+  useEffect(() => {
+    if (sending.current) return;
+    setSkillIds(chat?.skillIds ?? []);
+  }, [chat?.id, skillKey]);
+  useEffect(() => {
+    const known = new Set(skills.map((skill) => skill.id));
+    setSkillIds((ids) =>
+      ids.every((id) => known.has(id))
+        ? ids
+        : ids.filter((id) => known.has(id)),
+    );
+  }, [skills]);
   useEffect(() => {
     if (!connected?.models?.length) return;
     const available = connected.models.some(
@@ -206,6 +224,24 @@ export function ChatPane({
       setPermissionsBusy(false);
     }
   }
+  async function changeSkills(next) {
+    setSkillIds(next);
+    if (!chat) return;
+    setSkillsBusy(true);
+    try {
+      const saved = await api(
+        `/api/chats/${chat.id}/skills`,
+        { skillIds: next },
+        "PUT",
+      );
+      setSkillIds(saved.skillIds);
+    } catch (e) {
+      report(e);
+      await reload(chat.id).catch(() => {});
+    } finally {
+      setSkillsBusy(false);
+    }
+  }
   async function send(override) {
     const text = typeof override === "string" ? override : draft;
     if (
@@ -213,6 +249,7 @@ export function ChatPane({
       !project ||
       busy ||
       permissionsBusy ||
+      skillsBusy ||
       chat?.activeRun ||
       !model ||
       (selectedModel?.efforts?.length && !effort)
@@ -222,7 +259,15 @@ export function ChatPane({
     sending.current = true;
     try {
       const c =
-        chat ?? (await ensureChat({ provider, model, effort, permissions }));
+        chat ??
+        (await ensureChat({
+          provider,
+          model,
+          effort,
+          permissions,
+          skillIds,
+        }));
+      if (chat) await api(`/api/chats/${chat.id}/skills`, { skillIds }, "PUT");
       if (!chat) saveDraft(draftKey, "");
       const prior = readPending(c.id);
       const body =
@@ -494,6 +539,7 @@ export function ChatPane({
                   permissionsBusy ||
                   !draft.trim() ||
                   !project ||
+                  skillsBusy ||
                   !model ||
                   (selectedModel?.efforts?.length && !effort) ||
                   !!connected?.blockReason
@@ -522,6 +568,13 @@ export function ChatPane({
               ))}
             </select>
           </label>
+          <SkillPicker
+            skills={skills}
+            skillIds={skillIds}
+            disabled={busy || skillsBusy}
+            onChange={changeSkills}
+            onCreate={onOpenSkills}
+          />
           {peers.length > 0 && (
             <span
               className="workspace-peers"

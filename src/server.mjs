@@ -33,6 +33,14 @@ import {
   readRules,
   saveRules,
 } from "./core/rules.mjs";
+import {
+  chatSkillIds,
+  createSkill,
+  deleteSkill,
+  listSkills,
+  setChatSkills,
+  updateSkill,
+} from "./core/skills.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Names the browser client on disk, so an open page can tell it was rebuilt.
@@ -265,6 +273,7 @@ export async function createHarness({
             version: APP_VERSION,
             rules: describeRules(readRules(store), controller.providers),
             delegation: delegationStats(store),
+            skills: listSkills(store),
           });
         if (path === "/api/rules" && method === "PUT") {
           const rules = saveRules(
@@ -274,6 +283,24 @@ export async function createHarness({
           );
           controller.event(null, null, "rules", {});
           return json(res, 200, describeRules(rules, controller.providers));
+        }
+        if (path === "/api/skills" && method === "POST") {
+          const skill = createSkill(store, await readJson(req));
+          controller.event(null, null, "skills", {});
+          return json(res, 201, skill);
+        }
+        const skillMatch = path.match(/^\/api\/skills\/([^/]+)$/);
+        if (skillMatch) {
+          if (method === "PATCH") {
+            const skill = updateSkill(store, skillMatch[1], await readJson(req));
+            controller.event(null, null, "skills", {});
+            return json(res, 200, skill);
+          }
+          if (method === "DELETE") {
+            const removed = deleteSkill(store, skillMatch[1]);
+            controller.event(null, null, "skills", {});
+            return json(res, 200, removed);
+          }
         }
         if (path === "/api/providers/refresh" && method === "POST")
           return json(res, 200, {
@@ -381,12 +408,30 @@ export async function createHarness({
           controller.event(chat.id, null, "chat", chat);
           return json(res, 201, chat);
         }
+        if (
+          (match = path.match(/^\/api\/chats\/([^/]+)\/skills$/)) &&
+          method === "PUT"
+        ) {
+          const id = match[1];
+          if (!store.conversation(id))
+            return json(res, 404, { error: "Conversation not found" });
+          const skillIds = setChatSkills(
+            store,
+            id,
+            (await readJson(req)).skillIds,
+          );
+          controller.event(id, null, "skills", { skillIds });
+          return json(res, 200, { skillIds });
+        }
         if ((match = path.match(/^\/api\/chats\/([^/]+)$/))) {
           const id = match[1];
           if (!store.conversation(id))
             return json(res, 404, { error: "Conversation not found" });
           if (method === "GET")
-            return json(res, 200, store.conversationSnapshot(id));
+            return json(res, 200, {
+              ...store.conversationSnapshot(id),
+              skillIds: chatSkillIds(store, id),
+            });
           if (method === "PATCH") {
             const body = await readJson(req),
               fields = {};
@@ -611,6 +656,7 @@ export async function createHarness({
                 .map((e) => ({ ...e, payload: JSON.parse(e.payload) })),
             })),
             notes: store.projects().flatMap((p) => store.notes(p.id)),
+            skills: listSkills(store),
           };
           return json(res, 200, data, {
             "Content-Disposition":

@@ -23,6 +23,10 @@ The complete product is not finished at the first working provider milestone.
    every agent, and a rule that hands read-only searches to a cheaper worker model
    the user picks, across providers, with a fallback when a worker's provider is
    out of usage. Verified with simulated providers and workers only.
+9. **Skills (built; not yet run against real providers).** Named instructions
+   created in the app and turned on per chat. The full text is included in the
+   instructions Codex, Claude Code and Cursor already receive. Verified with
+   unit tests and a simulated provider only.
 
 ## Architecture decisions
 

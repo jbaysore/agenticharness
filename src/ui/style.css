@@ -2649,6 +2649,95 @@ small {
     display: none;
   }
 }
+.skills-control {
+  position: relative;
+}
+.skills-control > button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.skills-control > button[aria-expanded="true"] {
+  color: var(--text);
+}
+.skills-menu {
+  position: absolute;
+  z-index: 30;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 260px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-stronger);
+  border-radius: 12px;
+  box-shadow: 0 10px 35px #0008;
+  color: var(--text);
+}
+.skills-menu label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 7px 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+.skills-menu label input {
+  display: inline-block;
+  width: auto;
+  margin: 2px 0 0;
+  accent-color: var(--text);
+}
+.skills-menu p {
+  margin: 4px 6px 8px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.skills-menu .text-button {
+  display: block;
+  margin: 4px 6px 6px;
+}
+.skill-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.skill-list li {
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+}
+.skill-list header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.skill-list header strong {
+  flex: 1;
+  min-width: 0;
+}
+.skill-body {
+  white-space: pre-wrap;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 96px;
+  overflow: auto;
+  margin: 8px 0 0;
+}
+.skill-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;

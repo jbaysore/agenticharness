@@ -25,6 +25,7 @@ const paths = {
   archive: "M3 5h18v4H3V5Zm2 4v10h14V9M10 13h4",
   rules:
     "m4 6 1.5 1.5L8 5m3 1h9M4 12l1.5 1.5L8 11m3 1h9M4 18l1.5 1.5L8 17m3 1h9",
+  skill: "M6 3h12v18l-6-4-6 4V3Z",
   refresh: "M20 10a8 8 0 1 0-1 7M20 4v6h-6",
   check: "m5 12 4 4 10-10",
   link: "m9 15 6-6M7 14l-2 2a3 3 0 0 0 4 4l4-4M11 8l4-4a3 3 0 0 1 4 4l-2 2",

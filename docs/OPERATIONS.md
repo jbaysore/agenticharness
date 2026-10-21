@@ -80,6 +80,24 @@ turns overlap, and parallel chats still see each other's unfinished files when
 they run tests. Give parallel chats separate areas of the code, and review the
 diff before trusting a commit made while another chat was working.
 
+## Skills
+
+**Skills** in the sidebar is where you write a skill: a name and the instructions
+an agent should follow. Harness stores it. A skill you create here is not a
+Cursor skill, a Claude Code skill, or a Codex skill, so the same one is
+available to every agent.
+
+In a chat, open **Skills** under the message box and tick the ones that chat
+should use. A chat can use six. The next message includes the full text of each
+ticked skill, for Codex, Claude Code, or Cursor, including when that chat
+continues an existing session. A change during a turn applies to the next
+message. The work log names the skills that went with a turn. Text that every
+chat should always see belongs in **Agent rules** instead.
+
+A name can be 60 characters and the instructions 8,000. You can keep 40 skills.
+A long skill is sent in full on every message that uses it, so it spends
+included usage each time.
+
 ## Agent rules
 
 **Agent rules** in the sidebar holds standing rules that every agent receives at

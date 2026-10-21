@@ -19,6 +19,7 @@ import {
   rulesInstructions,
   workerName,
 } from "./rules.mjs";
+import { skillInstructions, skillsForTurn } from "./skills.mjs";
 import { isDelegationTool } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
@@ -347,6 +348,18 @@ export class Controller extends EventEmitter {
     };
     if (browserTools.length)
       this.bridgeBrowser.set(token, { tools: browserTools, call: browser });
+    const skills = skillsForTurn(this.store, chat.id);
+    if (skills.length)
+      this.event(chat.id, run.id, "work", {
+        kind: "skills",
+        item: {
+          title:
+            skills.length === 1
+              ? `Skill · ${skills[0].name}`
+              : `Skills · ${skills.map((skill) => skill.name).join(", ")}`,
+          description: "Included in the instructions for this turn.",
+        },
+      });
     const ctx = {
       project,
       chat,
@@ -364,7 +377,8 @@ export class Controller extends EventEmitter {
       handoff: [notice, handoff].filter(Boolean).join("\n\n"),
       instructions:
         agentInstructions(project, chat) +
-        rulesInstructions(rules, plan, this.providers, COMMAND_SHELL),
+        rulesInstructions(rules, plan, this.providers, COMMAND_SHELL) +
+        skillInstructions(skills),
       tools: [...historyTools, ...plan.tools, ...browserTools],
       browser,
       signal: abort.signal,
