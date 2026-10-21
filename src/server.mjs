@@ -35,6 +35,14 @@ import {
 } from "./core/rules.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Names the browser client on disk, so an open page can tell it was rebuilt.
+const clientBuild = () =>
+  Promise.all(
+    ["app.js", "app.css"].map((file) => stat(join(root, "dist", file))),
+  ).then(
+    (files) => files.map((f) => `${f.size}-${Math.round(f.mtimeMs)}`).join("."),
+    () => null,
+  );
 export async function createHarness({
   dataDir = process.env.HARNESS_DATA_DIR ??
     join(process.env.LOCALAPPDATA ?? homedir(), "AgenticHarness"),
@@ -138,6 +146,7 @@ export async function createHarness({
           app: "Agentic Harness",
           version: APP_VERSION,
           instanceId,
+          build: await clientBuild(),
         });
       if (path === "/internal/launch" && method === "POST") {
         if (req.headers.authorization !== "Bearer " + controlToken)

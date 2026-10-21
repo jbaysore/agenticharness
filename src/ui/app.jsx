@@ -107,7 +107,8 @@ function App() {
     paneRefs = useRef({}),
     limit = useRef(paneLimit),
     marking = useRef(new Set()),
-    errorTimer = useRef(null);
+    errorTimer = useRef(null),
+    build = useRef(null);
   limit.current = paneLimit;
   const report = useCallback((e) => {
     setError(e.message ?? String(e));
@@ -237,10 +238,32 @@ function App() {
       ignore = true;
     };
   }, []);
+  // A page keeps running the code it loaded with, so after a rebuild or a
+  // restart from Hub it reloads itself. Drafts and unsent messages are saved.
+  async function checkBuild() {
+    const latest = await fetch("/health", { cache: "no-store" })
+      .then((r) => r.json())
+      .then(
+        (h) => h.build,
+        () => null,
+      );
+    if (!latest) return;
+    if (build.current && build.current !== latest) location.reload();
+    else build.current = latest;
+  }
+  useEffect(() => {
+    const visible = () =>
+      document.visibilityState === "visible" && checkBuild();
+    document.addEventListener("visibilitychange", visible);
+    return () => document.removeEventListener("visibilitychange", visible);
+  }, []);
   useEffect(() => {
     if (!ready) return;
     const stream = new EventSource("/api/events?after=" + lastEvent.current);
-    stream.onopen = () => setOnline(true);
+    stream.onopen = () => {
+      setOnline(true);
+      checkBuild();
+    };
     stream.onerror = () => setOnline(false);
     stream.addEventListener("resync", async (event) => {
       lastEvent.current = JSON.parse(event.data).lastEventId;
