@@ -69,11 +69,14 @@ export function usageWindows(provider) {
   return (provider.usage.windows ?? [])
     .filter((w) => typeof w.usedPercent === "number")
     .map((w) => {
-      // Claude names its windows five_hour, seven_day, seven_day_opus….
+      // Claude's native meters use session/weekly_all/weekly_scoped; older
+      // readings use five_hour, seven_day, seven_day_opus….
       const [, claudeSpan, scope] =
         /^(five_hour|seven_day)_?(.*)$/.exec(w.bucket ?? "") ?? [];
       const minutes =
-        w.windowMinutes ?? { five_hour: 300, seven_day: 10080 }[claudeSpan];
+        w.windowMinutes ??
+        { session: 300, weekly_all: 10080, weekly_scoped: 10080 }[w.bucket] ??
+        { five_hour: 300, seven_day: 10080 }[claudeSpan];
       const span = minutes
         ? minutes >= 1440
           ? minutes === 10080
@@ -81,7 +84,11 @@ export function usageWindows(provider) {
             : Math.round(minutes / 1440) + "-day"
           : Math.round(minutes / 60) + "-hour"
         : null;
-      const bucket = claudeSpan ? scope : w.bucket !== provider.id && w.bucket;
+      const bucket = claudeSpan
+        ? scope
+        : !["session", "weekly_all"].includes(w.bucket) &&
+          w.bucket !== provider.id &&
+          w.bucket;
       const scopeName =
         w.label ?? (bucket ? String(bucket).replaceAll("_", " ") : null);
       return {

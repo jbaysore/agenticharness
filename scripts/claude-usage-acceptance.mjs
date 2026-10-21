@@ -33,8 +33,8 @@ try {
     rate_limits: {
       extra_usage: { is_enabled: false, user_disabled: true },
       limits: [
-        { kind: "five_hour", percent },
-        { kind: "seven_day", percent: 27 },
+        { kind: "session", group: "session", percent },
+        { kind: "weekly_all", group: "weekly", percent: 27 },
       ],
     },
   });
@@ -46,6 +46,26 @@ try {
       route: "Claude subscription",
       usage: monitor.update(reading(26)).usage,
       models: [{ id: "fixture", name: "Fixture", efforts: [] }],
+    },
+    {
+      id: "codex",
+      name: "Codex",
+      connected: true,
+      models: [],
+      usage: {
+        authoritative: true,
+        windows: [
+          { bucket: "codex", windowMinutes: 300, usedPercent: 10 },
+          { bucket: "codex", windowMinutes: 10080, usedPercent: 20 },
+        ],
+      },
+    },
+    {
+      id: "cursor",
+      name: "Cursor",
+      connected: true,
+      models: [],
+      usage: { authoritative: false, windows: [] },
     },
   ];
   const publish = (value) => {
@@ -73,6 +93,20 @@ try {
       "aria-label",
       /74%/,
     );
+    await expect(page.locator(".usage-chip")).toHaveCount(2);
+    await expect(page.locator(".usage-chip.cursor")).toHaveCount(0);
+    await expect(page.locator(".usage-chip.claude .usage-chip-value")).toHaveText([
+      "74%", "73%",
+    ]);
+    await expect(page.locator(".usage-chip.claude .usage-chip-span")).toHaveText([
+      "5h", "wk",
+    ]);
+    await expect(page.locator(".usage-chip.codex .usage-chip-value")).toHaveText([
+      "90%", "80%",
+    ]);
+    await page.screenshot({
+      path: `.local/screenshots/usage-header-${mobile ? "mobile" : "desktop"}.png`,
+    });
     publish({ rate_limits_available: true, rate_limits: {} });
     await expect(page.locator(".usage-chip.claude")).toHaveAttribute(
       "aria-label",
@@ -83,6 +117,10 @@ try {
       name: "Usage remaining",
       exact: true,
     });
+    await expect(popover.locator(".usage-provider.cursor")).toHaveCount(0);
+    await expect(
+      page.locator(".usage-chip.claude .usage-chip-row.unknown"),
+    ).toHaveCount(2);
     await expect(popover.getByRole("status")).toHaveText(
       /Unknown · last confirmed at .*\d+:\d+:\d+/,
     );
@@ -108,6 +146,7 @@ try {
       name: "Connections & usage",
       exact: true,
     });
+    await expect(connections.getByText("Cursor", { exact: true })).toBeVisible();
     await expect(connections.getByRole("status")).toHaveText(
       /Unknown · last confirmed at/,
     );
@@ -155,7 +194,7 @@ try {
   );
   expect(errors).toEqual([]);
   console.log(
-    "Claude usage UI passed: desktop/mobile unknown timestamps, retained values, reload, recovery and visible stop reason.",
+    "Claude usage UI passed: desktop/mobile session and weekly bars, Cursor excluded from header, unknown timestamps, retained values, reload, recovery and visible stop reason.",
   );
 } finally {
   await browser?.close();

@@ -26,6 +26,51 @@ const reading = (percent = 26) => ({
 // The actual incomplete response recorded immediately before the old stops.
 const incomplete = { rate_limits_available: true, rate_limits: {} };
 
+test("native Claude meters show separate session and weekly header bars", () => {
+  const monitor = createClaudeUsageMonitor(auth);
+  const provider = {
+    id: "claude",
+    connected: true,
+    usage: monitor.update({
+      ...reading(),
+      rate_limits: {
+        ...reading().rate_limits,
+        limits: [
+          {
+            kind: "weekly_scoped", group: "weekly", percent: 94,
+            scope: { model: { display_name: "Sonnet" } },
+          },
+          { kind: "session", group: "session", percent: 26 },
+          { kind: "weekly_all", group: "weekly", percent: 27 },
+          {
+            kind: "weekly_scoped", group: "weekly", percent: 10,
+            scope: { surface: { display_name: "Claude Code" } },
+          },
+        ],
+      },
+    }).usage,
+  };
+  assert.deepEqual(usageGlance(provider), {
+    remaining: 6,
+    level: "low",
+    bars: [
+      { name: "5-hour limit", short: "5h", remaining: 74, level: "ok" },
+      { name: "Weekly limit", short: "wk", remaining: 73, level: "ok" },
+    ],
+  });
+  assert.deepEqual(usageWindows(provider).map((w) => w.name), [
+    "Sonnet · Weekly limit",
+    "5-hour limit",
+    "Weekly limit",
+    "Claude Code · Weekly limit",
+  ]);
+  provider.usage = monitor.update(null).usage;
+  assert.deepEqual(usageGlance(provider).bars.map((b) => [b.short, b.remaining]), [
+    ["5h", null],
+    ["wk", null],
+  ]);
+});
+
 test("missing telemetry keeps the original confirmation time and recovers automatically", () => {
   let now = "2026-10-21T20:38:36.000Z";
   const monitor = createClaudeUsageMonitor(auth, () => now);

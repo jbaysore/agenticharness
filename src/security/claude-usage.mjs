@@ -49,7 +49,7 @@ function publicUsage(usage) {
       .filter((w) => Number.isFinite(w?.percent))
       .map((w) => ({
         bucket: w.kind,
-        label: w.scope?.model?.display_name ?? w.group,
+        label: w.scope?.model?.display_name ?? w.scope?.surface?.display_name,
         usedPercent: w.percent,
         resetsAt: w.resets_at,
         windowMinutes: null,

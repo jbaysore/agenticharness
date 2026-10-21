@@ -27,8 +27,10 @@ export function UsageGlance({ providers, onOpenConnections }) {
       document.removeEventListener("keydown", key);
     };
   }, [open]);
-  if (!providers.length) return null;
-  const glances = providers.map((p) => [p, usageGlance(p)]);
+  const glances = providers
+    .filter((p) => p.id !== "cursor")
+    .map((p) => [p, usageGlance(p)]);
+  if (!glances.length) return null;
   return (
     <div className="usage-glance" ref={root}>
       <button
