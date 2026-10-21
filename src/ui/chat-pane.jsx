@@ -127,7 +127,8 @@ export function ChatPane({
       chat ? chat.permissions : selection.permissions,
     ),
     [draft, setDraft] = useState(() => readDraft(draftKey)),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [permissionsBusy, setPermissionsBusy] = useState(false);
   const messages = useChatScroll(chat),
     input = useRef(null),
     sending = useRef(false);
@@ -175,6 +176,9 @@ export function ChatPane({
     };
   }, [chat?.id]);
   useEffect(() => {
+    if (chat && !permissionsBusy) setPermissions(chat.permissions);
+  }, [chat?.id, chat?.permissions, permissionsBusy]);
+  useEffect(() => {
     if (!connected?.models?.length) return;
     const available = connected.models.some(
       (m) => m.id === model && !m.disabled,
@@ -188,12 +192,27 @@ export function ChatPane({
     if (selectedModel && effort && !selectedModel.efforts.includes(effort))
       setEffort("");
   }, [model]);
+  async function changePermissions(next) {
+    setPermissions(next);
+    if (!chat) return;
+    setPermissionsBusy(true);
+    try {
+      await api(`/api/chats/${chat.id}`, { permissions: next }, "PATCH");
+      await reload(chat.id);
+    } catch (e) {
+      await reload(chat.id).catch(() => {});
+      report(e);
+    } finally {
+      setPermissionsBusy(false);
+    }
+  }
   async function send(override) {
     const text = typeof override === "string" ? override : draft;
     if (
       !text.trim() ||
       !project ||
       busy ||
+      permissionsBusy ||
       chat?.activeRun ||
       !model ||
       (selectedModel?.efforts?.length && !effort)
@@ -472,6 +491,7 @@ export function ChatPane({
                 aria-label="Send message"
                 disabled={
                   busy ||
+                  permissionsBusy ||
                   !draft.trim() ||
                   !project ||
                   !model ||
@@ -492,7 +512,8 @@ export function ChatPane({
             <select
               aria-label="Permissions"
               value={permissions}
-              onChange={(e) => setPermissions(e.target.value)}
+              disabled={busy || permissionsBusy}
+              onChange={(e) => changePermissions(e.target.value)}
             >
               {permissionModes.map(([id, label]) => (
                 <option key={id} value={id}>

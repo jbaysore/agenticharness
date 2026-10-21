@@ -30,7 +30,12 @@ worker model on Claude Code or Codex. Harness works out each time whether the
 hand-off is cheaper and falls back when the worker's provider is out of usage;
 this too has only been checked with simulated providers.
 Every chat can also drive a shared Chrome on the host through Playwright MCP;
-each action that can change a page asks for approval.
+each action that can change a page asks for approval unless **Override** is selected.
+New conversations default to **Auto-review**. The permission picker saves each
+selection immediately, including during a turn. Harness pauses the agent and
+resumes its native session under the new mode, keeping the same conversation,
+turn and completed work. **Override** bypasses permission review; questions still
+require your input. Existing conversations keep their saved mode.
 Remote access runs through a Cloudflare Tunnel behind Cloudflare Access; real
 endpoint and physical laptop/iPhone validation are pending. See [daily-use instructions](docs/OPERATIONS.md),
 [acceptance evidence](docs/ACCEPTANCE.md), [the delivery plan](docs/PLAN.md), and

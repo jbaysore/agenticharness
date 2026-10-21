@@ -5,6 +5,69 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHarness } from "../src/server.mjs";
 
+test("new chats default to auto-review and permission selections persist immediately", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-permissions-http-"));
+  let app = await createHarness({
+    dataDir: dir,
+    port: 0,
+    startProviders: false,
+  });
+  const call = async (path, body, method = "POST") => {
+    const response = await fetch(app.runtime.origin + path, {
+      method,
+      headers: { "Content-Type": "application/json", "X-Harness-Client": "1" },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const project = app.store.addProject("Permission defaults", dir),
+      chat = (await call("/api/chats", { projectId: project.id })).body,
+      sessions = { codex: { id: "keep-permission-session" } };
+    assert.equal(chat.permissions, "auto");
+    app.store.updateConversation(chat.id, { sessions });
+    for (const permissions of ["override", "auto", "manual"]) {
+      const changed = await call(
+        "/api/chats/" + chat.id,
+        { permissions },
+        "PATCH",
+      );
+      assert.equal(changed.status, 200);
+      assert.equal(changed.body.permissions, permissions);
+      assert.equal(app.store.conversation(chat.id).permissions, permissions);
+      assert.deepEqual(changed.body.sessions, sessions);
+      assert.equal(app.store.messages(chat.id).length, 0);
+    }
+    for (const permissions of ["invalid", null, false]) {
+      assert.equal(
+        (await call("/api/chats/" + chat.id, { permissions }, "PATCH")).status,
+        400,
+      );
+      assert.equal(app.store.conversation(chat.id).permissions, "manual");
+    }
+    assert.equal(
+      (
+        await call("/api/chats", {
+          projectId: project.id,
+          permissions: "override",
+        })
+      ).body.permissions,
+      "override",
+    );
+    await app.close();
+    app = await createHarness({ dataDir: dir, port: 0, startProviders: false });
+    assert.equal(app.store.conversation(chat.id).permissions, "manual");
+    assert.deepEqual(app.store.conversation(chat.id).sessions, sessions);
+    assert.equal(
+      (await call("/api/chats", { projectId: project.id })).body.permissions,
+      "auto",
+    );
+  } finally {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("real local HTTP server admits the host PC without pairing, enforces same-origin writes, and keeps stored history", async () => {
   const dir = await mkdtemp(join(tmpdir(), "harness-http-")),
     app = await createHarness({ dataDir: dir, port: 0, startProviders: false });

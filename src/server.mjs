@@ -376,7 +376,7 @@ export async function createHarness({
             effort: body.effort ?? null,
             permissions: PERMISSION_MODES.includes(body.permissions)
               ? body.permissions
-              : "manual",
+              : "auto",
           });
           controller.event(chat.id, null, "chat", chat);
           return json(res, 201, chat);
@@ -402,6 +402,8 @@ export async function createHarness({
                 throw new Error("Stop the turn before archiving this chat");
               store.setArchived(id, body.archived === true);
             }
+            if (Object.hasOwn(body, "permissions"))
+              controller.setPermissions(id, body.permissions);
             const chat = store.updateConversation(id, fields);
             controller.event(id, null, "chat", chat);
             return json(res, 200, chat);

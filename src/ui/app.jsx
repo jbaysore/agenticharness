@@ -116,7 +116,7 @@ function App() {
       provider: "codex",
       model: "",
       effort: "",
-      permissions: "manual",
+      permissions: "auto",
     }),
     paneRefs = useRef({}),
     limit = useRef(paneLimit),

@@ -264,7 +264,7 @@ export async function runClaude(ctx) {
     prompt: input,
     options: {
       ...claudeOptions(ctx.project.path),
-      ...permissionModes[ctx.permissions ?? "manual"],
+      ...permissionModes[ctx.permissions ?? "auto"],
       model: ctx.model,
       effort: ctx.effort || undefined,
       resume: ctx.session?.id,

@@ -136,7 +136,38 @@ export class Controller extends EventEmitter {
     this.active.get(chatId).task = task;
     return run;
   }
-  async execute(run, text, effort, abort) {
+  setPermissions(chatId, permissions) {
+    const chat = this.store.conversation(chatId);
+    if (!chat) throw new Error("Conversation not found");
+    if (!PERMISSION_MODES.includes(permissions))
+      throw new Error("Choose auto-review, manual review or override");
+    if (chat.permissions === permissions) return chat;
+    const updated = this.store.updateConversation(chatId, { permissions }),
+      active = this.active.get(chatId);
+    if (active && !active.cancelled) {
+      // Native permission policies can be frozen for a turn. Interrupt before
+      // resuming the same session so the entire mode, including its sandbox,
+      // applies to the next action. Keep the same Harness run and user message.
+      active.restart = true;
+      active.abort.abort();
+      this.event(chatId, active.run.id, "work", {
+        kind: "permissions-change",
+        item: {
+          title: "Applying permission mode",
+          description:
+            "Pausing the agent and continuing this turn with " +
+            {
+              auto: "Auto-review",
+              manual: "Manual review",
+              override: "Override",
+            }[permissions] +
+            ".",
+        },
+      });
+    }
+    return updated;
+  }
+  async execute(run, text, effort, abort, continuing = false) {
     const chat = this.store.conversation(run.conversation_id),
       project = this.store.project(chat.project_id),
       messageMap = new Map();
@@ -183,6 +214,7 @@ export class Controller extends EventEmitter {
     // Override answers every permission request itself and logs it; questions
     // for the user still reach the user.
     const approve = (request) => {
+      if (abort.signal.aborted) return Promise.resolve({ allow: false });
       if (permissions !== "override" || request.kind === "question")
         return this.waitApproval(run, request, abort.signal);
       emit("work", {
@@ -318,7 +350,13 @@ export class Controller extends EventEmitter {
     const ctx = {
       project,
       chat,
-      text,
+      text: continuing
+        ? [
+            `The user changed the permission mode to ${permissions} while you were working. Continue the current task from this session's saved progress under the new permissions.`,
+            "Do not repeat completed actions. Requests awaiting permission when interrupted were not declined by the user; reevaluate them under the new mode. Unanswered questions still require user input.",
+            "Original request:\n" + text,
+          ].join("\n\n")
+        : text,
       model: run.model,
       effort,
       permissions,
@@ -392,7 +430,6 @@ export class Controller extends EventEmitter {
       status = abort.signal.aborted ? "cancelled" : "failed";
       error = caught.message;
     } finally {
-      this.store.setRun(run.id, status, null, error ?? null);
       this.store.expireApprovals(run.id);
       this.bridgeTokens.delete(token);
       this.bridgeBrowser.delete(token);
@@ -401,14 +438,22 @@ export class Controller extends EventEmitter {
           waiter.resolve({ allow: false });
           this.approvalWaiters.delete(id);
         }
-      this.active.delete(chat.id);
-      this.event(chat.id, run.id, "run", {
-        status,
-        error,
-        provider: run.provider,
-        model: run.model,
-      });
     }
+    const active = this.active.get(chat.id);
+    if (active?.restart && !active.cancelled) {
+      active.restart = false;
+      active.abort = new AbortController();
+      this.store.setRun(run.id, "running");
+      return this.execute(run, text, effort, active.abort, true);
+    }
+    this.store.setRun(run.id, status, null, error ?? null);
+    this.active.delete(chat.id);
+    this.event(chat.id, run.id, "run", {
+      status,
+      error,
+      provider: run.provider,
+      model: run.model,
+    });
   }
   waitApproval(run, request, signal) {
     if (signal.aborted) return Promise.resolve({ allow: false });
@@ -469,6 +514,7 @@ export class Controller extends EventEmitter {
   cancel(chatId) {
     const active = this.active.get(chatId);
     if (active) {
+      active.cancelled = true;
       active.abort.abort();
       this.event(chatId, active.run.id, "work", {
         kind: "cancellation",
@@ -479,7 +525,10 @@ export class Controller extends EventEmitter {
   }
   async close() {
     const active = [...this.active.values()];
-    for (const { abort } of active) abort.abort();
+    for (const work of active) {
+      work.cancelled = true;
+      work.abort.abort();
+    }
     await Promise.allSettled([...active.map((a) => a.task), this.refreshing]);
     this.browser?.close();
   }

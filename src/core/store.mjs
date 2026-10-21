@@ -69,7 +69,7 @@ export class Store {
     const conversation = columns("conversations");
     if (!conversation.includes("permissions"))
       this.db.exec(
-        "ALTER TABLE conversations ADD COLUMN permissions TEXT NOT NULL DEFAULT 'manual'",
+        "ALTER TABLE conversations ADD COLUMN permissions TEXT NOT NULL DEFAULT 'auto'",
       );
     if (!conversation.includes("archived_at"))
       this.db.exec("ALTER TABLE conversations ADD COLUMN archived_at TEXT");
@@ -173,7 +173,7 @@ export class Store {
     provider = "codex",
     model = "",
     effort = null,
-    permissions = "manual",
+    permissions = "auto",
     scope = this.settings().defaultHistoryScope,
     createdAt,
   }) {

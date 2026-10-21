@@ -301,7 +301,7 @@ export async function runCodex(ctx) {
       model: ctx.model,
       modelProvider: "openai",
       serviceTier: "default",
-      ...permissionModes[ctx.permissions ?? "manual"],
+      ...permissionModes[ctx.permissions ?? "auto"],
       developerInstructions: ctx.instructions,
       config: {
         model_provider: "openai",
