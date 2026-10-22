@@ -49,10 +49,10 @@ input.on("line", async (line) => {
             Authorization: "Bearer " + process.env.HARNESS_BRIDGE_TOKEN,
           },
           body: JSON.stringify(m.params),
-          // A browser action may wait for the user's approval, and landing
-          // runs the project's check command.
+          // Browser actions and mode suggestions may wait for user approval.
+          // Landing runs the project's check command.
           signal: AbortSignal.timeout(
-            /^browser_|^land_changes$/.test(m.params?.name)
+            /^browser_|^(?:land_changes|suggest_mode)$/.test(m.params?.name)
               ? 15 * 60 * 1000
               : 15000,
           ),

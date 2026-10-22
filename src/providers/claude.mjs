@@ -23,6 +23,7 @@ import {
   ASK_DENY,
   CLAUDE_ASK_TOOLS,
   claudeAskAllowed,
+  CHAT_MODES,
 } from "../core/modes.mjs";
 export { checkClaudeBilling };
 const exec = promisify(execFile);
@@ -285,6 +286,28 @@ export async function runClaude(
             }),
           ),
         ),
+      // The tool itself always asks the user, including in Ask and Plan modes.
+      ...(ctx.tools ?? [])
+        .filter((t) => t.name === "suggest_mode")
+        .map((t) =>
+          tool(
+            t.name,
+            t.description,
+            {
+              mode: z.enum(CHAT_MODES),
+              reason: z.string().min(1).max(4000),
+              objective: z.string().min(1).max(250000).optional(),
+            },
+            async (args) => ({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(await ctx.history(t.name, args)),
+                },
+              ],
+            }),
+          ),
+        ),
       // Offered only to a chat working in its own worktree.
       ...(ctx.tools ?? [])
         .filter((t) => t.name === "land_changes")
@@ -322,7 +345,7 @@ export async function runClaude(
       model: ctx.model,
       effort: ctx.effort || undefined,
       resume: ctx.session?.id,
-      allowedTools: ["mcp__harness__rename_chat"],
+      allowedTools: ["mcp__harness__rename_chat", "mcp__harness__suggest_mode"],
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

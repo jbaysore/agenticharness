@@ -156,7 +156,9 @@ export function Approval({ approval, onAnswer }) {
           ? `${providerName(approval.provider)} has a question`
           : r.kind === "plan"
             ? `${providerName(approval.provider)} has a plan`
-            : `${providerName(approval.provider)} needs you`}
+            : r.kind === "mode-change"
+              ? `${providerName(approval.provider)} suggests a mode change`
+              : `${providerName(approval.provider)} needs you`}
       </div>
       <h3>{r.title}</h3>
       {r.reviewReason && (
@@ -166,6 +168,19 @@ export function Approval({ approval, onAnswer }) {
         <div className="plan-body">
           <Markdown text={r.plan} />
         </div>
+      ) : r.kind === "mode-change" ? (
+        <>
+          <p>{r.reason}</p>
+          {r.objective && (
+            <p>
+              <strong>Goal:</strong> {r.objective}
+            </p>
+          )}
+          <p className="muted small">
+            Your approval switches this chat to {r.mode} mode and continues the
+            current task.
+          </p>
+        </>
       ) : r.kind === "question" ? (
         r.questions?.map((q) => (
           <QuestionField
@@ -191,7 +206,11 @@ export function Approval({ approval, onAnswer }) {
           disabled={submitting}
           onClick={() => respond({ allow: false })}
         >
-          {r.kind === "plan" ? "Keep planning" : "Decline"}
+          {r.kind === "plan"
+            ? "Keep planning"
+            : r.kind === "mode-change"
+              ? "Keep current mode"
+              : "Decline"}
         </button>
         <button
           className="primary"
@@ -206,7 +225,9 @@ export function Approval({ approval, onAnswer }) {
             ? "Send answer"
             : r.kind === "plan"
               ? "Approve plan"
-              : "Allow once"}
+              : r.kind === "mode-change"
+                ? "Approve mode change"
+                : "Allow once"}
         </button>
       </div>
     </section>

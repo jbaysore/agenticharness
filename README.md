@@ -50,6 +50,11 @@ answers questions about the project and cannot change files, commits, or pages.
 Cursor uses its native Ask mode; Codex is held in a read-only sandbox; Claude
 Code can only read and search. **Plan** proposes work before changing anything,
 and **Goal** keeps Codex or Claude Code going until a condition is met.
+Agents can suggest a mode change with a reason and, for Goal, a concrete
+objective. Every suggestion waits for your manual approval, including under
+Auto-review and Override. Approving resumes the current task in the chosen mode
+with the same conversation and native session; declining keeps the current mode.
+Mode approval alone does not approve a plan or expand the task scope.
 Cursor's **Auto-review**, and browser actions under every agent's **Auto-review**,
 use a separate Codex session, with a Claude subscription fallback if Codex cannot
 review. Cursor's read-only Git commands, such as `git status` or `git diff`,

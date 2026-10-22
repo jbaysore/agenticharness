@@ -27,6 +27,7 @@ import {
   readRepositoryFile,
 } from "./core/repository.mjs";
 import { historyCall, historyTools } from "./core/history.mjs";
+import { modeSuggestionTool } from "./core/modes.mjs";
 import { landTool } from "./core/worktrees.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
@@ -194,6 +195,7 @@ export async function createHarness({
         return json(res, 200, {
           tools: [
             ...historyTools,
+            ...(controller.bridgeModes.has(token) ? [modeSuggestionTool] : []),
             ...(controller.bridgeLand.has(token) ? [landTool] : []),
             ...(controller.bridgeBrowser.get(token)?.tools ?? []),
           ],
@@ -206,6 +208,12 @@ export async function createHarness({
           return json(res, 401, { error: "History capability expired" });
         const body = await readJson(req),
           browser = controller.bridgeBrowser.get(token);
+        if (body.name === "suggest_mode" && controller.bridgeModes.has(token))
+          return json(
+            res,
+            200,
+            await controller.bridgeModes.get(token)(body.arguments ?? {}),
+          );
         if (browser && isBrowserTool(body.name))
           return json(res, 200, {
             mcp: await browser.call(body.name, body.arguments ?? {}),

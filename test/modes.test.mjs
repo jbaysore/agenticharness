@@ -6,16 +6,16 @@ import { runClaude } from "../src/providers/claude.mjs";
 import {
   CLAUDE_ASK_TOOLS,
   hostToolsForMode,
+  modeSuggestionTool,
 } from "../src/core/modes.mjs";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   codexAskBlocksApproval,
   codexCollaboration,
   codexExecutionPolicy,
 } from "../src/providers/codex.mjs";
-import {
-  cursorAskRejection,
-  cursorModeId,
-} from "../src/providers/cursor.mjs";
+import { cursorAskRejection, cursorModeId } from "../src/providers/cursor.mjs";
 
 const auth = async () => ({
   loggedIn: true,
@@ -156,12 +156,74 @@ test("a Claude goal is set with /goal, and its hand-off moves to the system prom
   assert.equal(seen.options.permissionMode, "auto");
 });
 
+test("an approved Claude switch to Goal starts the concrete objective while resuming its session", async () => {
+  const { run, seen } = fakeClaude({
+    text: "Continue the current task without repeating completed actions",
+    mode: "goal",
+    continuing: true,
+    startGoal: true,
+    goalObjective: "The parser tests pass",
+    session: { id: "saved-session" },
+    approve: async () => ({ allow: true }),
+  });
+  await run;
+  assert.equal(seen.message, "/goal The parser tests pass");
+  assert.equal(seen.options.resume, "saved-session");
+});
+
+test("Claude exposes the suggestion as an MCP tool that reaches Harness even in Ask mode", async () => {
+  const calls = [];
+  const { run } = fakeClaude(
+    {
+      text: "How does the parser work?",
+      mode: "ask",
+      tools: [modeSuggestionTool],
+      history: async (name, args) => {
+        calls.push({ name, args });
+        return { changed: false };
+      },
+      approve: async () => ({ allow: true }),
+    },
+    async (options) => {
+      assert.equal(
+        (await options.canUseTool("mcp__harness__suggest_mode", {})).behavior,
+        "allow",
+      );
+      const client = new Client({ name: "mode-test", version: "1.0.0" });
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      const server = options.mcpServers.harness.instance;
+      try {
+        await server.connect(serverTransport);
+        await client.connect(clientTransport);
+        const { tools } = await client.listTools();
+        assert.ok(tools.some((tool) => tool.name === "suggest_mode"));
+        const result = await client.callTool({
+          name: "suggest_mode",
+          arguments: { mode: "plan", reason: "Map the parser changes first" },
+        });
+        assert.deepEqual(JSON.parse(result.content[0].text), {
+          changed: false,
+        });
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+  assert.equal((await run).status, "completed");
+  assert.deepEqual(calls, [
+    {
+      name: "suggest_mode",
+      args: { mode: "plan", reason: "Map the parser changes first" },
+    },
+  ]);
+});
+
 test("ask mode stays on after a turn and reaches Cursor", async () => {
   const store = new Store(":memory:"),
     controller = new Controller(store, {});
-  controller.providers = [
-    { id: "cursor", models: [{ id: "m", efforts: [] }] },
-  ];
+  controller.providers = [{ id: "cursor", models: [{ id: "m", efforts: [] }] }];
   let seen;
   controller.runners.cursor = async (ctx) => {
     seen = ctx;
@@ -219,7 +281,11 @@ test("Claude ask mode can read and cannot edit, run commands, or leave the mode"
       text: "How does the queue work?",
       mode: "ask",
       permissions: "override",
-      tools: [{ name: "history_search" }, { name: "browser_snapshot" }],
+      tools: [
+        { name: "history_search" },
+        { name: "browser_snapshot" },
+        { name: "suggest_mode" },
+      ],
       approve: async () => ({ allow: true }),
     },
     async (options) => {
@@ -229,6 +295,7 @@ test("Claude ask mode can read and cannot edit, run commands, or leave the mode"
         "Bash",
         "ExitPlanMode",
         "mcp__harness__history_search",
+        "mcp__harness__suggest_mode",
         "mcp__harness__land_changes",
         "mcp__harness__browser_snapshot",
         "mcp__harness__browser_click",
@@ -241,6 +308,7 @@ test("Claude ask mode can read and cannot edit, run commands, or leave the mode"
   assert.deepEqual(seen.options.tools, CLAUDE_ASK_TOOLS);
   assert.equal(decisions.Read.behavior, "allow");
   assert.equal(decisions["mcp__harness__history_search"].behavior, "allow");
+  assert.equal(decisions["mcp__harness__suggest_mode"].behavior, "allow");
   assert.equal(decisions["mcp__harness__browser_snapshot"].behavior, "allow");
   for (const name of [
     "Edit",
@@ -258,15 +326,24 @@ test("Codex ask mode is a read-only sandbox and is not plan mode", () => {
     approvalsReviewer: "user",
     sandbox: "read-only",
   });
-  assert.equal(codexExecutionPolicy("default", "override").sandbox, "danger-full-access");
+  assert.equal(
+    codexExecutionPolicy("default", "override").sandbox,
+    "danger-full-access",
+  );
   assert.equal(codexCollaboration("ask"), "default");
   assert.equal(codexCollaboration("plan"), "plan");
-  assert.equal(codexAskBlocksApproval("ask", "item/fileChange/requestApproval"), true);
+  assert.equal(
+    codexAskBlocksApproval("ask", "item/fileChange/requestApproval"),
+    true,
+  );
   assert.equal(
     codexAskBlocksApproval("ask", "item/commandExecution/requestApproval"),
     true,
   );
-  assert.equal(codexAskBlocksApproval("plan", "item/fileChange/requestApproval"), false);
+  assert.equal(
+    codexAskBlocksApproval("plan", "item/fileChange/requestApproval"),
+    false,
+  );
 });
 
 test("Cursor ask mode uses the native ask id and declines other permissions", () => {

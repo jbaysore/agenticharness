@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { cursorPrompt } from "./attachments.mjs";
 import { historyTools } from "../core/history.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
+import { modeSuggestionTool } from "../core/modes.mjs";
 const exec = promisify(execFile);
 
 // Harness's history and browser tools need no prompt of Cursor's, as with
@@ -33,7 +34,9 @@ export function isHarnessTool(toolCall, tools = []) {
     toolCall?.kind === "other" &&
     !!name &&
     name[1] === name[2] &&
-    (historyNames.has(name[1]) || isBrowserTool(name[1])) &&
+    (historyNames.has(name[1]) ||
+      name[1] === modeSuggestionTool.name ||
+      isBrowserTool(name[1])) &&
     tools.some((t) => t.name === name[1])
   );
 }

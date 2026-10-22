@@ -28,9 +28,11 @@ import {
 import {
   ASK_DENY,
   ASK_INSTRUCTIONS,
+  MODE_SUGGESTION_INSTRUCTIONS,
   askHostAllowed,
   checkMode,
   hostToolsForMode,
+  modeSuggestionTool,
 } from "./modes.mjs";
 import { invokedSkills, listSkills, skillInstructions } from "./skills.mjs";
 import { isDelegationTool, offeredTools } from "./delegation.mjs";
@@ -76,6 +78,7 @@ export class Controller extends EventEmitter {
     this.browser = browser;
     this.bridgeBrowser = new Map();
     this.bridgeLand = new Map();
+    this.bridgeModes = new Map();
     // Where every new chat gets its own worktree.
     this.worktreeRoot = worktreeRoot;
     // Worktree removals in progress, by chat, so a new turn waits for them.
@@ -330,7 +333,14 @@ export class Controller extends EventEmitter {
   tidyAll() {
     return Promise.all(this.store.conversations().map((c) => this.tidy(c.id)));
   }
-  async execute(run, text, effort, abort, continuing = false) {
+  async execute(
+    run,
+    text,
+    effort,
+    abort,
+    continuing = false,
+    modeChange = null,
+  ) {
     const chat = this.store.conversation(run.conversation_id),
       home = this.store.project(chat.project_id),
       messageMap = new Map();
@@ -395,9 +405,9 @@ export class Controller extends EventEmitter {
       }
       this.event(chat.id, run.id, type, payload);
     };
-    // Override answers every permission request itself and logs it. Questions
-    // and plans still reach the user. In Auto-review, the reviewer decides
-    // every permission request and asks the user only when it returns ask.
+    // Override answers every permission request itself and logs it. Questions,
+    // plans and mode suggestions still reach the user. In Auto-review, the
+    // reviewer decides permissions and asks the user only when it returns ask.
     const reviewer =
       permissions === "auto"
         ? new ActionReviewer({
@@ -425,7 +435,7 @@ export class Controller extends EventEmitter {
       if (reviewer && request.kind === "permission") return review(request);
       if (
         permissions !== "override" ||
-        ["question", "plan"].includes(request.kind)
+        ["question", "plan", "mode-change"].includes(request.kind)
       )
         return this.waitApproval(run, request, abort.signal);
       emit("work", {
@@ -448,6 +458,20 @@ export class Controller extends EventEmitter {
       this.dataDir,
     );
     const requestText = text + attachmentContext(files);
+    const continuationText = continuing
+      ? [
+          modeChange
+            ? `The user approved changing the chat mode from ${modeChange.fromMode} to ${chat.mode}. Continue the current task from this session's saved progress in ${chat.mode} mode. This approval changes the mode only; it does not approve a proposed plan or expand the task scope.`
+            : `The user changed the permission mode to ${permissions} while you were working. Continue the current task from this session's saved progress under the new permissions.`,
+          "Do not repeat completed actions. Requests awaiting permission when interrupted were not declined by the user; reevaluate them under the new mode. Unanswered questions still require user input.",
+          modeChange?.objective &&
+            "Approved Goal objective:\n" + modeChange.objective,
+          "Original request:\n" + requestText,
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      : requestText;
+    const startGoal = modeChange?.mode === "goal" && chat.mode === "goal";
     const lastAgent = messages
       .filter((m) => m.role === "assistant")
       .at(-1)?.provider;
@@ -492,7 +516,12 @@ export class Controller extends EventEmitter {
     // draft would change the project or prepare a commit, so they are absent.
     let plan = planDelegation(rules, this.providers, run, this.store);
     if (chat.mode === "ask") {
-      const actions = { ...plan.actions, edit: false, run: false, draft: false };
+      const actions = {
+        ...plan.actions,
+        edit: false,
+        run: false,
+        draft: false,
+      };
       plan = { ...plan, actions, tools: offeredTools(actions) };
     }
     const delegator =
@@ -613,6 +642,92 @@ export class Controller extends EventEmitter {
     };
     if (project.worktree && chat.mode !== "ask")
       this.bridgeLand.set(token, land);
+    // This request is always a user decision, never an action for the reviewer.
+    // Restart the native session so its sandbox and collaboration mode agree.
+    let suggestingMode = false,
+      effectiveMode = chat.mode;
+    const suggestMode = async (input) => {
+      if (abort.signal.aborted)
+        return { changed: false, reason: "Turn stopped." };
+      checkMode(input.mode, run.provider);
+      if (
+        typeof input.reason !== "string" ||
+        !input.reason.trim() ||
+        input.reason.length > 4000
+      )
+        throw new Error("Explain the mode suggestion in 1–4,000 characters");
+      if (
+        input.mode === "goal" &&
+        (typeof input.objective !== "string" ||
+          !input.objective.trim() ||
+          input.objective.length > 250000)
+      )
+        throw new Error(
+          "Include a concrete Goal objective under 250,000 characters",
+        );
+      const current = this.store.conversation(chat.id);
+      if (current.mode !== effectiveMode)
+        return {
+          changed: false,
+          mode: current.mode,
+          reason:
+            "The user already changed the mode. Continue under their selection on the next message.",
+        };
+      if (input.mode === current.mode)
+        return {
+          changed: false,
+          mode: current.mode,
+          reason: "Already in this mode.",
+        };
+      if (suggestingMode)
+        return {
+          changed: false,
+          reason: "A mode suggestion is already awaiting the user's decision.",
+        };
+      suggestingMode = true;
+      try {
+        const request = {
+          kind: "mode-change",
+          title: `Switch from ${current.mode} to ${input.mode}?`,
+          fromMode: current.mode,
+          mode: input.mode,
+          reason: input.reason.trim(),
+          ...(input.mode === "goal" && { objective: input.objective.trim() }),
+        };
+        const answer = await approve(request);
+        if (!answer.allow || abort.signal.aborted)
+          return {
+            changed: false,
+            mode: current.mode,
+            reason:
+              "The mode change was not approved. Continue in the current mode; do not repeat this suggestion.",
+          };
+        if (this.store.conversation(chat.id).mode !== current.mode)
+          return {
+            changed: false,
+            reason:
+              "The user changed the mode while this suggestion was pending. Their selection takes precedence.",
+          };
+        const active = this.active.get(chat.id);
+        if (!active || active.cancelled || active.abort !== abort)
+          return { changed: false, reason: "Turn stopped." };
+        this.event(chat.id, null, "chat", this.setMode(chat.id, request.mode));
+        active.modeChange = request;
+        active.restart = true;
+        abort.abort();
+        emit("work", {
+          kind: "mode-change",
+          item: {
+            title: `Applying ${request.mode} mode`,
+            description: request.reason,
+          },
+        });
+        return { changed: true, mode: request.mode };
+      } finally {
+        suggestingMode = false;
+      }
+    };
+    this.bridgeModes.set(token, suggestMode);
     const skills = invokedSkills(listSkills(this.store), text);
     if (skills.length)
       this.event(chat.id, run.id, "work", {
@@ -629,37 +744,39 @@ export class Controller extends EventEmitter {
       project,
       chat,
       attachments: files,
-      text: continuing
-        ? [
-            `The user changed the permission mode to ${permissions} while you were working. Continue the current task from this session's saved progress under the new permissions.`,
-            "Do not repeat completed actions. Requests awaiting permission when interrupted were not declined by the user; reevaluate them under the new mode. Unanswered questions still require user input.",
-            "Original request:\n" + requestText,
-          ].join("\n\n")
-        : requestText,
+      text: continuationText,
       model: run.model,
       effort,
       permissions,
       mode: chat.mode,
       continuing,
+      startGoal,
+      goalObjective: startGoal ? modeChange.objective : undefined,
       // An approved plan ends plan mode, so the chat goes on to build it.
-      planApproved: () =>
+      planApproved: () => {
+        effectiveMode = "default";
         this.event(
           chat.id,
           null,
           "chat",
           this.store.updateConversation(chat.id, { mode: "default" }),
-        ),
+        );
+      },
       session,
       handoff: [notice, handoff].filter(Boolean).join("\n\n"),
       instructions:
         agentInstructions(project, chat) +
         rulesInstructions(rules, plan, this.providers, COMMAND_SHELL) +
         skillInstructions(skills) +
+        "\n\n" +
+        MODE_SUGGESTION_INSTRUCTIONS +
+        (startGoal ? "\n\n" + continuationText : "") +
         (chat.mode === "ask" ? "\n\n" + ASK_INSTRUCTIONS : ""),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
       tools: [
         ...hostToolsForMode(chat.mode, [
           ...historyTools,
+          modeSuggestionTool,
           ...(project.worktree ? [landTool] : []),
           ...plan.tools,
         ]),
@@ -682,6 +799,7 @@ export class Controller extends EventEmitter {
           typeof args === "string" ? JSON.parse(args) : (args ?? {});
         if (chat.mode === "ask" && !askHostAllowed(name))
           return { error: ASK_DENY };
+        if (name === "suggest_mode") return suggestMode(input);
         if (name === "land_changes")
           return project.worktree
             ? land()
@@ -758,6 +876,7 @@ export class Controller extends EventEmitter {
       this.bridgeTokens.delete(token);
       this.bridgeBrowser.delete(token);
       this.bridgeLand.delete(token);
+      this.bridgeModes.delete(token);
       for (const [id, waiter] of this.approvalWaiters)
         if (waiter.runId === run.id) {
           waiter.resolve({ allow: false });
@@ -767,9 +886,18 @@ export class Controller extends EventEmitter {
     const active = this.active.get(chat.id);
     if (active?.restart && !active.cancelled) {
       active.restart = false;
+      const nextModeChange = active.modeChange;
+      active.modeChange = null;
       active.abort = new AbortController();
       this.store.setRun(run.id, "running");
-      return this.execute(run, text, effort, active.abort, true);
+      return this.execute(
+        run,
+        text,
+        effort,
+        active.abort,
+        true,
+        nextModeChange,
+      );
     }
     this.store.setRun(run.id, status, null, error ?? null);
     this.active.delete(chat.id);

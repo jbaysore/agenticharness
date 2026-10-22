@@ -14,7 +14,9 @@ export function codexInput(ctx) {
 
 export async function claudeContent(ctx) {
   const text =
-    ctx.mode === "goal" && !ctx.continuing ? "/goal " + ctx.text : request(ctx);
+    ctx.mode === "goal" && (!ctx.continuing || ctx.startGoal)
+      ? "/goal " + (ctx.goalObjective ?? ctx.text)
+      : request(ctx);
   const files = images(ctx);
   if (!files.length) return text;
   return [

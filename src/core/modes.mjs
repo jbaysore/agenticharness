@@ -5,6 +5,30 @@ import { isBrowserTool } from "./browser.mjs";
 // working until the message's condition is met.
 export const CHAT_MODES = ["default", "ask", "plan", "goal"];
 
+export const modeSuggestionTool = {
+  name: "suggest_mode",
+  description:
+    "Suggest a more appropriate chat mode for the current task. Explain why; for Goal, include a concrete objective. Always waits for the user's manual approval, including under Auto-review or Override. Approval resumes this task in the chosen mode; a decline keeps the current mode. Do not repeat a declined suggestion unless the user's needs change.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      mode: { type: "string", enum: CHAT_MODES },
+      reason: { type: "string", minLength: 1, maxLength: 4000 },
+      objective: {
+        type: "string",
+        minLength: 1,
+        maxLength: 250000,
+        description:
+          "Required for Goal: the condition to work until it is met.",
+      },
+    },
+    required: ["mode", "reason"],
+    additionalProperties: false,
+  },
+};
+
+export const MODE_SUGGESTION_INSTRUCTIONS = `You may call suggest_mode when another chat mode would better suit the current task: Default performs work normally; Ask answers read-only questions; Plan proposes work before implementation; Goal keeps working until a concrete condition is met. Explain the benefit and include the objective for Goal. Harness always asks the user to approve a mode suggestion manually, even under Auto-review or Override. Stay within the current mode until approved; after a decline, continue in the current mode and do not repeat the suggestion unless the user's needs change. Changing modes does not approve a proposed plan or expand the user's task scope.`;
+
 export function checkMode(mode, provider) {
   if (!CHAT_MODES.includes(mode))
     throw new Error("Choose the default, ask, plan or goal mode");
@@ -12,7 +36,7 @@ export function checkMode(mode, provider) {
     throw new Error("Cursor has no goal mode. Choose Codex or Claude Code.");
 }
 
-export const ASK_INSTRUCTIONS = `Ask mode: this turn is read-only. Answer questions and explain how the project works. You may read and search files, and you may use read-only history and browser tools. Creating, editing, or deleting files, running commands, landing commits, and changing a page are unavailable. The user changes the mode; stay in Ask mode.`;
+export const ASK_INSTRUCTIONS = `Ask mode: this turn is read-only. Answer questions and explain how the project works. You may read and search files, and you may use read-only history and browser tools. Creating, editing, or deleting files, running commands, landing commits, and changing a page are unavailable. You may suggest a mode change with suggest_mode; stay in Ask mode unless the user approves it.`;
 
 export const ASK_DENY =
   "Ask mode is read-only. This action is unavailable. Use read and search tools to answer the question.";
@@ -25,6 +49,7 @@ const ASK_HOST_TOOLS = new Set([
   "project_notes",
   "workspace_activity",
   "rename_chat",
+  "suggest_mode",
   "delegate_read",
   "delegate_locate",
 ]);

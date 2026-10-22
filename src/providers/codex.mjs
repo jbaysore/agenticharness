@@ -150,8 +150,8 @@ const permissionModes = {
     sandbox: "danger-full-access",
   },
 };
-export async function runCodex(ctx) {
-  const rpc = await openCodex(ctx.project.path);
+export async function runCodex(ctx, { open = openCodex } = {}) {
+  const rpc = await open(ctx.project.path);
   let turnId,
     threadId,
     finished = false,
@@ -415,7 +415,7 @@ export async function runCodex(ctx) {
       const soon = nextTurn(2000);
       const { goal: set } = await rpc.call("thread/goal/set", {
         threadId,
-        objective: ctx.text,
+        objective: ctx.goalObjective ?? ctx.text,
         status: "active",
         origin: "user",
       });
@@ -439,6 +439,19 @@ export async function runCodex(ctx) {
         input: codexInput(ctx),
       });
       turnId = start.turn.id;
+    }
+    if (goal && ctx.startGoal) {
+      // A resumed Plan session must first receive Default collaboration mode.
+      // Setting the goal earlier could auto-start another turn in Plan mode.
+      if (ctx.signal.aborted)
+        throw new Error("Cancelled before the goal started");
+      const { goal: set } = await rpc.call("thread/goal/set", {
+        threadId,
+        objective: ctx.goalObjective,
+        status: "active",
+        origin: "user",
+      });
+      goalStatus = set.status;
     }
     timer = setInterval(async () => {
       if (polling || finished || rpc.closed) return;
