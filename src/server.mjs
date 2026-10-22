@@ -861,6 +861,10 @@ export async function createHarness({
       else res.end();
     }
   });
+  // cloudflared reuses idle connections for 90 seconds. If Node closes one
+  // first (its default is 5), the next request on it becomes a Cloudflare 502.
+  server.keepAliveTimeout = 120_000;
+  server.headersTimeout = 125_000;
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", resolve);
