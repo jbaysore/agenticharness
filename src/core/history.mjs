@@ -1,4 +1,5 @@
 import { pathsOverlap } from "./repository.mjs";
+import { attachmentContext, attachmentPath } from "./attachments.mjs";
 
 export const historyTools = [
   {
@@ -60,8 +61,12 @@ export const historyTools = [
 ];
 
 // The title a chat gets from its first message until it is renamed.
-export function provisionalTitle(text) {
-  return text.slice(0, 70);
+export function provisionalTitle(text, attachments = []) {
+  return (
+    text.slice(0, 70) ||
+    attachments[0]?.name?.slice(0, 70) ||
+    "New conversation"
+  );
 }
 
 // Asked on a chat's first turn only.
@@ -76,7 +81,10 @@ function renameChat(store, chat, title) {
     .replace(/^["'`]+|["'`.]+$/g, "")
     .slice(0, 80);
   if (!clean) throw new Error("Title is empty");
-  if (!first || chat.title !== provisionalTitle(first.content))
+  if (
+    !first ||
+    chat.title !== provisionalTitle(first.content, first.attachments)
+  )
     return {
       renamed: false,
       title: chat.title,
@@ -156,7 +164,7 @@ export function workspaceNotice(peers, changes) {
   ].join("\n");
 }
 
-export function historyCall(store, conversationId, name, args) {
+export function historyCall(store, conversationId, name, args, dataDir) {
   const chat = store.conversation(conversationId);
   if (!chat) throw new Error("Conversation not found");
   if (name === "workspace_activity")
@@ -192,7 +200,13 @@ export function historyCall(store, conversationId, name, args) {
       title: target.title,
       projectId: target.project_id,
       source: `harness://conversation/${target.id}`,
-      messages: page.map((m) => ({ ...m, content: m.content.slice(0, 16000) })),
+      messages: page.map((m) => ({
+        ...m,
+        content: m.content.slice(0, 16000),
+        attachments: (m.attachments ?? []).map((f) =>
+          dataDir ? { ...f, path: attachmentPath(dataDir, f) } : f,
+        ),
+      })),
       nextOffset:
         offset + page.length < all.length ? offset + page.length : null,
     };
@@ -200,11 +214,12 @@ export function historyCall(store, conversationId, name, args) {
   throw new Error("Unknown history tool");
 }
 
-export function handoffContext(store, chat, provider) {
+export function handoffContext(store, chat, provider, dataDir) {
   const prior = store
     .messages(chat.id)
-    .filter((m) => m.content)
-    .slice(-14, -1);
+    .slice(0, -1)
+    .filter((m) => m.content || m.attachments?.length)
+    .slice(-13);
   const notes = store
     .notes(chat.project_id)
     .filter(
@@ -218,7 +233,7 @@ export function handoffContext(store, chat, provider) {
     "Recent readable transcript (bounded; older history remains searchable):",
     ...prior.map(
       (m) =>
-        `[${m.role}; ${m.provider ?? "user"}; ${m.model ?? ""}; source harness://conversation/${chat.id}#${m.id}]\n${m.content.slice(0, 6000)}`,
+        `[${m.role}; ${m.provider ?? "user"}; ${m.model ?? ""}; source harness://conversation/${chat.id}#${m.id}]\n${m.content.slice(0, 6000)}${dataDir ? attachmentContext((m.attachments ?? []).map((f) => ({ ...f, path: attachmentPath(dataDir, f) }))) : ""}`,
     ),
     "Saved project decisions:",
     ...notes.map(

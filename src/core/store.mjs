@@ -46,6 +46,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, effort TEXT, scope TEXT NOT NULL DEFAULT 'all', sessions TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), action_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, native_turn_id TEXT, created_at TEXT NOT NULL, ended_at TEXT);
       CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), run_id TEXT REFERENCES runs(id), role TEXT NOT NULL, provider TEXT, model TEXT, content TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, created_at TEXT NOT NULL);
       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content, content='messages', content_rowid='rowid');
       CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(rowid,content) VALUES (new.rowid,new.content); END;
       CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN INSERT INTO messages_fts(messages_fts,rowid,content) VALUES ('delete',old.rowid,old.content); END;
@@ -66,6 +67,10 @@ export class Store {
         .prepare(`PRAGMA table_info(${table})`)
         .all()
         .map((c) => c.name);
+    if (!columns("messages").includes("attachments"))
+      this.db.exec(
+        "ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
+      );
     if (!columns("runs").includes("error"))
       this.db.exec("ALTER TABLE runs ADD COLUMN error TEXT");
     const conversation = columns("conversations");
@@ -258,7 +263,16 @@ export class Store {
   messages(id) {
     return this.db
       .prepare("SELECT * FROM messages WHERE conversation_id=? ORDER BY rowid")
-      .all(id);
+      .all(id)
+      .map((m) => ({ ...m, attachments: JSON.parse(m.attachments) }));
+  }
+  addAttachment({ id, projectId, name, type, size }) {
+    this.db
+      .prepare("INSERT INTO attachments VALUES(?,?,?,?,?,?)")
+      .run(id, projectId, name, type, size, this.now());
+  }
+  attachment(id) {
+    return this.db.prepare("SELECT * FROM attachments WHERE id=?").get(id);
   }
   addMessage({
     id = randomUUID(),
@@ -268,11 +282,12 @@ export class Store {
     provider = null,
     model = null,
     content = "",
+    attachments = [],
     createdAt,
   }) {
     this.db
       .prepare(
-        "INSERT INTO messages(id,conversation_id,run_id,role,provider,model,content,created_at) VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO messages(id,conversation_id,run_id,role,provider,model,content,created_at,attachments) VALUES(?,?,?,?,?,?,?,?,?)",
       )
       .run(
         id,
@@ -283,6 +298,7 @@ export class Store {
         model,
         content,
         createdAt || this.now(),
+        JSON.stringify(attachments),
       );
     this.updateConversation(conversationId, {});
     return id;
@@ -361,7 +377,14 @@ export class Store {
         .get(runId)?.content ?? ""
     );
   }
-  createRun({ conversationId, actionId, provider, model, text }) {
+  createRun({
+    conversationId,
+    actionId,
+    provider,
+    model,
+    text,
+    attachments = [],
+  }) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const existing = this.runForAction(actionId);
@@ -392,11 +415,14 @@ export class Store {
         runId: id,
         role: "user",
         content: text,
+        attachments,
       });
       const c = this.conversation(conversationId);
       this.updateConversation(conversationId, {
         title:
-          c.title === "New conversation" ? provisionalTitle(text) : c.title,
+          c.title === "New conversation"
+            ? provisionalTitle(text, attachments)
+            : c.title,
         provider,
         model,
       });

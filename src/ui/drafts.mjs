@@ -1,7 +1,7 @@
 const key = "harness.drafts.v1";
-function readAll(storage) {
+function readAll(storage, storageKey = key) {
   try {
-    const drafts = JSON.parse(storage.getItem(key) ?? "{}");
+    const drafts = JSON.parse(storage.getItem(storageKey) ?? "{}");
     return drafts && typeof drafts === "object" && !Array.isArray(drafts)
       ? drafts
       : {};
@@ -21,6 +21,33 @@ export function saveDraft(id, text, storage = window.sessionStorage) {
     if (Object.keys(drafts).length)
       storage.setItem(key, JSON.stringify(drafts));
     else storage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const attachmentKey = "harness.draft-attachments.v1";
+export function readDraftAttachments(id, storage = window.sessionStorage) {
+  const files = readAll(storage, attachmentKey)[id];
+  return Array.isArray(files)
+    ? files.filter(
+        (f) => f && typeof f.id === "string" && typeof f.name === "string",
+      )
+    : [];
+}
+export function saveDraftAttachments(
+  id,
+  files,
+  storage = window.sessionStorage,
+) {
+  try {
+    const drafts = readAll(storage, attachmentKey);
+    if (files.length) drafts[id] = files;
+    else delete drafts[id];
+    if (Object.keys(drafts).length)
+      storage.setItem(attachmentKey, JSON.stringify(drafts));
+    else storage.removeItem(attachmentKey);
     return true;
   } catch {
     return false;

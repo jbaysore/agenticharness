@@ -1,11 +1,19 @@
-export async function api(path, body, method) {
+export async function api(path, body, method, headers = {}) {
+  const file = body instanceof Blob;
   const response = await fetch(path, {
     method: method ?? (body === undefined ? "GET" : "POST"),
     headers: {
       "X-Harness-Client": "1",
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(body === undefined
+        ? {}
+        : {
+            "Content-Type": file
+              ? "application/octet-stream"
+              : "application/json",
+          }),
+      ...headers,
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : file ? body : JSON.stringify(body),
   });
   // While the host restarts, Cloudflare answers with its own HTML error page.
   const data = await response.json().catch(() => {

@@ -1217,6 +1217,74 @@ small {
   border-color: color-mix(in srgb, var(--agent) 70%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent) 16%, transparent);
 }
+.composer.dragging {
+  border-color: var(--agent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent) 16%, transparent);
+}
+.attachment-input {
+  display: none;
+}
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+.composer > .attachments {
+  padding: 12px 14px 0;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+}
+.attachment {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 6px;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+.attachment a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+}
+.attachment img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+.attachment a > span {
+  min-width: 0;
+}
+.attachment strong {
+  display: block;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+.attachment small,
+.attachment-status {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.attachment-status {
+  padding: 10px 16px 0;
+}
+.attach-button {
+  flex-shrink: 0;
+}
 .composer textarea {
   display: block;
   border: 0;

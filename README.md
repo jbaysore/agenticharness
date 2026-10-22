@@ -20,6 +20,11 @@ the window leaves work running. The host binds to `127.0.0.1:47831`.
 Real editing, test execution and handoff across all three agents pass. The app
 includes streaming chat, native sessions, shared history search, review comments,
 revision requests, file artifacts, decisions, approvals, and PowerShell terminals.
+Paste screenshots into the chatbox, use the paperclip to upload files, or drag
+files onto the composer. Preview or remove attachments before sending, with or
+without message text. Each message accepts up to 10 files, 20 MB each; uploaded
+files stay on this PC and remain linked in chat history. Attachment handling has
+been checked in a real browser with a simulated agent.
 Up to three chats run side by side, the sidebar shows what every chat is doing,
 and agents sharing a folder are told about each other; this has been checked
 with a simulated provider, not yet with real providers running at once.
@@ -79,6 +84,8 @@ double-click **Launch Harness.vbs**. `npm run package` creates the Windows zip.
 `.local/screenshots`, with no provider calls, for reviewing visual changes.
 `node scripts/acceptance.mjs` is an **opt-in real provider test** that consumes
 included usage and edits an ignored fixture. Ordinary tests use no inference.
+`npm run test:attachments` checks paste, upload, drop, draft recovery and send
+retries in a headless browser with a simulated agent and no inference.
 
 All repository changes go directly to `main`, following [AGENTS.md](AGENTS.md).
 

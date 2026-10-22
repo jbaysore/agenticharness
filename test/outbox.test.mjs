@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readAllPending, readPending, savePending } from "../src/ui/outbox.mjs";
-import { readDraft, saveDraft } from "../src/ui/drafts.mjs";
+import {
+  readDraft,
+  saveDraft,
+  readDraftAttachments,
+  saveDraftAttachments,
+} from "../src/ui/drafts.mjs";
 const memory = (initial = {}) => {
   const data = new Map(Object.entries(initial));
   return {
@@ -72,4 +77,33 @@ test("a draft stays with its chat and blocked storage loses it quietly", () => {
   assert.equal(storage.data.size, 0);
   assert.equal(readDraft("a", blocked), "");
   assert.equal(saveDraft("a", "text", blocked), false);
+});
+
+test("attachment drafts and unconfirmed sends preserve file references without storing file bytes", () => {
+  const storage = memory(),
+    files = [
+      {
+        id: "file-id",
+        name: "screen.png",
+        type: "image/png",
+        size: 123,
+        url: "/api/attachments/file-id",
+      },
+    ];
+  saveDraftAttachments("a", files, storage);
+  assert.deepEqual(readDraftAttachments("a", storage), files);
+  assert.deepEqual(readDraftAttachments("b", storage), []);
+  const pending = {
+    actionId: "attachment-retry",
+    chatId: "a",
+    text: "",
+    attachments: [files[0].id],
+    attachmentFiles: files,
+  };
+  savePending("a", pending, storage);
+  assert.deepEqual(readPending("a", storage), pending);
+  saveDraftAttachments("a", [], storage);
+  assert.deepEqual(readDraftAttachments("a", storage), []);
+  assert.deepEqual(readDraftAttachments("a", blocked), []);
+  assert.equal(saveDraftAttachments("a", files, blocked), false);
 });

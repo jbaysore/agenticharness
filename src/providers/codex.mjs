@@ -4,6 +4,7 @@ import { subscriptionEnvironment } from "../security/environment.mjs";
 import { checkCodexBilling, publicCodexUsage } from "../security/billing.mjs";
 import { historyTools } from "../core/history.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
+import { codexInput } from "./attachments.mjs";
 
 export function checkCodexRoute(config) {
   // config/read includes the official default even when the user set no override.
@@ -407,14 +408,7 @@ export async function runCodex(ctx) {
             developer_instructions: null,
           },
         },
-        input: [
-          {
-            type: "text",
-            text: [ctx.handoff, ctx.text]
-              .filter(Boolean)
-              .join("\n\nCurrent request:\n"),
-          },
-        ],
+        input: codexInput(ctx),
       });
       turnId = start.turn.id;
     }

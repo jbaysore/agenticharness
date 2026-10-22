@@ -5,6 +5,7 @@ import { checkAccountConfirmation } from "../security/billing.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
+import { cursorPrompt } from "./attachments.mjs";
 const exec = promisify(execFile);
 
 export async function cursorAuth() {
@@ -50,6 +51,7 @@ export async function openCursor(cwd) {
       throw new Error(
         "Cursor does not advertise its native subscription login",
       );
+    rpc.promptCapabilities = init.agentCapabilities?.promptCapabilities ?? {};
     await rpc.call("authenticate", { methodId: "cursor_login" });
     return rpc;
   } catch (error) {
@@ -343,12 +345,10 @@ export async function runCursor(ctx) {
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");
     live = true;
-    const prompt = [ctx.instructions, ctx.handoff, ctx.text]
-      .filter(Boolean)
-      .join("\n\n");
+    const prompt = await cursorPrompt(ctx, rpc.promptCapabilities);
     const result = await rpc.call(
       "session/prompt",
-      { sessionId, prompt: [{ type: "text", text: prompt }] },
+      { sessionId, prompt },
       24 * 60 * 60 * 1000,
     );
     return {

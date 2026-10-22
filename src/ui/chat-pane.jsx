@@ -3,7 +3,13 @@ import { flushSync } from "react-dom";
 import { api } from "./api.mjs";
 import { Icon, Markdown, Approval } from "./components.jsx";
 import { readPending, savePending } from "./outbox.mjs";
-import { readDraft, saveDraft } from "./drafts.mjs";
+import {
+  readDraft,
+  saveDraft,
+  readDraftAttachments,
+  saveDraftAttachments,
+} from "./drafts.mjs";
+import { Attachments } from "./attachments.jsx";
 import { useChatScroll } from "./chat-scroll.jsx";
 import { ModelPicker } from "./model-picker.jsx";
 import { SkillSlash } from "./skills-modal.jsx";
@@ -67,6 +73,7 @@ function UserTurn({ message }) {
       id={message.id}
     >
       <Markdown text={text} />
+      <Attachments files={message.attachments} />
       {long && (
         <button className="show-more" onClick={() => setOpen(!open)}>
           {open ? "Show less" : "Show more"}
@@ -147,6 +154,11 @@ export function ChatPane({
       chat ? chat.permissions : selection.permissions,
     ),
     [draft, setDraft] = useState(() => readDraft(draftKey)),
+    [attachments, setAttachments] = useState(() =>
+      readDraftAttachments(draftKey),
+    ),
+    [uploading, setUploading] = useState(false),
+    [dragging, setDragging] = useState(false),
     [busy, setBusy] = useState(false),
     [permissionsBusy, setPermissionsBusy] = useState(false),
     [mode, setMode] = useState(chat?.mode ?? "default"),
@@ -155,12 +167,17 @@ export function ChatPane({
   const messages = useChatScroll(chat),
     input = useRef(null),
     slash = useRef(null),
+    fileInput = useRef(null),
+    uploadingRef = useRef(false),
     sending = useRef(false);
   const connected = providers.find((p) => p.id === provider),
     selectedModel = connected?.models?.find((m) => m.id === model);
   useEffect(() => {
     saveDraft(draftKey, draft);
   }, [draftKey, draft]);
+  useEffect(() => {
+    saveDraftAttachments(draftKey, attachments);
+  }, [draftKey, attachments]);
   useEffect(() => {
     onSelection({ provider, model, effort, permissions });
   }, [provider, model, effort, permissions]);
@@ -182,9 +199,11 @@ export function ChatPane({
         if (run) {
           savePending(chat.id, null);
           setDraft("");
+          setAttachments([]);
           return reload(chat.id);
         }
         setDraft(pending.text);
+        setAttachments(pending.attachmentFiles ?? []);
         setProvider(pending.provider);
         setModel(pending.model);
         setEffort(pending.effort ?? "");
@@ -266,12 +285,57 @@ export function ChatPane({
     field?.focus();
     field?.setSelectionRange(next.cursor, next.cursor);
   }
+  async function attachFiles(files, pasted = false) {
+    if (!project || sending.current || uploadingRef.current || !files.length)
+      return;
+    if (attachments.length + files.length > 10) {
+      report(new Error("Attach up to 10 files per message."));
+      return;
+    }
+    uploadingRef.current = true;
+    setUploading(true);
+    try {
+      for (const file of files) {
+        if (file.size > 20 * 1024 * 1024) {
+          report(
+            new Error(
+              `${file.name} is too large. Files must be 20 MB or smaller.`,
+            ),
+          );
+          continue;
+        }
+        const name =
+          pasted && file.type.startsWith("image/")
+            ? `Screenshot-${Date.now()}-${file.name || "image.png"}`
+            : file.name || "attachment";
+        try {
+          const saved = await api(
+            `/api/projects/${project.id}/attachments`,
+            file,
+            "POST",
+            {
+              "X-Harness-Filename": encodeURIComponent(name),
+            },
+          );
+          setAttachments((current) => [...current, saved]);
+        } catch (e) {
+          report(e);
+        }
+      }
+    } finally {
+      uploadingRef.current = false;
+      setUploading(false);
+      input.current?.focus();
+    }
+  }
   async function send(override, turnMode = mode) {
     const text = typeof override === "string" ? override : draft;
     if (
-      !text.trim() ||
+      (!text.trim() && !attachments.length) ||
       !project ||
       busy ||
+      sending.current ||
+      uploadingRef.current ||
       permissionsBusy ||
       modeBusy ||
       chat?.activeRun ||
@@ -291,11 +355,16 @@ export function ChatPane({
           permissions,
           mode: turnMode,
         }));
-      if (!chat) saveDraft(draftKey, "");
+      if (!chat) {
+        saveDraft(draftKey, "");
+        saveDraftAttachments(draftKey, []);
+      }
       const prior = readPending(c.id);
       const body =
         prior &&
         prior.text === text &&
+        JSON.stringify(prior.attachments ?? []) ===
+          JSON.stringify(attachments.map((f) => f.id)) &&
         prior.provider === provider &&
         prior.model === model &&
         prior.permissions === permissions &&
@@ -305,6 +374,8 @@ export function ChatPane({
               chatId: c.id,
               actionId: crypto.randomUUID(),
               text,
+              attachments: attachments.map((f) => f.id),
+              attachmentFiles: attachments,
               provider,
               model,
               effort: effort || null,
@@ -315,6 +386,7 @@ export function ChatPane({
       await api(`/api/chats/${c.id}/messages`, body);
       savePending(c.id, null);
       setDraft("");
+      setAttachments([]);
       await reload(c.id);
       await refresh();
     } catch (e) {
@@ -532,12 +604,54 @@ export function ChatPane({
           </button>
         )}
         <form
-          className="composer"
+          className={"composer" + (dragging ? " dragging" : "")}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            if (project && !busy && !uploading) setDragging(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false);
+          }}
+          onDrop={(e) => {
+            if (!e.dataTransfer.files.length) return;
+            e.preventDefault();
+            setDragging(false);
+            attachFiles(Array.from(e.dataTransfer.files));
+          }}
           onSubmit={(e) => {
             e.preventDefault();
             send();
           }}
         >
+          <input
+            type="file"
+            ref={fileInput}
+            className="attachment-input"
+            aria-label="Upload files"
+            multiple
+            disabled={!project || busy || uploading}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = "";
+              attachFiles(files);
+            }}
+          />
+          <Attachments
+            files={attachments}
+            disabled={busy || uploading}
+            onRemove={(id) =>
+              setAttachments((files) => files.filter((f) => f.id !== id))
+            }
+          />
+          {uploading && (
+            <div className="attachment-status" role="status">
+              Uploading files…
+            </div>
+          )}
+          {dragging && (
+            <div className="attachment-status">Drop files to attach</div>
+          )}
           <textarea
             ref={input}
             aria-label="Message your coding agent"
@@ -552,6 +666,21 @@ export function ChatPane({
               setCaret(e.target.selectionStart ?? 0);
             }}
             onSelect={(e) => setCaret(e.target.selectionStart ?? 0)}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData.files);
+              if (!files.length) return;
+              e.preventDefault();
+              const text = e.clipboardData.getData("text/plain");
+              if (text) {
+                const field = e.currentTarget;
+                setDraft(
+                  field.value.slice(0, field.selectionStart) +
+                    text +
+                    field.value.slice(field.selectionEnd),
+                );
+              }
+              attachFiles(files, true);
+            }}
             onKeyDown={(e) => {
               if (slash.current?.onKeyDown(e)) return;
               if (
@@ -566,6 +695,18 @@ export function ChatPane({
             disabled={!project}
           />
           <div className="composer-controls">
+            <button
+              type="button"
+              className="icon-button attach-button"
+              aria-label="Attach files"
+              title="Attach files or paste a screenshot · Up to 10 files, 20 MB each"
+              disabled={
+                !project || busy || uploading || attachments.length >= 10
+              }
+              onClick={() => fileInput.current?.click()}
+            >
+              <Icon name="attach" size={18} />
+            </button>
             <ModelPicker
               providers={providers}
               provider={provider}
@@ -594,9 +735,10 @@ export function ChatPane({
                 aria-label="Send message"
                 disabled={
                   busy ||
+                  uploading ||
                   permissionsBusy ||
                   modeBusy ||
-                  !draft.trim() ||
+                  (!draft.trim() && !attachments.length) ||
                   !project ||
                   !model ||
                   (selectedModel?.efforts?.length && !effort) ||

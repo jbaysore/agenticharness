@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { providerName } from "./voice.mjs";
 
 const paths = {
+  attach: "m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9m-2 14 7-7",
   plus: "M12 5v14M5 12h14",
   chat: "M5 4h14v12H9l-4 4V4Z",
   folder: "M3 6h7l2 3h9v11H3V6Z",

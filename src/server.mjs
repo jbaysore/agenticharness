@@ -28,6 +28,7 @@ import { historyCall, historyTools } from "./core/history.mjs";
 import { landTool } from "./core/worktrees.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
+import { uploadAttachment, serveAttachment } from "./core/attachments.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
@@ -210,6 +211,7 @@ export async function createHarness({
           chatId,
           body.name,
           body.arguments ?? {},
+          dataDir,
         );
         if (body.name === "rename_chat" && result.renamed)
           controller.event(chatId, null, "chat", store.conversation(chatId));
@@ -254,6 +256,24 @@ export async function createHarness({
             res,
             dataDir,
             path.slice("/api/browser/screenshots/".length),
+          );
+        const attachmentMatch = path.match(/^\/api\/attachments\/([^/]+)$/);
+        if (attachmentMatch)
+          return serveAttachment(req, res, store, dataDir, attachmentMatch[1]);
+        const uploadMatch = path.match(
+          /^\/api\/projects\/([^/]+)\/attachments$/,
+        );
+        if (uploadMatch && method === "POST")
+          return json(
+            res,
+            201,
+            await uploadAttachment(
+              req,
+              store,
+              dataDir,
+              uploadMatch[1],
+              req.headers["x-harness-filename"],
+            ),
           );
         if (path === "/api/logout" && method === "POST") {
           auth.logout(req);
@@ -773,6 +793,7 @@ export async function createHarness({
   const actualPort = server.address().port;
   localOrigin = `http://127.0.0.1:${actualPort}`;
   controller = new Controller(store, {
+    dataDir,
     probePath: join(dataDir, "connection-probe"),
     bridgeUrl: localOrigin,
     browser: startProviders ? new Browser(dataDir) : null,

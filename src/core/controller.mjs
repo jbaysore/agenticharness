@@ -25,6 +25,11 @@ import { isDelegationTool } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { browserTitle } from "./browser.mjs";
+import {
+  attachmentContext,
+  attachmentInfo,
+  resolveAttachments,
+} from "./attachments.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { CursorReviewer } from "./reviewer.mjs";
 import {
@@ -51,11 +56,12 @@ export function checkMode(mode, provider) {
 export class Controller extends EventEmitter {
   constructor(
     store,
-    { probePath, bridgeUrl, browser = null, worktreeRoot = null },
+    { probePath, bridgeUrl, browser = null, worktreeRoot = null, dataDir },
   ) {
     super();
     this.store = store;
     this.probePath = probePath;
+    this.dataDir = dataDir;
     this.bridgeUrl = bridgeUrl;
     this.providers = [];
     this.active = new Map();
@@ -109,10 +115,22 @@ export class Controller extends EventEmitter {
     });
     return this.refreshing;
   }
-  send(chatId, { actionId, text, provider, model, effort, permissions, mode }) {
+  send(
+    chatId,
+    {
+      actionId,
+      text = "",
+      attachments = [],
+      provider,
+      model,
+      effort,
+      permissions,
+      mode,
+    },
+  ) {
     const chat = this.store.conversation(chatId);
     if (!chat) throw new Error("Conversation not found");
-    if (typeof text !== "string" || !text.trim() || text.length > 250000)
+    if (typeof text !== "string" || text.length > 250000)
       throw new Error("Enter a message under 250,000 characters");
     if (typeof actionId !== "string" || !/^[-\w]{16,100}$/.test(actionId))
       throw new Error("A stable action ID is required");
@@ -129,6 +147,14 @@ export class Controller extends EventEmitter {
         throw new Error("Action ID belongs to another conversation");
       return { ...prior, duplicate: true };
     }
+    const files = resolveAttachments(
+      this.store,
+      chat.project_id,
+      attachments,
+      this.dataDir,
+    );
+    if (!text.trim() && !files.length)
+      throw new Error("Enter a message or attach a file");
     if (this.active.has(chatId))
       throw new Error("This chat already has active work");
     const selected = this.providers.find((p) => p.id === provider);
@@ -145,6 +171,7 @@ export class Controller extends EventEmitter {
       provider,
       model,
       text: text.trim(),
+      attachments: files.map(attachmentInfo),
     });
     const abort = new AbortController();
     this.active.set(chatId, { run, abort });
@@ -364,6 +391,16 @@ export class Controller extends EventEmitter {
       return Promise.resolve({ allow: true, answers: {} });
     };
     const messages = this.store.messages(chat.id);
+    const attached =
+      messages.find((m) => m.run_id === run.id && m.role === "user")
+        ?.attachments ?? [];
+    const files = resolveAttachments(
+      this.store,
+      chat.project_id,
+      attached.map((f) => f.id),
+      this.dataDir,
+    );
+    const requestText = text + attachmentContext(files);
     const lastAgent = messages
       .filter((m) => m.role === "assistant")
       .at(-1)?.provider;
@@ -371,7 +408,7 @@ export class Controller extends EventEmitter {
     const handoff =
       (lastAgent && lastAgent !== run.provider) ||
       (!session && messages.length > 1)
-        ? handoffContext(this.store, chat, run.provider)
+        ? handoffContext(this.store, chat, run.provider, this.dataDir)
         : "";
     if (handoff)
       this.event(chat.id, run.id, "handoff", {
@@ -521,13 +558,14 @@ export class Controller extends EventEmitter {
     const ctx = {
       project,
       chat,
+      attachments: files,
       text: continuing
         ? [
             `The user changed the permission mode to ${permissions} while you were working. Continue the current task from this session's saved progress under the new permissions.`,
             "Do not repeat completed actions. Requests awaiting permission when interrupted were not declined by the user; reevaluate them under the new mode. Unanswered questions still require user input.",
-            "Original request:\n" + text,
+            "Original request:\n" + requestText,
           ].join("\n\n")
-        : text,
+        : requestText,
       model: run.model,
       effort,
       permissions,
@@ -579,7 +617,13 @@ export class Controller extends EventEmitter {
                 error: "Nothing can be handed off this turn.",
                 instruction: "Do this yourself.",
               };
-        const result = historyCall(this.store, chat.id, name, input);
+        const result = historyCall(
+          this.store,
+          chat.id,
+          name,
+          input,
+          this.dataDir,
+        );
         if (name === "rename_chat" && result.renamed)
           this.event(chat.id, null, "chat", this.store.conversation(chat.id));
         emit("work", {

@@ -12,6 +12,7 @@ import { AsyncQueue } from "../core/queue.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
+import { claudeContent } from "./attachments.mjs";
 import {
   checkClaudeBilling,
   createClaudeUsageMonitor,
@@ -389,12 +390,7 @@ export async function runClaude(
       type: "user",
       message: {
         role: "user",
-        content:
-          goal && !ctx.continuing
-            ? "/goal " + ctx.text
-            : [ctx.handoff, ctx.text]
-                .filter(Boolean)
-                .join("\n\nCurrent request:\n"),
+        content: await claudeContent(ctx),
       },
       parent_tool_use_id: null,
       session_id: ctx.session?.id ?? "",
