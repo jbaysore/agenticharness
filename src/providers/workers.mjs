@@ -8,12 +8,8 @@ import { resolve } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AsyncQueue } from "../core/queue.mjs";
 import { checkCodexBilling } from "../security/billing.mjs";
-import {
-  checkClaudeBilling,
-  claudeAuth,
-  claudeOptions,
-  usageOf,
-} from "./claude.mjs";
+import { claudeAuth, claudeOptions, usageOf } from "./claude.mjs";
+import { claudeUsageForAccount } from "../security/claude-usage.mjs";
 import { checkCodexRoute, openCodex } from "./codex.mjs";
 import {
   REVIEW_PROMPT,
@@ -63,6 +59,7 @@ export async function runClaudeWorker(
     baseOptions = claudeOptions,
     readUsage = usageOf,
     pollIntervalMs = 15000,
+    usageForAccount = claudeUsageForAccount,
   } = {},
 ) {
   const input = new AsyncQueue();
@@ -113,7 +110,8 @@ export async function runClaudeWorker(
   signal.addEventListener("abort", stop, { once: true });
   try {
     const auth = await readAuth(),
-      reason = checkClaudeBilling(auth, await readUsage(q));
+      monitor = usageForAccount(auth),
+      reason = monitor.update(await readUsage(q).catch(() => null)).reason;
     if (reason) throw new WorkerUnavailable(reason);
     if (signal.aborted) throw cancelled();
     input.push({
@@ -127,7 +125,9 @@ export async function runClaudeWorker(
         if (checkingQuota) return;
         checkingQuota = true;
         try {
-          const blocked = checkClaudeBilling(auth, await readUsage(q));
+          const { reason: blocked } = monitor.update(
+            await readUsage(q).catch(() => null),
+          );
           if (blocked) throw new WorkerUnavailable(blocked);
         } catch (error) {
           boundaryError = error;
@@ -154,8 +154,10 @@ export async function runClaudeWorker(
         (event.rate_limit_info?.isUsingOverage ||
           event.rate_limit_info?.overageInUse ||
           event.rate_limit_info?.status === "rejected")
-      )
+      ) {
+        monitor.invalidate();
         throw new WorkerUnavailable("Claude reported a usage boundary");
+      }
       if (event.type !== "result") continue;
       if (signal.aborted) throw cancelled();
       const text =
@@ -167,7 +169,9 @@ export async function runClaudeWorker(
           event.errors?.join("\n") || "The worker ended without an answer",
         );
       if (mode === "review") {
-        const blocked = checkClaudeBilling(auth, await readUsage(q));
+        const { reason: blocked } = monitor.update(
+          await readUsage(q).catch(() => null),
+        );
         if (blocked) throw new WorkerUnavailable(blocked);
       }
       const used = Object.values(event.modelUsage ?? {});

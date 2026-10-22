@@ -1,5 +1,5 @@
-// A turn starts with verified subscription-only usage. Later missing telemetry
-// makes that reading stale; only an explicit billing boundary stops the turn.
+// Missing telemetry makes verified subscription-only usage stale. Only an
+// explicit billing boundary invalidates it; turns share it for the same account.
 function confirmedBoundary(usage) {
   const extra = usage?.rate_limits?.extra_usage;
   if (extra?.is_enabled === true)
@@ -14,14 +14,20 @@ function confirmedBoundary(usage) {
   return null;
 }
 
-export function checkClaudeBilling(auth, usage) {
+function checkClaudeAccount(auth) {
   if (
-    !auth.loggedIn ||
+    !auth?.loggedIn ||
     auth.authMethod !== "claude.ai" ||
     auth.apiProvider !== "firstParty" ||
     !["pro", "max", "team"].includes(auth.subscriptionType)
   )
     return "Sign in to Claude Code with an included-usage Claude subscription. API, gateway and usage-based accounts are blocked.";
+  return null;
+}
+
+export function checkClaudeBilling(auth, usage) {
+  const accountProblem = checkClaudeAccount(auth);
+  if (accountProblem) return accountProblem;
   const boundary = confirmedBoundary(usage);
   if (boundary) return boundary;
   if (
@@ -65,10 +71,13 @@ export function createClaudeUsageMonitor(
   let lastConfirmed = null,
     lastConfirmedAt = null;
   return {
+    invalidate() {
+      lastConfirmed = null;
+    },
     update(reading) {
       const problem = checkClaudeBilling(auth, reading);
-      const unknown =
-        !!problem && !!lastConfirmed && !confirmedBoundary(reading);
+      if (confirmedBoundary(reading)) lastConfirmed = null;
+      const unknown = !!problem && !!lastConfirmed;
       if (!problem) {
         lastConfirmed = publicUsage(reading);
         lastConfirmedAt = now();
@@ -90,3 +99,28 @@ export function createClaudeUsageMonitor(
     },
   };
 }
+
+// Keep verification in memory for this host, across chats, probes and workers.
+// A changed account, organization, plan or login route must verify afresh.
+export function createClaudeUsageTracker(now) {
+  let account = null,
+    monitor;
+  return (auth) => {
+    const key =
+      !checkClaudeAccount(auth) && auth.email && auth.orgId
+        ? JSON.stringify([
+            auth.email,
+            auth.orgId,
+            auth.subscriptionType,
+            auth.configDirectory ?? null,
+          ])
+        : null;
+    if (!key || key !== account) {
+      account = key;
+      monitor = createClaudeUsageMonitor(auth, now);
+    }
+    return monitor;
+  };
+}
+
+export const claudeUsageForAccount = createClaudeUsageTracker();

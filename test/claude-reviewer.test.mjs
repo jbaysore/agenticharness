@@ -2,12 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runClaudeWorker } from "../src/providers/workers.mjs";
 import { REVIEW_SCHEMA } from "../src/core/review-policy.mjs";
+import { createClaudeUsageTracker } from "../src/security/claude-usage.mjs";
 
 const auth = () => ({
   loggedIn: true,
   authMethod: "claude.ai",
   apiProvider: "firstParty",
   subscriptionType: "pro",
+  email: "reviewer@example.test",
+  orgId: "fixture-org",
 });
 const usage = () => ({
   rate_limits_available: true,
@@ -32,7 +35,11 @@ const result = () => ({
   },
 });
 
-function fixture({ problem, signal = new AbortController().signal } = {}) {
+function fixture({
+  problem,
+  signal = new AbortController().signal,
+  usageForAccount = createClaudeUsageTracker(),
+} = {}) {
   let options,
     closed = false,
     inputSeen = false,
@@ -47,11 +54,12 @@ function fixture({ problem, signal = new AbortController().signal } = {}) {
     async *[Symbol.asyncIterator]() {
       const input = await q.prompt.next();
       inputSeen = !input.done;
-      if (problem === "poll" || problem === "cancel") {
+      if (["poll", "cancel", "poll-unknown", "poll-error"].includes(problem)) {
         await new Promise((resolve) => {
           release = resolve;
         });
-        throw new Error("SDK session closed");
+        if (problem === "poll" || problem === "cancel")
+          throw new Error("SDK session closed");
       }
       if (problem === "overage-event")
         yield {
@@ -99,6 +107,11 @@ function fixture({ problem, signal = new AbortController().signal } = {}) {
         }),
         readUsage: async () => {
           reads++;
+          if (reads > 1 && ["post-unknown", "poll-unknown", "poll-error"].includes(problem)) {
+            if (reads >= 3) release?.();
+            if (problem === "poll-error") throw new Error("lookup failed");
+            return null;
+          }
           const current = usage();
           if (
             problem === "quota" ||
@@ -111,6 +124,7 @@ function fixture({ problem, signal = new AbortController().signal } = {}) {
           return current;
         },
         pollIntervalMs: 5,
+        usageForAccount,
       },
     );
   return {
@@ -190,4 +204,19 @@ test("cancelling a Claude review closes the SDK session without returning a verd
   abort.abort();
   await assert.rejects(run);
   assert.equal(f.closed, true);
+});
+
+for (const problem of ["post-unknown", "poll-unknown", "poll-error"])
+  test(`a verified Claude reviewer continues through ${problem}`, { timeout: 3000 }, async () => {
+    const f = fixture({ problem });
+    assert.equal((await f.run()).text, JSON.stringify(verdict));
+    assert.equal(f.closed, true);
+  });
+
+test("a worker can start with unknown telemetry for an already verified account", async () => {
+  const usageForAccount = createClaudeUsageTracker();
+  await fixture({ usageForAccount }).run();
+  const next = fixture({ problem: "unknown", usageForAccount });
+  assert.equal((await next.run()).text, JSON.stringify(verdict));
+  assert.equal(next.inputSeen, true);
 });

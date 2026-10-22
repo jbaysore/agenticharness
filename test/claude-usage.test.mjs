@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createClaudeUsageMonitor } from "../src/security/claude-usage.mjs";
-import { runClaude } from "../src/providers/claude.mjs";
+import {
+  createClaudeUsageMonitor,
+  createClaudeUsageTracker,
+} from "../src/security/claude-usage.mjs";
+import { inspectClaude, runClaude } from "../src/providers/claude.mjs";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import {
@@ -15,6 +18,8 @@ const auth = {
   authMethod: "claude.ai",
   apiProvider: "firstParty",
   subscriptionType: "pro",
+  email: "fixture@example.test",
+  orgId: "fixture-org",
 };
 const reading = (percent = 26) => ({
   rate_limits_available: true,
@@ -94,7 +99,7 @@ test("missing telemetry keeps the original confirmation time and recovers automa
   assert.equal(recovered.usage.windows[0].usedPercent, 27);
 });
 
-test("a new turn still requires complete subscription verification", () => {
+test("an account without saved verification still requires complete subscription verification", () => {
   for (const value of [
     incomplete,
     null,
@@ -116,6 +121,53 @@ test("a new turn still requires complete subscription verification", () => {
   );
 });
 
+test("the same account shares its last confirmation across turns and missing lookups", () => {
+  let now = "2026-10-22T12:47:37.938Z";
+  const usageForAccount = createClaudeUsageTracker(() => now);
+  const initial = usageForAccount(auth).update(reading(20));
+  now = "2026-10-22T12:48:38.730Z";
+  const next = usageForAccount({ ...auth }).update({
+    ...reading(),
+    rate_limits: { ...reading().rate_limits, limits: [] },
+  });
+  assert.equal(next.reason, null);
+  assert.equal(next.usage.verificationStatus, "unknown");
+  assert.equal(next.usage.lastConfirmedAt, initial.usage.lastConfirmedAt);
+  assert.deepEqual(next.usage.windows, initial.usage.windows);
+  assert.equal(usageForAccount(auth).update(reading(21)).usage.lastConfirmedAt, now);
+});
+
+test("account, organization, plan, route and sign-out changes discard saved verification", () => {
+  for (const change of [
+    { email: "someone-else@example.test" },
+    { orgId: "other-org" },
+    { subscriptionType: "max" },
+    { configDirectory: "other-config" },
+    { authMethod: "console" },
+    { apiProvider: "bedrock" },
+    { loggedIn: false },
+    { email: undefined },
+    { orgId: undefined },
+  ]) {
+    const usageForAccount = createClaudeUsageTracker();
+    usageForAccount(auth).update(reading());
+    const next = usageForAccount({ ...auth, ...change }).update(null);
+    assert.ok(next.reason, JSON.stringify(change));
+    assert.equal(next.usage.lastConfirmedAt, null);
+    // Switching back does not resurrect an old account's verification.
+    assert.ok(usageForAccount(auth).update(null).reason);
+  }
+});
+
+test("missing identity cannot share verification and a host restart must verify again", () => {
+  const usageForAccount = createClaudeUsageTracker();
+  const anonymous = { ...auth, email: undefined };
+  usageForAccount(anonymous).update(reading());
+  assert.ok(usageForAccount(anonymous).update(null).reason);
+  usageForAccount(auth).update(reading());
+  assert.ok(createClaudeUsageTracker()(auth).update(null).reason);
+});
+
 test("confirmed unsafe fields stop a verified turn even in an otherwise partial response", () => {
   for (const [limits, expected] of [
     [{ extra_usage: { is_enabled: true } }, /extra usage is enabled/],
@@ -125,6 +177,8 @@ test("confirmed unsafe fields stop a verified turn even in an otherwise partial 
     const monitor = createClaudeUsageMonitor(auth);
     monitor.update(reading());
     assert.match(monitor.update({ rate_limits: limits }).reason, expected);
+    assert.ok(monitor.update(null).reason);
+    assert.equal(monitor.update(reading()).reason, null);
   }
 });
 
@@ -151,7 +205,11 @@ test("unknown usage labels its cached values and does not advertise them as curr
 
 function fixture(
   values,
-  { nativeBoundary = false, readAuth = async () => auth } = {},
+  {
+    nativeBoundary = false,
+    readAuth = async () => auth,
+    usageForAccount = createClaudeUsageTracker(),
+  } = {},
 ) {
   let release;
   const done = new Promise((resolve) => {
@@ -205,6 +263,7 @@ function fixture(
           return q;
         },
         readAuth,
+        usageForAccount,
         baseOptions: () => ({}),
         readUsage: async () => {
           const value = values[Math.min(reads++, values.length - 1)];
@@ -300,6 +359,58 @@ test("missing initial verification fails before sending a prompt to Claude", asy
   await assert.rejects(f.run(), /could not verify/);
   assert.equal(f.inputSeen, false);
   assert.equal(f.closed, true);
+});
+
+test("the next SDK turn continues when its initial quota lookup is empty or fails", async () => {
+  for (const value of [
+    { ...reading(), rate_limits: { ...reading().rate_limits, limits: [] } },
+    new Error("lookup failed"),
+  ]) {
+    const usageForAccount = createClaudeUsageTracker();
+    const first = fixture([reading(20), incomplete], { usageForAccount });
+    assert.equal((await first.run()).status, "completed");
+    const lastConfirmedAt = first.events.find((e) => e.type === "usage")
+      .payload.lastConfirmedAt;
+    const next = fixture([value, reading(21)], { usageForAccount });
+    assert.equal((await next.run()).status, "completed");
+    assert.equal(next.inputSeen, true);
+    assert.equal(next.interrupted, false);
+    const initial = next.events.find((e) => e.type === "usage").payload;
+    assert.equal(initial.verificationStatus, "unknown");
+    assert.equal(initial.lastConfirmedAt, lastConfirmedAt);
+  }
+});
+
+test("a native quota boundary prevents the next turn using cached verification", async () => {
+  const usageForAccount = createClaudeUsageTracker();
+  const first = fixture([reading()], { nativeBoundary: true, usageForAccount });
+  assert.equal((await first.run()).status, "failed");
+  const next = fixture([incomplete], { usageForAccount });
+  await assert.rejects(next.run(), /could not verify/);
+  assert.equal(next.inputSeen, false);
+});
+
+test("connection refresh preserves verification and the model catalog during a telemetry outage", async () => {
+  const usageForAccount = createClaudeUsageTracker();
+  const first = fixture([reading()], { usageForAccount });
+  await first.run();
+  let closed = false;
+  const provider = await inspectClaude(process.cwd(), {
+    readAuth: async () => ({ ...auth }),
+    readUsage: async () => incomplete,
+    baseOptions: () => ({}),
+    usageForAccount,
+    queryFn: () => ({
+      supportedModels: async () => [{ value: "opus", displayName: "Opus" }],
+      close() { closed = true; },
+    }),
+  });
+  assert.equal(provider.blockReason, null);
+  assert.equal(provider.connected, true);
+  assert.equal(provider.models[0].id, "opus");
+  assert.equal(provider.usage.verificationStatus, "unknown");
+  assert.equal(provider.usage.lastConfirmedAt, first.events[0].payload.lastConfirmedAt);
+  assert.equal(closed, true);
 });
 
 test("the host retains unknown status and confirmation time for a browser reload", async () => {

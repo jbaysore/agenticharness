@@ -15,7 +15,7 @@ import { isBrowserTool } from "../core/browser.mjs";
 import { claudeContent } from "./attachments.mjs";
 import {
   checkClaudeBilling,
-  createClaudeUsageMonitor,
+  claudeUsageForAccount,
 } from "../security/claude-usage.mjs";
 export { checkClaudeBilling };
 const exec = promisify(execFile);
@@ -88,8 +88,18 @@ export async function usageOf(q) {
     return null;
   }
 }
-export async function inspectClaude(cwd) {
-  const auth = await claudeAuth();
+export async function inspectClaude(
+  cwd,
+  {
+    readAuth = claudeAuth,
+    queryFn = query,
+    readUsage = usageOf,
+    baseOptions = claudeOptions,
+    usageForAccount = claudeUsageForAccount,
+  } = {},
+) {
+  const auth = await readAuth(),
+    monitor = usageForAccount(auth);
   if (!auth.loggedIn)
     return {
       id: "claude",
@@ -101,10 +111,10 @@ export async function inspectClaude(cwd) {
         "Run Claude Code authentication with your Claude subscription.",
     };
   const input = new AsyncQueue(),
-    q = query({ prompt: input, options: { ...claudeOptions(cwd), tools: [] } });
+    q = queryFn({ prompt: input, options: { ...baseOptions(cwd), tools: [] } });
   try {
     const models = await q.supportedModels(),
-      verification = createClaudeUsageMonitor(auth).update(await usageOf(q));
+      verification = monitor.update(await readUsage(q).catch(() => null));
     return {
       id: "claude",
       name: "Claude Code",
@@ -177,6 +187,7 @@ export async function runClaude(
     readUsage = usageOf,
     baseOptions = claudeOptions,
     pollIntervalMs = 20000,
+    usageForAccount = claudeUsageForAccount,
   } = {},
 ) {
   const input = new AsyncQueue(),
@@ -380,8 +391,8 @@ export async function runClaude(
   ctx.signal.addEventListener("abort", cancel, { once: true });
   try {
     const auth = await readAuth(),
-      monitor = createClaudeUsageMonitor(auth),
-      initial = monitor.update(await readUsage(q));
+      monitor = usageForAccount(auth),
+      initial = monitor.update(await readUsage(q).catch(() => null));
     ctx.emit("usage", initial.usage);
     if (initial.reason) throw new Error(initial.reason);
     if (ctx.signal.aborted)
@@ -523,6 +534,7 @@ export async function runClaude(
           event.rate_limit_info?.overageInUse ||
           event.rate_limit_info?.status === "rejected")
       ) {
+        monitor.invalidate();
         stopped = "Claude reported a usage boundary";
         cancel();
         ctx.emit("work", { kind: "billing-stop", reason: stopped });
