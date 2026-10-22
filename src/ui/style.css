@@ -1445,7 +1445,8 @@ small {
 }
 .composer-footer {
   display: flex;
-  gap: 13px;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   margin: 10px 4px 0;
   font-size: 12px;
@@ -1460,12 +1461,93 @@ small {
   color: inherit;
 }
 .composer-footer select {
-  padding: 0;
-  border: 0;
-  background: none;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
   font-size: 12px;
   color: var(--text-2);
-  max-width: 103px;
+  transition:
+    background var(--dur-fast),
+    border-color var(--dur-fast);
+}
+.composer-footer select:not(:disabled):hover,
+.composer-footer select:open {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.composer-footer select:focus-visible {
+  outline: 2px solid var(--agent-ink);
+  outline-offset: 2px;
+}
+.composer-footer select:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Keep native selection and keyboard behavior while styling the top-layer menu.
+   Browsers without customizable selects retain the styled native control. */
+@supports (appearance: base-select) {
+  .composer-footer select,
+  .composer-footer select::picker(select) {
+    appearance: base-select;
+  }
+  .composer-footer select {
+    gap: 8px;
+    align-items: center;
+  }
+  .composer-footer select::picker-icon {
+    color: var(--text-3);
+    font-size: 10px;
+  }
+  .composer-footer select:open::picker-icon {
+    rotate: 180deg;
+  }
+  .composer-footer select::picker(select) {
+    min-width: 200px;
+    max-width: calc(100vw - 24px);
+    max-height: min(320px, calc(100dvh - 24px));
+    margin-block: 6px;
+    padding: 5px;
+    border: 1px solid var(--line-stronger);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 10px 35px #0008;
+    scrollbar-width: thin;
+  }
+  .composer-footer option {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 10px;
+    border-radius: 6px;
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 400;
+    cursor: pointer;
+  }
+  .composer-footer option:checked {
+    background: var(--surface-2);
+    color: var(--text);
+    font-weight: 550;
+  }
+  .composer-footer option:not(:disabled):hover,
+  .composer-footer option:focus-visible {
+    outline: none;
+    background: var(--surface-3);
+    color: var(--text);
+  }
+  .composer-footer option::checkmark {
+    order: 1;
+    margin-inline-start: auto;
+    color: var(--text);
+  }
+  .composer-footer option:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
 }
 .composer-footer .history-scope {
   margin-left: auto;
