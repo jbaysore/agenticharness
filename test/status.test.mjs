@@ -7,6 +7,7 @@ import {
   chatMarkerLabel,
   pinnedChats,
   providerStatusLabel,
+  resetCountdown,
   resetLabel,
   sidebarOrder,
   usageGlance,
@@ -166,8 +167,8 @@ test("the header shows the tightest usage window for each provider", () => {
     remaining: 12,
     level: "low",
     bars: [
-      { name: "5-hour limit", short: "5h", remaining: 60, level: "ok" },
-      { name: "Weekly limit", short: "wk", remaining: 12, level: "low" },
+      { name: "5-hour limit", short: "5h", remaining: 60, level: "ok", resetsAt: 1800000000000 },
+      { name: "Weekly limit", short: "wk", remaining: 12, level: "low", resetsAt: null },
     ],
   });
   assert.deepEqual(
@@ -179,7 +180,7 @@ test("the header shows the tightest usage window for each provider", () => {
     {
       remaining: null,
       level: "unknown",
-      bars: [{ name: "Usage", short: "", remaining: null, level: "unknown" }],
+      bars: [{ name: "Usage", short: "", remaining: null, level: "unknown", resetsAt: null }],
     },
   );
   assert.equal(
@@ -206,4 +207,13 @@ test("the header shows the tightest usage window for each provider", () => {
     ["5-hour limit", "Opus · Weekly limit", "Sonnet · Weekly limit"],
   );
   assert.equal(resetLabel(Date.now() + 135 * 60000 + 1000), "Resets in 2h 15m");
+});
+
+test("reset countdowns stay compact for the top bar", () => {
+  const now = 1_000_000_000_000;
+  assert.equal(resetCountdown(null, now), "");
+  assert.equal(resetCountdown(now + 45 * 60000, now), "45m");
+  assert.equal(resetCountdown(now + 200 * 60000, now), "3h");
+  assert.equal(resetCountdown(now + (2 * 24 + 4) * 3600000 + 5 * 60000, now), "2d 4h");
+  assert.equal(resetCountdown(now - 60000, now), "0m");
 });

@@ -2355,9 +2355,9 @@ small {
 .usage-glance-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 20px;
   height: 30px;
-  padding: 0 10px;
+  padding: 0 12px;
   border-radius: 7px;
   color: var(--text-2);
 }
@@ -2366,22 +2366,25 @@ small {
   background: var(--surface-3);
   color: var(--text);
 }
+/* Rows share columns so the bars, percentages and countdowns line up. */
 .usage-chip {
-  display: inline-flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
+  display: inline-grid;
+  grid-auto-flow: row;
+  align-items: center;
+  align-content: center;
+  column-gap: 7px;
+  row-gap: 2px;
+  text-align: left;
   font-size: 11px;
   line-height: 12px;
   font-variant-numeric: tabular-nums;
 }
 .usage-chip-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  display: contents;
 }
 .usage-chip-bar {
-  width: 20px;
+  grid-column: 1;
+  width: 24px;
   height: 3px;
   border-radius: 9px;
   overflow: hidden;
@@ -2394,10 +2397,18 @@ small {
   border-radius: 9px;
 }
 .usage-chip-value {
+  grid-column: 2;
   min-width: 3.4ch;
   text-align: right;
 }
 .usage-chip-span {
+  grid-column: 3;
+  color: var(--text-3);
+  font-size: 10px;
+}
+.usage-chip-reset {
+  grid-column: 4;
+  margin-left: 3px;
   color: var(--text-3);
   font-size: 10px;
 }
@@ -2991,7 +3002,7 @@ small {
     text-overflow: ellipsis;
   }
   .usage-glance-trigger {
-    gap: 9px;
+    gap: 12px;
     padding: 0 6px;
   }
   .usage-chip-bar {

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   providerStatusLabel,
+  resetCountdown,
   resetLabel,
   usageGlance,
   usageWindows,
@@ -11,7 +12,13 @@ import {
 // opens every limit window with its reset time.
 export function UsageGlance({ providers, onOpenConnections }) {
   const [open, setOpen] = useState(false),
+    [now, setNow] = useState(Date.now),
     root = useRef(null);
+  // Keep the reset countdowns current between provider updates.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
   useEffect(() => {
     if (!open) return;
     const outside = (event) => {
@@ -49,7 +56,10 @@ export function UsageGlance({ providers, onOpenConnections }) {
               .map((b) =>
                 b.remaining === null
                   ? "usage unknown"
-                  : `${b.remaining}% of ${b.name.toLowerCase()} left`,
+                  : `${b.remaining}% of ${b.name.toLowerCase()} left` +
+                    (b.resetsAt
+                      ? `, resets in ${resetCountdown(b.resetsAt, now)}`
+                      : ""),
               )
               .join(", ")}`}
           >
@@ -66,6 +76,11 @@ export function UsageGlance({ providers, onOpenConnections }) {
                     : b.remaining + "%"}
                 </span>
                 {b.short && <span className="usage-chip-span">{b.short}</span>}
+                {b.resetsAt && (
+                  <span className="usage-chip-reset">
+                    {resetCountdown(b.resetsAt, now)}
+                  </span>
+                )}
               </span>
             ))}
           </span>
@@ -109,7 +124,7 @@ export function UsageGlance({ providers, onOpenConnections }) {
                         <strong>{w.remaining}% left{p.usage?.verificationStatus === "unknown" && " (last confirmed)"}</strong>
                       </div>
                       <progress max="100" value={w.remaining} />
-                      {w.resetsAt && <small>{resetLabel(w.resetsAt)}</small>}
+                      {w.resetsAt && <small>{resetLabel(w.resetsAt, now)}</small>}
                     </div>
                   ))
                 ) : (

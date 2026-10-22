@@ -28,13 +28,18 @@ try {
     apiProvider: "firstParty",
     subscriptionType: "pro",
   });
+  // Reset times sit mid-unit so the countdown text stays stable during the run.
+  const resetIn = (minutes) => Math.floor(Date.now() / 1000) + minutes * 60;
   const reading = (percent) => ({
     rate_limits_available: true,
     rate_limits: {
       extra_usage: { is_enabled: false, user_disabled: true },
       limits: [
-        { kind: "session", group: "session", percent },
-        { kind: "weekly_all", group: "weekly", percent: 27 },
+        { kind: "session", group: "session", percent, resets_at: resetIn(200) },
+        {
+          kind: "weekly_all", group: "weekly", percent: 27,
+          resets_at: resetIn((4 * 24 + 5) * 60 + 30),
+        },
       ],
     },
   });
@@ -55,7 +60,7 @@ try {
       usage: {
         authoritative: true,
         windows: [
-          { bucket: "codex", windowMinutes: 300, usedPercent: 10 },
+          { bucket: "codex", windowMinutes: 300, usedPercent: 10, resetsAt: resetIn(30) },
           { bucket: "codex", windowMinutes: 10080, usedPercent: 20 },
         ],
       },
@@ -101,8 +106,14 @@ try {
     await expect(page.locator(".usage-chip.claude .usage-chip-span")).toHaveText([
       "5h", "wk",
     ]);
+    await expect(page.locator(".usage-chip.claude .usage-chip-reset")).toHaveText([
+      "3h", "4d 5h",
+    ]);
     await expect(page.locator(".usage-chip.codex .usage-chip-value")).toHaveText([
       "90%", "80%",
+    ]);
+    await expect(page.locator(".usage-chip.codex .usage-chip-reset")).toHaveText([
+      /^(29|30)m$/,
     ]);
     await page.screenshot({
       path: `.local/screenshots/usage-header-${mobile ? "mobile" : "desktop"}.png`,

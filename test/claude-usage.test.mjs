@@ -60,14 +60,15 @@ test("native Claude meters show separate session and weekly header bars", () => 
       },
     }).usage,
   };
-  assert.deepEqual(usageGlance(provider), {
-    remaining: 6,
-    level: "low",
-    bars: [
+  assert.deepEqual(
+    usageGlance(provider).bars.map(({ resetsAt, ...bar }) => bar),
+    [
       { name: "5-hour limit", short: "5h", remaining: 74, level: "ok" },
       { name: "Weekly limit", short: "wk", remaining: 73, level: "ok" },
     ],
-  });
+  );
+  assert.equal(usageGlance(provider).remaining, 6);
+  assert.equal(usageGlance(provider).level, "low");
   assert.deepEqual(usageWindows(provider).map((w) => w.name), [
     "Sonnet · Weekly limit",
     "5-hour limit",

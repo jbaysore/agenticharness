@@ -164,12 +164,24 @@ export function usageGlance(provider) {
       short: w.minutes < 1440 ? Math.round(w.minutes / 60) + "h" : "wk",
       remaining: unknown ? null : w.remaining,
       level: unknown ? "unknown" : usageLevel(w.remaining),
+      resetsAt: w.resetsAt,
     }));
   return {
     remaining,
     level,
-    bars: bars.length ? bars : [{ name: "Usage", short: "", remaining, level }],
+    bars: bars.length
+      ? bars
+      : [{ name: "Usage", short: "", remaining, level, resetsAt: null }],
   };
+}
+// Compact time until a reset for the top bar: "45m", "3h", "2d 4h".
+export function resetCountdown(at, now = Date.now()) {
+  if (!at) return "";
+  const minutes = Math.max(0, Math.floor((at - now) / 60000));
+  if (minutes < 60) return minutes + "m";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + "h";
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 export function resetLabel(at, now = Date.now()) {
   if (!at) return "";
