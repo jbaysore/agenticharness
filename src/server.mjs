@@ -19,6 +19,7 @@ import {
   readJson,
 } from "./security/http.mjs";
 import { accessVerifier } from "./security/access.mjs";
+import { browseDirectories } from "./core/directories.mjs";
 import {
   projectPath,
   repositoryState,
@@ -407,6 +408,12 @@ export async function createHarness({
           });
           return;
         }
+        if (path === "/api/directories" && method === "GET")
+          return json(
+            res,
+            200,
+            await browseDirectories(url.searchParams.get("path") ?? undefined),
+          );
         if (path === "/api/projects" && method === "POST") {
           const body = await readJson(req),
             path = await projectPath(body.path),

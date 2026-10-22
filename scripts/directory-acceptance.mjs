@@ -1,8 +1,8 @@
 // Real browser and host, simulated agent; consumes no inference.
 import { chromium, expect } from "@playwright/test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { basename, join, parse } from "node:path";
 import { createHarness } from "../src/server.mjs";
 import { chooseModel } from "./model-picker-helpers.mjs";
 
@@ -15,6 +15,14 @@ const dir = await mkdtemp(join(tmpdir(), "harness-directory-browser-")),
   );
 for (const path of [firstPath, secondPath, newPath])
   await mkdir(path, { recursive: true });
+const nestedPath = join(firstPath, "Nested folder Ω");
+await mkdir(join(nestedPath, "Empty"), { recursive: true });
+for (const folder of ["docs", "scripts", "src", "test"])
+  await mkdir(join(firstPath, folder));
+await writeFile(
+  join(firstPath, "file.txt"),
+  "Only folders appear in the explorer",
+);
 await mkdir(".local/screenshots", { recursive: true });
 const app = await createHarness({
   dataDir: join(dir, "data"),
@@ -62,7 +70,158 @@ try {
   });
   await expect(files.getByText("notes.txt")).toBeVisible();
   await trigger.click();
-  await dialog.getByLabel("Project directory").selectOption(second.id);
+  const location = dialog.getByRole("textbox", {
+      name: "Location",
+      exact: true,
+    }),
+    useFolder = dialog.getByRole("button", {
+      name: "Use this folder",
+      exact: true,
+    });
+  await expect(location).toHaveValue(firstPath);
+  await expect(useFolder).toBeEnabled();
+  await useFolder.press("Tab");
+  await expect(
+    dialog.getByRole("button", { name: "Close dialog", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(useFolder).toBeFocused();
+  await expect(
+    dialog.getByRole("button", {
+      name: "Open folder Nested folder Ω",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Open folder file.txt", exact: true }),
+  ).toHaveCount(0);
+  await page.screenshot({
+    path: ".local/screenshots/directory-explorer-desktop.png",
+    animations: "disabled",
+  });
+  await dialog
+    .getByRole("button", { name: "Open folder Nested folder Ω", exact: true })
+    .press("Enter");
+  const emptyFolder = dialog.getByRole("button", {
+    name: "Open folder Empty",
+    exact: true,
+  });
+  await expect(emptyFolder).toBeFocused();
+  await emptyFolder.press("Enter");
+  await expect(
+    dialog.getByText("No subfolders. You can use this folder.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Up one folder", exact: true })
+    .click();
+  await expect(location).toHaveValue(nestedPath);
+  await dialog
+    .getByRole("navigation", { name: "Folder path", exact: true })
+    .getByRole("button", { name: "first", exact: true })
+    .click();
+  await expect(location).toHaveValue(firstPath);
+  // A slow earlier request must not replace a more recent destination.
+  let releaseListing, listingStarted;
+  const delayedListing = new Promise((resolve) => {
+    releaseListing = resolve;
+  });
+  const started = new Promise((resolve) => {
+    listingStarted = resolve;
+  });
+  await page.route("**/api/directories?*", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("path") !== nestedPath)
+      return route.continue();
+    const response = await route.fetch();
+    listingStarted();
+    await delayedListing;
+    await route.fulfill({ response });
+  });
+  await dialog
+    .getByRole("button", { name: "Open folder Nested folder Ω", exact: true })
+    .click();
+  await started;
+  await expect(useFolder).toBeDisabled();
+  await dialog
+    .getByRole("button", { name: "Open project Second project", exact: true })
+    .click();
+  await expect(useFolder).toBeEnabled();
+  await expect(location).toHaveValue(secondPath);
+  const slowResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/directories" &&
+      new URL(response.url()).searchParams.get("path") === nestedPath,
+  );
+  releaseListing();
+  await (await slowResponse).finished();
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  await expect(location).toHaveValue(secondPath);
+  await page.unroute("**/api/directories?*");
+  await dialog
+    .getByRole("button", { name: "Open project first", exact: true })
+    .click();
+  await expect(useFolder).toBeEnabled();
+  // Unreadable locations leave the last valid listing and allow recovery.
+  await page.route("**/api/directories?*", (route) => {
+    if (new URL(route.request().url()).searchParams.get("path") !== nestedPath)
+      return route.continue();
+    return route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error:
+          "This folder cannot be opened. Choose a folder you have permission to access.",
+      }),
+    });
+  });
+  await dialog
+    .getByRole("button", { name: "Open folder Nested folder Ω", exact: true })
+    .click();
+  await expect(dialog.getByRole("alert")).toContainText("permission to access");
+  await expect(useFolder).toBeDisabled();
+  await expect(
+    dialog.getByRole("button", { name: "Open folder src", exact: true }),
+  ).toBeVisible();
+  await page.unroute("**/api/directories?*");
+  await dialog
+    .getByRole("button", { name: "Open project first", exact: true })
+    .click();
+  await expect(useFolder).toBeEnabled();
+  await dialog.getByRole("button", { name: "Go to Home", exact: true }).click();
+  await expect(location).toHaveValue(await realpath(homedir()));
+  await dialog
+    .getByRole("button", {
+      name: `Go to ${parse(firstPath).root}`,
+      exact: true,
+    })
+    .click();
+  await expect(
+    dialog.getByRole("button", { name: "Up one folder", exact: true }),
+  ).toBeDisabled();
+  await dialog
+    .getByRole("button", { name: "Open project Second project", exact: true })
+    .click();
+  await expect(location).toHaveValue(secondPath);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute(
+    "title",
+    `Change directory: ${firstPath}`,
+  );
+  await expect(input).toHaveValue(
+    "Keep this first message while changing folders",
+  );
+  await trigger.click();
+  await dialog
+    .getByRole("button", { name: "Open project Second project", exact: true })
+    .click();
   await page.route(`**/api/projects/${second.id}/attachments`, (route) =>
     route.fulfill({
       status: 503,
@@ -70,7 +229,7 @@ try {
       body: JSON.stringify({ error: "Copy fixture failed" }),
     }),
   );
-  await dialog.getByRole("button", { name: "Use directory" }).click();
+  await useFolder.click();
   await expect(dialog.getByRole("alert")).toContainText("Copy fixture failed");
   await expect(trigger).toHaveAttribute(
     "title",
@@ -78,7 +237,7 @@ try {
   );
   await expect(files.getByText("notes.txt")).toBeVisible();
   await page.unroute(`**/api/projects/${second.id}/attachments`);
-  await dialog.getByRole("button", { name: "Use directory" }).click();
+  await useFolder.click();
   await expect(dialog).toBeHidden();
   await expect(trigger).toContainText("Second project");
   await expect(trigger).toHaveAttribute(
@@ -104,17 +263,30 @@ try {
 
   // The sidebar's New conversation creates an empty chat that can also move.
   await page.locator(".new-chat").click();
+  await expect(input).toHaveValue("");
   await input.fill("A second unsent draft");
   const empty = app.store.conversations().find((c) => c.id !== chat.id);
   await trigger.click();
-  await dialog.getByLabel("Project directory").selectOption("");
-  await dialog.getByLabel("Folder path").fill(join(dir, "missing"));
-  await dialog.getByRole("button", { name: "Use directory" }).click();
+  await location.fill(join(dir, "missing"));
+  await expect(useFolder).toBeDisabled();
+  await location.press("Enter");
   await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(useFolder).toBeDisabled();
   await expect(input).toHaveValue("A second unsent draft");
+  expect(attempts).toHaveLength(0);
   expect(app.store.conversation(empty.id).project_id).toBe(second.id);
-  await dialog.getByLabel("Folder path").fill(newPath);
-  await dialog.getByRole("button", { name: "Use directory" }).click();
+  await dialog
+    .getByRole("button", { name: "Up one folder", exact: true })
+    .click();
+  await dialog
+    .getByRole("button", {
+      name: `Open folder ${basename(newPath)}`,
+      exact: true,
+    })
+    .click();
+  await expect(useFolder).toBeEnabled();
+  expect(app.store.conversation(empty.id).project_id).toBe(second.id);
+  await useFolder.click();
   await expect(dialog).toBeHidden();
   await expect(trigger).toHaveAttribute(
     "title",
@@ -132,13 +304,14 @@ try {
   await expect(trigger).toBeVisible();
   await trigger.click();
   await expect(dialog).toBeVisible();
+  await expect(useFolder).toBeEnabled();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
   await page.screenshot({
-    path: ".local/screenshots/directory-mobile.png",
+    path: ".local/screenshots/directory-explorer-mobile.png",
     animations: "disabled",
   });
   await page.keyboard.press("Escape");
@@ -171,9 +344,9 @@ try {
     .getByRole("button", { name: "Change directory", exact: true })
     .click();
   await dialog
-    .getByLabel("Project directory")
-    .selectOption(app.store.projects()[0].id);
-  await dialog.getByRole("button", { name: "Use directory" }).click();
+    .getByRole("button", { name: "Open project first", exact: true })
+    .click();
+  await useFolder.click();
   await expect(dialog).toBeHidden();
   await expect(pane.getByLabel("Message your coding agent")).toHaveValue(
     "Split draft",
@@ -204,8 +377,16 @@ try {
     await welcome
       .getByRole("button", { name: "Change directory", exact: true })
       .click();
-    await welcome.getByLabel("Folder path").fill(firstPath);
-    await welcome.getByRole("button", { name: "Use directory" }).click();
+    const welcomeLocation = welcome.getByRole("textbox", {
+      name: "Location",
+      exact: true,
+    });
+    await expect(welcomeLocation).toHaveValue(await realpath(homedir()));
+    await welcomeLocation.fill(firstPath);
+    await welcomeLocation.press("Enter");
+    await welcome
+      .getByRole("button", { name: "Use this folder", exact: true })
+      .click();
     await expect(welcome.getByRole("dialog")).toBeHidden();
     await expect(welcome.getByLabel("Message your coding agent")).toBeEnabled();
     expect(
@@ -217,7 +398,7 @@ try {
   }
   expect(errors).toEqual([]);
   console.log(
-    "Directory acceptance passed: initial and saved drafts, attachments, reload, existing/new/invalid paths, mobile layout, and first-message working directory. No inference.",
+    "Directory acceptance passed: folder and breadcrumb navigation, Home/drives/projects, keyboard focus, cancellation, stale responses, permission errors, optional paths, draft/attachment preservation, split panes, mobile layout, and first-message working directory. No inference.",
   );
 } finally {
   await browser.close();
