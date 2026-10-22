@@ -7,6 +7,7 @@ const paths = {
   plus: "M12 5v14M5 12h14",
   chat: "M5 4h14v12H9l-4 4V4Z",
   folder: "M3 6h7l2 3h9v11H3V6Z",
+  chevron: "M9 6l6 6-6 6",
   search: "m16 16 5 5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
   terminal: "m5 7 5 5-5 5m8 0h6",
   review: "M8 4H4v16h4M16 4h4v16h-4M9 8h6M9 12h6M9 16h6",

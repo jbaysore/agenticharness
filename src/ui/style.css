@@ -409,21 +409,51 @@ small {
 .project-row {
   display: flex;
   align-items: center;
-  gap: 9px;
   width: 100%;
-  padding: 8px 11px;
-  text-align: left;
+  padding-left: 2px;
   color: var(--text-2);
   border-radius: 8px;
+}
+.project-row:hover {
+  background: var(--hover);
+}
+.project-row button:hover {
+  filter: none;
+}
+.folder-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 28px;
+  flex-shrink: 0;
+  color: var(--text-3);
+  border-radius: 6px;
+}
+.folder-toggle svg {
+  transition: transform var(--dur-fast) var(--ease);
+}
+.folder-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.project-open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 11px 8px 2px;
+  text-align: left;
   font-weight: 500;
   font-size: 13px;
+  border-radius: 8px;
 }
-.project-row > span {
+.project-open > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.project-row small {
+.project-open small {
   margin-left: auto;
   color: var(--text-3);
   font-size: 12px;
@@ -437,8 +467,8 @@ small {
   display: flex;
   align-items: center;
   gap: 7px;
-  width: calc(100% - 17px);
-  margin-left: 17px;
+  width: calc(100% - 26px);
+  margin-left: 26px;
   padding-right: 9px;
   font-size: 13px;
   color: var(--text-2);
@@ -556,8 +586,8 @@ small {
   font-size: 12px;
 }
 .archived-toggle {
-  width: calc(100% - 17px);
-  margin-left: 17px;
+  width: calc(100% - 26px);
+  margin-left: 26px;
   padding: 7px 10px;
   text-align: left;
   font-size: 12px;

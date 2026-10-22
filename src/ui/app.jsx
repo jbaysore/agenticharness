@@ -25,6 +25,12 @@ import { readAllPending } from "./outbox.mjs";
 import { applyWork, verbLabels } from "../core/steps.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
 import {
+  changeFolders,
+  folderStorageKey,
+  openFolderIds,
+  readExpandedFolders,
+} from "./sidebar-folders.mjs";
+import {
   closePane,
   focusedPane,
   focusPane,
@@ -38,6 +44,14 @@ import {
   toSearch,
   visiblePanes,
 } from "./panes.mjs";
+
+function loadExpandedFolders() {
+  try {
+    return readExpandedFolders(localStorage.getItem(folderStorageKey));
+  } catch {
+    return null;
+  }
+}
 
 // The host names this page's script by the build it served (/app.js?v=…).
 const loadedBuild = new URL(
@@ -58,7 +72,8 @@ function App() {
   const [chats, setChats] = useState({}),
     [view, setView] = useState(() => initialPanes()),
     [selectedProject, setSelectedProject] = useState(""),
-    [showArchived, setShowArchived] = useState(false),
+    [expandedFolders, setExpandedFolders] = useState(loadExpandedFolders),
+    [archivedOpen, setArchivedOpen] = useState([]),
     [windowVisible, setWindowVisible] = useState(
       () => document.visibilityState === "visible",
     );
@@ -93,6 +108,17 @@ function App() {
     if (mobile) setSidebar((open) => !open);
     else setLayout((current) => ({ ...current, leftOpen: !current.leftOpen }));
   };
+  useEffect(() => {
+    if (expandedFolders === null) return;
+    try {
+      localStorage.setItem(
+        folderStorageKey,
+        JSON.stringify({ expanded: expandedFolders }),
+      );
+    } catch {
+      // Folders still open and close for this visit when storage is unavailable.
+    }
+  }, [expandedFolders]);
   useEffect(() => {
     setSidebar(false);
     setOverlayPanel(false);
@@ -176,6 +202,9 @@ function App() {
           : openInFocused(current, id, next.project_id),
       );
       setSelectedProject(next.project_id);
+      setExpandedFolders((saved) =>
+        changeFolders(saved, next.project_id, next.project_id, "expand"),
+      );
       setSidebar(false);
       return next;
     },
@@ -438,7 +467,8 @@ function App() {
   }, [shown.map((p) => p.key).join(",")]);
   // The taskbar shows how many chats are waiting while the window is in the background.
   const active = activeChats(state.conversations),
-    attention = attentionCount(state.conversations);
+    attention = attentionCount(state.conversations),
+    foldersOpen = openFolderIds(expandedFolders, selectedProject);
   useEffect(() => {
     document.title =
       (attention ? `(${attention}) ` : "") + "Harness — Your coding workspace";
@@ -644,41 +674,70 @@ function App() {
             const mine = state.conversations.filter(
                 (c) => c.project_id === p.id,
               ),
-              archived = mine.filter((c) => c.archived_at);
+              archived = mine.filter((c) => c.archived_at),
+              open = foldersOpen.includes(p.id),
+              showingArchived = archivedOpen.includes(p.id);
             return (
-              <div key={p.id}>
-                <button
+              <div key={p.id} className="project">
+                <div
                   className={
                     "project-row " +
                     (p.id === selectedProject ? "selected" : "")
                   }
-                  onClick={() => {
-                    setSelectedProject(p.id);
-                    // Browsing another project never closes a chat that is open.
-                    if (!current.chatId) emptyPane(p.id);
-                    setSidebar(false);
-                  }}
                 >
-                  <Icon name="folder" />
-                  <span>{p.name}</span>
-                  <small>{mine.length - archived.length}</small>
-                </button>
-                {p.id === selectedProject && (
-                  <>
+                  <button
+                    className="folder-toggle"
+                    aria-label={`${open ? "Collapse" : "Expand"} ${p.name}`}
+                    aria-expanded={open}
+                    aria-controls={`project-${p.id}-chats`}
+                    title={open ? "Collapse folder" : "Expand folder"}
+                    onClick={() =>
+                      setExpandedFolders((saved) =>
+                        changeFolders(saved, selectedProject, p.id, "toggle"),
+                      )
+                    }
+                  >
+                    <Icon name="chevron" size={14} />
+                  </button>
+                  <button
+                    className="project-open"
+                    onClick={() => {
+                      setSelectedProject(p.id);
+                      // Browsing another project never closes a chat that is open.
+                      if (!current.chatId) emptyPane(p.id);
+                      setExpandedFolders((saved) =>
+                        changeFolders(saved, selectedProject, p.id, "expand"),
+                      );
+                      setSidebar(false);
+                    }}
+                  >
+                    <Icon name="folder" />
+                    <span>{p.name}</span>
+                    <small>{mine.length - archived.length}</small>
+                  </button>
+                </div>
+                {open && (
+                  <div id={`project-${p.id}-chats`}>
                     {mine.filter((c) => !c.archived_at).map((c) => chatRow(c))}
                     {archived.length > 0 && (
                       <button
                         className="archived-toggle"
-                        aria-expanded={showArchived}
-                        onClick={() => setShowArchived(!showArchived)}
+                        aria-expanded={showingArchived}
+                        onClick={() =>
+                          setArchivedOpen((ids) =>
+                            ids.includes(p.id)
+                              ? ids.filter((id) => id !== p.id)
+                              : [...ids, p.id],
+                          )
+                        }
                       >
-                        {showArchived
+                        {showingArchived
                           ? "Hide archived"
                           : `Show archived (${archived.length})`}
                       </button>
                     )}
-                    {showArchived && archived.map((c) => chatRow(c))}
-                  </>
+                    {showingArchived && archived.map((c) => chatRow(c))}
+                  </div>
                 )}
               </div>
             );
@@ -938,6 +997,9 @@ function App() {
                 });
                 await refresh();
                 setSelectedProject(p.id);
+                setExpandedFolders((saved) =>
+                  changeFolders(saved, p.id, p.id, "expand"),
+                );
                 emptyPane(p.id);
                 setModal(null);
                 setProjectName("");
