@@ -13,6 +13,7 @@ import {
   readPanes,
   savePanes,
   setPaneChat,
+  showHome,
   toSearch,
   visiblePanes,
 } from "../src/ui/panes.mjs";
@@ -112,6 +113,20 @@ test("the window width decides how many panes show, keeping the focused one", ()
     ["a", "b"],
   );
   assert.equal(visiblePanes(state, 3), state.panes);
+});
+test("home is one new conversation and stays put when that is already open", () => {
+  const split = openBeside(openInFocused(initialPanes(), "a"), "b");
+  const home = showHome(split, "project");
+  assert.deepEqual(chats(home), [null]);
+  assert.equal(focusedPane(home).projectId, "project");
+  assert.equal(toSearch(home), "/");
+  assert.equal(showHome(home, "project"), home);
+  const unnamed = initialPanes();
+  assert.equal(showHome(unnamed, "project"), unnamed);
+  const elsewhere = showHome(home, "other");
+  assert.notEqual(elsewhere, home);
+  assert.equal(focusedPane(elsewhere).projectId, "other");
+  assert.equal(toSearch(showHome(openInFocused(initialPanes(), "a"))), "/");
 });
 test("open chats round-trip through the address and a single-chat link still works", () => {
   const state = initialPanes(["a", "b"]);

@@ -74,6 +74,14 @@ export function setPaneChat(state, key, chatId) {
     panes: state.panes.map((p) => (p.key === key ? { ...p, chatId } : p)),
   };
 }
+// Home is one fresh conversation. Staying there keeps whatever is already typed.
+export function showHome(state, projectId = "") {
+  const only = state.panes.length === 1 ? state.panes[0] : null;
+  if (only && !only.chatId && (only.projectId || projectId) === projectId)
+    return state;
+  const blank = pane(null, projectId);
+  return { panes: [blank], focused: blank.key };
+}
 export function closePane(state, key, projectId = "") {
   const index = state.panes.findIndex((p) => p.key === key);
   if (index < 0) return state;

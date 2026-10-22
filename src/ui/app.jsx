@@ -46,6 +46,7 @@ import {
   readPanes,
   savePanes,
   setPaneChat,
+  showHome,
   toSearch,
   visiblePanes,
 } from "./panes.mjs";
@@ -713,8 +714,19 @@ function App() {
         hidden={!sidebarVisible}
       >
         <div className="brand">
-          <Mark />
-          <span className="wordmark">Harness</span>
+          <button
+            type="button"
+            className="brand-home"
+            title="New conversation"
+            aria-label="Harness, new conversation"
+            onClick={() => {
+              setView((current) => showHome(current, selectedProject));
+              setSidebar(false);
+            }}
+          >
+            <Mark />
+            <span className="wordmark">Harness</span>
+          </button>
           <button
             className="icon-button sidebar-close"
             aria-label="Collapse sidebar"
