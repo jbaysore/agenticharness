@@ -132,6 +132,8 @@ export function ChatPane({
   providers,
   focused,
   solo,
+  headerDrag,
+  dropTarget,
   peers,
   selection,
   onSelection,
@@ -173,6 +175,7 @@ export function ChatPane({
     input = useRef(null),
     slash = useRef(null),
     fileInput = useRef(null),
+    headerDragAllowed = useRef(false),
     uploadingRef = useRef(false),
     sending = useRef(false);
   const connected = providers.find((p) => p.id === provider),
@@ -468,7 +471,18 @@ export function ChatPane({
       onFocus={onFocus}
     >
       {!solo && (
-        <header className="pane-header">
+        <header
+          className={"pane-header" + (dropTarget ? " drop-target" : "")}
+          draggable={!!headerDrag}
+          {...headerDrag}
+          onPointerDown={(event) => {
+            headerDragAllowed.current = !event.target.closest("button");
+          }}
+          onDragStart={(event) => {
+            if (!headerDragAllowed.current) event.preventDefault();
+            else headerDrag?.onDragStart(event);
+          }}
+        >
           <span className={"provider-dot " + (chat?.provider ?? provider)} />
           <strong title={title}>{title}</strong>
           {["approval", "running"].includes(marker) && (

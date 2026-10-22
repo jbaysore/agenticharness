@@ -28,6 +28,15 @@ export function focusPane(state, key) {
     ? state
     : { ...state, focused: key };
 }
+// Move the existing pane so its composer and reading position stay with it.
+export function movePane(state, key, targetKey) {
+  const from = state.panes.findIndex((p) => p.key === key),
+    to = state.panes.findIndex((p) => p.key === targetKey);
+  if (from < 0 || to < 0 || from === to) return state;
+  const panes = [...state.panes];
+  panes.splice(to, 0, panes.splice(from, 1)[0]);
+  return { ...state, panes };
+}
 // A chat is only ever open once; asking for it again moves focus to it.
 export function openInFocused(state, chatId, projectId = "") {
   const existing = chatId && state.panes.find((p) => p.chatId === chatId);

@@ -6,6 +6,7 @@ import {
   focusPane,
   initialPanes,
   maxPanes,
+  movePane,
   openBeside,
   openInFocused,
   parseSearch,
@@ -73,6 +74,23 @@ test("closing moves focus to a neighbour and never leaves zero panes", () => {
   assert.deepEqual(chats(state), [null]);
   assert.equal(focusedPane(state).projectId, "project");
   assert.equal(closePane(state, "missing"), state);
+});
+
+test("reordering moves panes in both directions without changing their identity or focus", () => {
+  const state = initialPanes(["a", "b", "c"], 1),
+    [a, b, c] = state.panes;
+  const moved = movePane(state, a.key, c.key);
+  assert.deepEqual(chats(moved), ["b", "c", "a"]);
+  assert.equal(moved.focused, b.key);
+  assert.equal(moved.panes[0], b);
+  assert.equal(moved.panes[1], c);
+  assert.equal(moved.panes[2], a);
+  assert.deepEqual(chats(state), ["a", "b", "c"]);
+  assert.deepEqual(movePane(moved, a.key, b.key), state);
+  assert.deepEqual(chats(movePane(state, a.key, b.key)), ["b", "a", "c"]);
+  assert.equal(movePane(state, a.key, a.key), state);
+  assert.equal(movePane(state, "missing", a.key), state);
+  assert.equal(movePane(state, a.key, "missing"), state);
 });
 test("the window width decides how many panes show, keeping the focused one", () => {
   assert.equal(maxPanes(1920, 246), 3);

@@ -694,6 +694,18 @@ small {
   color: var(--text-2);
   box-shadow: inset 0 2px 0 var(--agent);
 }
+.pane-header[draggable="true"] {
+  cursor: grab;
+  user-select: none;
+}
+.pane-header[draggable="true"]:active {
+  cursor: grabbing;
+}
+.pane-header.drop-target {
+  background: var(--surface-2);
+  outline: 1px solid var(--agent);
+  outline-offset: -1px;
+}
 .pane-header strong {
   flex: 1;
   min-width: 0;

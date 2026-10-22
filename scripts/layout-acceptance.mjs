@@ -166,6 +166,10 @@ try {
   // Up to three chats sit side by side; the work panel gives way before a chat does.
   const panes = page.locator(".chat-pane");
   const focused = page.locator(".chat-pane.focused");
+  const paneFor = (name) => page.getByRole("region", { name, exact: true });
+  const headerFor = (name) => paneFor(name).locator(".pane-header");
+  const paneOrder = () =>
+    panes.evaluateAll((all) => all.map((p) => p.ariaLabel));
   const sidebarChat = (name) => left.getByRole("button", { name, exact: true });
   await page.setViewportSize({ width: 1920, height: 1000 });
   await page.evaluate(() => localStorage.removeItem("harness.panes.v1"));
@@ -180,6 +184,13 @@ try {
   await expect(panes).toHaveCount(1);
   await sidebarChat("Second chat").click({ modifiers: ["Control"] });
   await expect(panes).toHaveCount(2);
+  await headerFor("Second chat")
+    .locator("strong")
+    .dragTo(headerFor("Layout check"));
+  expect(await paneOrder()).toEqual(["Second chat", "Layout check"]);
+  await expect(focused).toHaveAttribute("aria-label", "Second chat");
+  await headerFor("Second chat").dragTo(headerFor("Layout check"));
+  expect(await paneOrder()).toEqual(["Layout check", "Second chat"]);
   await sidebarChat("Third chat").click({ button: "middle" });
   await expect(panes).toHaveCount(3);
   await expect(focused).toHaveAttribute("aria-label", "Third chat");
@@ -224,6 +235,103 @@ try {
   expect(new URL(page.url()).searchParams.get("chat").split(",")).toHaveLength(
     3,
   );
+
+  // Headers move the existing chats, including drafts, and remember their order.
+  for (const name of ["Layout check", "Second chat", "Third chat"])
+    await paneFor(name)
+      .getByLabel("Message your coding agent")
+      .fill(`Draft for ${name}`);
+  const originalIds = new URL(page.url()).searchParams.get("chat").split(",");
+  await headerFor("Layout check").dragTo(headerFor("Third chat"));
+  expect(await paneOrder()).toEqual([
+    "Second chat",
+    "Third chat",
+    "Layout check",
+  ]);
+  await expect(focused).toHaveAttribute("aria-label", "Layout check");
+  for (const name of ["Layout check", "Second chat", "Third chat"])
+    await expect(
+      paneFor(name).getByLabel("Message your coding agent"),
+    ).toHaveValue(`Draft for ${name}`);
+  expect(new URL(page.url()).searchParams.get("chat").split(",")).toEqual([
+    originalIds[1],
+    originalIds[2],
+    originalIds[0],
+  ]);
+  await page.reload();
+  await expect(panes).toHaveCount(3);
+  expect(await paneOrder()).toEqual([
+    "Second chat",
+    "Third chat",
+    "Layout check",
+  ]);
+  await expect(focused).toHaveAttribute("aria-label", "Layout check");
+  await expect(
+    paneFor("Layout check").getByLabel("Message your coding agent"),
+  ).toHaveValue("Draft for Layout check");
+
+  // Cancelling a real drag clears its highlight without reordering anything.
+  const source = await headerFor("Layout check").boundingBox();
+  const target = await headerFor("Second chat").boundingBox();
+  await page.mouse.move(
+    source.x + source.width / 2,
+    source.y + source.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    target.x + target.width / 2,
+    target.y + target.height / 2,
+    { steps: 12 },
+  );
+  await page.mouse.move(
+    target.x + target.width / 2,
+    target.y + target.height / 2,
+  );
+  await expect(page.locator(".pane-header.drop-target")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(page.locator(".pane-header.drop-target")).toHaveCount(0);
+  expect(await paneOrder()).toEqual([
+    "Second chat",
+    "Third chat",
+    "Layout check",
+  ]);
+
+  // An external drag cannot move chats or reuse a cancelled internal drag.
+  const external = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "External text");
+    return data;
+  });
+  await headerFor("Second chat").dispatchEvent("dragover", {
+    dataTransfer: external,
+  });
+  await headerFor("Second chat").dispatchEvent("drop", {
+    dataTransfer: external,
+  });
+  await external.dispose();
+  expect(await paneOrder()).toEqual([
+    "Second chat",
+    "Third chat",
+    "Layout check",
+  ]);
+  await paneFor("Layout check")
+    .getByLabel("Close pane")
+    .dragTo(headerFor("Second chat"));
+  await expect(panes).toHaveCount(3);
+  expect(await paneOrder()).toEqual([
+    "Second chat",
+    "Third chat",
+    "Layout check",
+  ]);
+  await headerFor("Layout check").dragTo(headerFor("Second chat"));
+  expect(await paneOrder()).toEqual([
+    "Layout check",
+    "Second chat",
+    "Third chat",
+  ]);
+  await expect(page.locator(".pane-header.drop-target")).toHaveCount(0);
+
   await panes.nth(2).getByLabel("Close pane").click();
   await panes.nth(1).getByLabel("Close pane").click();
   await expect(panes).toHaveCount(1);
@@ -393,7 +501,7 @@ try {
   await expect.poll(() => width(left)).toBe(256);
   expect(errors).toEqual([]);
   console.log(
-    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, pin and unpin, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
+    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, header drag reordering and cancellation, draft preservation, pin and unpin, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
   );
 } finally {
   await browser?.close();

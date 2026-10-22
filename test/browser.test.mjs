@@ -48,7 +48,8 @@ test("the browser lists Playwright's tools without the host-code one, and runs c
     assert.deepEqual(order, ["slow", "fast"]);
   } finally {
     browser.close();
-    await rm(dir, { recursive: true, force: true });
+    // Windows can retain the child's working directory briefly after close.
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 

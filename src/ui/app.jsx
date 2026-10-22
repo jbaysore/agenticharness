@@ -37,6 +37,7 @@ import {
   focusedPane,
   focusPane,
   initialPanes,
+  movePane,
   openBeside,
   openInFocused,
   parseSearch,
@@ -73,6 +74,7 @@ function App() {
     [toastKind, setToastKind] = useState("error");
   const [chats, setChats] = useState({}),
     [view, setView] = useState(() => initialPanes()),
+    [paneDrop, setPaneDrop] = useState(null),
     [selectedProject, setSelectedProject] = useState(""),
     [expandedFolders, setExpandedFolders] = useState(loadExpandedFolders),
     [archivedOpen, setArchivedOpen] = useState([]),
@@ -150,6 +152,7 @@ function App() {
       permissions: "auto",
     }),
     paneRefs = useRef({}),
+    draggedPane = useRef(null),
     limit = useRef(paneLimit),
     marking = useRef(new Set()),
     errorTimer = useRef(null),
@@ -432,6 +435,35 @@ function App() {
   const shown = visiblePanes(view, paneLimit),
     current = focusedPane(view),
     chat = (current.chatId && chats[current.chatId]) || null;
+  const finishPaneDrag = () => {
+    draggedPane.current = null;
+    setPaneDrop(null);
+  };
+  const paneHeaderDrag = (key) => ({
+    onDragStart: (event) => {
+      draggedPane.current = key;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/x-harness-pane", key);
+    },
+    onDragEnd: finishPaneDrag,
+    onDragOver: (event) => {
+      if (!draggedPane.current || draggedPane.current === key) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setPaneDrop(key);
+    },
+    onDragLeave: (event) => {
+      if (!event.currentTarget.contains(event.relatedTarget))
+        setPaneDrop((target) => (target === key ? null : target));
+    },
+    onDrop: (event) => {
+      if (!draggedPane.current) return;
+      event.preventDefault();
+      const source = draggedPane.current;
+      finishPaneDrag();
+      setView((v) => movePane(v, source, key));
+    },
+  });
   const paneProject = (p) =>
     state.projects.find(
       (candidate) =>
@@ -884,6 +916,8 @@ function App() {
               providers={state.providers}
               focused={p.key === current.key}
               solo={view.panes.length === 1}
+              headerDrag={shown.length > 1 ? paneHeaderDrag(p.key) : undefined}
+              dropTarget={paneDrop === p.key}
               peers={workspacePeers(
                 state.conversations,
                 paneProject(p)?.id,
