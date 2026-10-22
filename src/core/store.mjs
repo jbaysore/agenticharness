@@ -93,7 +93,7 @@ export class Store {
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN read_at TEXT; UPDATE conversations SET read_at=updated_at",
       );
-    // The chat's own Git worktree, when it started beside another busy chat.
+    // The chat's own Git worktree, created on its first turn.
     if (!conversation.includes("worktree"))
       this.db.exec("ALTER TABLE conversations ADD COLUMN worktree TEXT");
     // Run on a chat's rebased branch before it lands on the project's branch.

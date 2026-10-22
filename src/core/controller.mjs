@@ -260,17 +260,13 @@ export class Controller extends EventEmitter {
     checkMode(mode, chat.provider);
     return this.store.updateConversation(chatId, { mode });
   }
-  // The folder a chat works in: its own worktree when it started while
-  // another chat was busy on the same project, otherwise the project folder.
-  // A chat keeps that folder for good, because native sessions are tied to it.
+  // The folder a chat works in: its own worktree, created on its first turn,
+  // or the project folder when that is not a Git repository on a branch or the
+  // chat began before worktrees were given to every chat. A chat keeps that
+  // folder for good, because native sessions are tied to it.
   async chatFolder(chat, home, run) {
     let worktree = chat.worktree;
-    if (
-      !worktree &&
-      this.worktreeRoot &&
-      !Object.keys(chat.sessions).length &&
-      workspacePeers(this.store, chat.id, { byProject: true }).length
-    )
+    if (!worktree && this.worktreeRoot && !Object.keys(chat.sessions).length)
       try {
         worktree = await createWorktree({
           projectPath: home.path,
@@ -283,10 +279,13 @@ export class Controller extends EventEmitter {
           kind: "worktree",
           item: {
             title: `Working in its own copy on ${worktree.branch}`,
-            description: `Another chat was already working on this project, so this chat has its own Git worktree at ${worktree.path}. Its commits reach ${worktree.base} through land_changes.`,
+            description: `This chat has its own Git worktree at ${worktree.path}, so other chats' unfinished edits never reach it. Its commits reach ${worktree.base} through land_changes.`,
           },
         });
       } catch (failure) {
+        // Only worth a notice when sharing the folder with a busy chat.
+        if (!workspacePeers(this.store, chat.id, { byProject: true }).length)
+          return home;
         this.event(chat.id, run.id, "work", {
           kind: "worktree-unavailable",
           item: {

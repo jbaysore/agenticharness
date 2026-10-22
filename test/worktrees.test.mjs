@@ -209,7 +209,7 @@ test("a worktree with nothing of its own catches up before a turn", async () => 
   }
 });
 
-test("a chat starting while another is busy gets its own worktree and land_changes", async () => {
+test("every new chat gets its own worktree and land_changes", async () => {
   const f = fixture(),
     store = new Store(":memory:"),
     controller = new Controller(store, { worktreeRoot: f.root });
@@ -241,14 +241,19 @@ test("a chat starting while another is busy gets its own worktree and land_chang
       return ctx;
     };
     const first = chat("First"),
-      second = chat("Second");
+      second = chat("Second"),
+      // A chat that began in the project folder before worktrees stays there.
+      older = chat("Older");
+    store.updateConversation(older.id, { sessions: { codex: "native-1" } });
     const alone = await start(first, "Refactor"),
-      beside = await start(second, "Add a test");
-    assert.equal(alone.project.path, f.project);
-    assert.ok(!alone.tools.some((t) => t.name === "land_changes"));
-    assert.equal(store.conversation(first.id).worktree, null);
+      beside = await start(second, "Add a test"),
+      shared = await start(older, "Tidy up");
 
-    const worktree = store.conversation(second.id).worktree;
+    const own = store.conversation(first.id).worktree,
+      worktree = store.conversation(second.id).worktree;
+    assert.equal(alone.project.path, own.path);
+    assert.notEqual(own.path, worktree.path);
+    assert.ok(alone.tools.some((t) => t.name === "land_changes"));
     assert.equal(beside.project.path, worktree.path);
     assert.equal(beside.project.home, f.project);
     assert.ok(beside.tools.some((t) => t.name === "land_changes"));
@@ -261,20 +266,23 @@ test("a chat starting while another is busy gets its own worktree and land_chang
       (await beside.history("workspace_activity", {}))[0].title,
       "First",
     );
+    assert.equal(shared.project.path, f.project);
+    assert.equal(store.conversation(older.id).worktree, null);
 
     commit(worktree.path, "b.txt", "mine\n");
     const landed = await beside.history("land_changes", {});
     assert.equal(landed.landed, true, landed.reason);
     assert.equal(git(f.project, "rev-parse", "HEAD"), landed.commit);
     assert.equal(
-      (await alone.history("land_changes", {})).error,
+      (await shared.history("land_changes", {})).error,
       "This chat works in the shared project folder.",
     );
 
     finish[first.id]();
     finish[second.id]();
+    finish[older.id]();
     while (controller.active.size) await new Promise((r) => setTimeout(r, 5));
-    // The chat keeps its worktree on later turns, even with nobody else busy.
+    // The chat keeps its worktree on later turns.
     const later = await start(second, "And another");
     assert.equal(later.project.path, worktree.path);
     finish[second.id]();

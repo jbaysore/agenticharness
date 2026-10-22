@@ -70,7 +70,7 @@ two turns at once, so none of it counts as real concurrent-provider evidence.
 | One to three panes at 1920, 1512 and 1200 px; restore on reload        | Real Edge (`node scripts/layout-acceptance.mjs`) | Passed: three panes of at least 390 px with the work panel docked at 1920; panel floats at 1512; two panes with the focused one kept at 1200; one pane on the phone viewport |
 | Single-chat review, files, terminal, search, reconnect                 | Real Edge with saved real transcripts            | Passed after the change (`node scripts/browser-acceptance.mjs`)                                                                                                              |
 | Workspace notice, commit rules and `workspace_activity`                | Unit tests with a stubbed provider               | Passed: a chat starting beside another in the same or a nested folder receives the notice; an unrelated project does not                                                     |
-| Worktree per chat and `land_changes`                                   | Unit tests with real Git and a stubbed provider  | Passed: a chat starting beside a busy one gets a worktree; landing rebases, checks, fast-forwards and pushes, and refuses conflicts, failing checks and uncommitted work     |
+| Worktree per chat and `land_changes`                                   | Unit tests with real Git and a stubbed provider  | Passed: every new chat gets its own worktree; landing rebases, checks, fast-forwards and pushes, and refuses conflicts, failing checks and uncommitted work                  |
 | Chat status, unread, archive and the migration of an existing database | Unit tests against real SQLite                   | Passed                                                                                                                                                                       |
 | Real agents following the notice; two real turns committing at once    | Requires included usage                          | Not run                                                                                                                                                                      |
 | Two simultaneous Cursor turns                                          | Requires included usage                          | Not run; Cursor's worker lock is untested with concurrent sessions                                                                                                           |
@@ -109,12 +109,12 @@ uses the tools, that a real worker answers well, or that tokens are saved.
 The provider was simulated. No real agent was asked to follow a skill, so this
 is not evidence that Codex, Claude Code, or Cursor obeys one.
 
-| Check                                                                                                                                          | Kind                                                   | Result  |
-| ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------- |
-| Create, edit, invoke with `/review-notes`, include the text on that message, ignore a path, leave a later message alone, and delete         | Real Edge (`node scripts/skills-acceptance.mjs`)       | Passed  |
-| Name and command checks, the six-skill limit, and a deleted skill no longer matches its command                                                | Unit tests (`test/skills.test.mjs`)                    | Passed  |
+| Check                                                                                                                                                | Kind                                                       | Result  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------- |
+| Create, edit, invoke with `/review-notes`, include the text on that message, ignore a path, leave a later message alone, and delete                  | Real Edge (`node scripts/skills-acceptance.mjs`)           | Passed  |
+| Name and command checks, the six-skill limit, and a deleted skill no longer matches its command                                                      | Unit tests (`test/skills.test.mjs`)                        | Passed  |
 | Codex, Claude Code, and Cursor turns receive a slash command’s skill; a message without it does not; an edit is included the next time it is invoked | Unit tests with stubbed providers (`test/skills.test.mjs`) | Passed  |
-| A real agent following a skill                                                                                                                 | Requires included usage                                | Not run |
+| A real agent following a skill                                                                                                                       | Requires included usage                                    | Not run |
 
 ## Bugs found through dogfooding
 

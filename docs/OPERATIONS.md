@@ -78,9 +78,8 @@ Codex, Claude Code and Cursor give new chats a short title silently at the start
 of their work. If an agent misses naming a chat, it is reminded on the next turn.
 An automatic title never replaces one you chose or an earlier automatic title.
 
-When a chat's first turn starts while another chat is working on the same
-project, and the project folder is the top of a Git repository on a branch, the
-chat gets its own Git worktree under `%LOCALAPPDATA%\AgenticHarness\worktrees`
+When a chat's first turn starts, and the project folder is the top of a Git
+repository on a branch, the chat gets its own Git worktree under `%LOCALAPPDATA%\AgenticHarness\worktrees`
 on a branch named `harness/<id>`. It keeps that worktree for good. Its agent,
 Review, Files and Terminal all work there, so no other chat's unfinished edits
 reach its builds, tests or commits. `node_modules` is linked from the project
@@ -97,7 +96,8 @@ fails if the project folder has uncommitted changes in the same files, or is on
 another branch. Before each turn, a worktree with no commits of its own catches
 up with the project's branch.
 
-A chat that started while nobody else was working stays in the shared project
+A chat that began before every chat got a worktree, or whose project folder is
+not the top of a Git repository on a branch, stays in the shared project
 folder. When a turn starts while another chat is working in that folder, or in a
 folder nested inside it, the agent is told who else is working, what they were
 asked, and which files already had uncommitted changes. It is instructed to

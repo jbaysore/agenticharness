@@ -42,12 +42,13 @@ The complete product is not finished at the first working provider milestone.
   are not silently granted write access. Git state stays per repository.
 - Local host binds to loopback. Remote access requires an explicitly configured
   encrypted authenticated path. Never expose raw agent RPC endpoints publicly.
-- A chat that starts while another is working on the same Git project gets its
-  own worktree and branch, fixed for the life of the chat because native
+- Every new chat on a Git project gets its own worktree and branch on its first
+  turn, fixed for the life of the chat because native
   sessions are tied to their folder. Its commits reach the project's branch only
   through `land_changes`, which rebases, runs the project's check command,
   fast-forwards and pushes, one landing at a time per project. A chat that
-  started alone keeps the shared folder, where the notice and commit rules are
+  began before this, or whose project folder is not the top of a Git repository
+  on a branch, keeps the shared folder, where the notice and commit rules are
   still advisory.
 - Delegated work runs in the host, not in a provider's own subagents. Built-in
   subagents cannot leave their provider and their model is not always settable,

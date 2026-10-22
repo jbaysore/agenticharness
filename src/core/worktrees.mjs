@@ -9,9 +9,8 @@ import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { git } from "./repository.mjs";
 
-// A chat that starts while another is working in the same project gets its own
-// Git worktree, so no chat edits, builds or commits on top of another's
-// unfinished work. Its commits reach the project's branch through land_changes.
+// Every new chat gets its own Git worktree, so no chat edits, builds or commits
+// on top of another's unfinished work. Its commits reach the project's branch through land_changes.
 
 export const landTool = {
   name: "land_changes",
