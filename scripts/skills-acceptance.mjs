@@ -28,7 +28,7 @@ controller.providers = [
 controller.refreshProviders = async () => controller.providers;
 const seen = [];
 controller.runners.codex = async (ctx) => {
-  seen.push({ text: ctx.text, instructions: ctx.instructions });
+  seen.push({ text: ctx.text, instructions: ctx.instructions, mode: ctx.mode });
   ctx.emit("text", { nativeId: "reply-" + seen.length, text: "Done: " + ctx.text });
   return { status: "completed" };
 };
@@ -44,7 +44,8 @@ try {
   const skillsButton = page.locator(".sidebar").getByRole("button", { name: /^Skills/ }),
     dialog = page.getByRole("dialog", { name: "Skills" }),
     box = page.getByLabel("Message your coding agent"),
-    menu = page.getByRole("listbox", { name: "Skills" }),
+    menu = page.getByRole("listbox", { name: "Skills and modes" }),
+    modeSelect = page.getByLabel("Mode", { exact: true }),
     reply = page.locator(".message.assistant").last();
   const ask = async (text) => {
     await page.getByLabel("Message your coding agent").fill(text);
@@ -91,16 +92,34 @@ try {
   await ask("Read src/review-notes");
   assert.doesNotMatch(seen[2].instructions, /Skill: Review notes/);
 
+  await box.fill("/pl");
+  await menu.getByRole("option", { name: "/plan Plan mode" }).click();
+  await expect(box).toHaveValue("");
+  await expect(modeSelect).toHaveValue("plan");
+  await box.fill("/default Tidy the parser");
+  await page.getByLabel("Send message").click();
+  await expect(reply).toContainText("Done: Tidy the parser");
+  await expect(modeSelect).toHaveValue("default");
+  assert.equal(seen[3].text, "Tidy the parser");
+  assert.equal(seen[3].mode, "default");
+  await box.fill("/goal");
+  await box.press("Escape");
+  await page.getByLabel("Send message").click();
+  await expect(modeSelect).toHaveValue("goal");
+  await expect(box).toHaveValue("");
+  await modeSelect.selectOption("default");
+
   await skillsButton.click();
   await dialog.getByRole("button", { name: "Delete Review notes" }).click();
   await expect(dialog.getByRole("status")).toContainText("Deleted Review notes.");
   await dialog.getByLabel("Close dialog").click();
   await box.fill("/");
   await expect(menu).toContainText("No skills yet.");
+  await expect(menu.getByRole("option", { name: "/plan Plan mode" })).toBeVisible();
 
   expect(errors).toEqual([]);
   console.log(
-    "Skills checks passed: create, edit, invoke with a slash command, include the text on that message, ignore a path, leave a later message alone, and delete. The provider was simulated.",
+    "Skills checks passed: create, edit, invoke with a slash command, include the text on that message, ignore a path, leave a later message alone, switch modes with /plan, /default and /goal, and delete. The provider was simulated.",
   );
 } finally {
   await browser.close();

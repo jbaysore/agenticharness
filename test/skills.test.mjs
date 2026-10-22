@@ -14,7 +14,9 @@ import {
   applyCommand,
   createSkill,
   deleteSkill,
+  dropCommand,
   invokedSkills,
+  leadingMode,
   listSkills,
   skillInstructions,
   slashToken,
@@ -71,6 +73,11 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
     () => createSkill(store, { name: "Release-notes", instructions: "Again." }),
     /slash command/,
   );
+  for (const name of ["Plan", "goal", "Default"])
+    assert.throws(
+      () => createSkill(store, { name, instructions: "x" }),
+      /switches the chat's mode/,
+    );
   assert.equal(notes.instructions, "Write the decision down.\nKeep the source.");
   assert.throws(
     () => createSkill(store, { name: "review notes", instructions: "Again." }),
@@ -249,4 +256,24 @@ test("skill routes create, edit and delete, and publish the slash command", asyn
     await app.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("/plan, /goal and /default at the start of a message switch the mode", () => {
+  assert.deepEqual(leadingMode("/plan Add a login page"), {
+    mode: "plan",
+    text: "Add a login page",
+  });
+  assert.deepEqual(leadingMode("  /Goal\nAll tests pass"), {
+    mode: "goal",
+    text: "All tests pass",
+  });
+  assert.deepEqual(leadingMode("/default"), { mode: "default", text: "" });
+  assert.equal(leadingMode("/planning notes"), null);
+  assert.equal(leadingMode("Make a /plan first"), null);
+  assert.equal(leadingMode("/review-notes now"), null);
+  assert.deepEqual(dropCommand("/pl", 3), { text: "", cursor: 0 });
+  assert.deepEqual(dropCommand("Fix it /pl now", 10), {
+    text: "Fix it now",
+    cursor: 7,
+  });
 });

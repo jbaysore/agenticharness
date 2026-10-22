@@ -181,15 +181,34 @@ export function SkillsModal({ skills, onSaved, onClose }) {
 }
 
 // The menu appears while a /command is being typed. Escape hides it until the
-// command being typed changes. Enter and Tab insert the highlighted skill.
-export function SkillSlash({ ref, skills, text, caret, onPick, onCreate }) {
+// command being typed changes. Enter and Tab insert the highlighted skill, or
+// switch to the highlighted mode.
+export function SkillSlash({
+  ref,
+  skills,
+  modes = [],
+  text,
+  caret,
+  onPick,
+  onMode,
+  onCreate,
+}) {
   const token = slashToken(text, caret),
     key = token ? `${token.start}:${token.query}` : "";
   const matches = token
-    ? skills
-        .filter((skill) => skill.command.startsWith(token.query))
+    ? [
+        ...modes.map((entry) => ({
+          ...entry,
+          id: "mode:" + entry.command,
+          isMode: true,
+        })),
+        ...skills,
+      ]
+        .filter((item) => item.command.startsWith(token.query))
         .slice(0, 8)
     : [];
+  const choose = (item) =>
+    item.isMode ? onMode(item.mode) : onPick(item.command);
   const [hidden, setHidden] = useState(""),
     [highlight, setHighlight] = useState(0);
   useEffect(() => setHighlight(0), [key]);
@@ -214,37 +233,36 @@ export function SkillSlash({ ref, skills, text, caret, onPick, onCreate }) {
         }
         if (event.key === "Enter" || event.key === "Tab") {
           event.preventDefault();
-          onPick(matches[Math.min(highlight, matches.length - 1)].command);
+          choose(matches[Math.min(highlight, matches.length - 1)]);
           return true;
         }
         return false;
       },
     }),
-    [open, key, matches, highlight, onPick],
+    [open, key, matches, highlight, onPick, onMode],
   );
   if (!open) return null;
   return (
-    <div className="slash-menu" role="listbox" aria-label="Skills">
-      {matches.length ? (
-        matches.map((skill, index) => (
+    <div className="slash-menu" role="listbox" aria-label="Skills and modes">
+      {matches.map((skill, index) => (
           <button
             type="button"
             role="option"
             aria-selected={index === highlight}
             key={skill.id}
             className={index === highlight ? "active" : ""}
-            title={skill.instructions}
+            title={skill.description ?? skill.instructions}
             onMouseDown={(event) => {
               event.preventDefault();
-              onPick(skill.command);
+              choose(skill);
             }}
             onMouseEnter={() => setHighlight(index)}
           >
             <strong>/{skill.command}</strong>
             <span>{skill.name}</span>
           </button>
-        ))
-      ) : (
+      ))}
+      {!matches.some((item) => !item.isMode) && (
         <p>{skills.length ? `No skill for /${token.query}.` : "No skills yet."}</p>
       )}
       <button

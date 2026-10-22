@@ -13,7 +13,12 @@ import { Attachments } from "./attachments.jsx";
 import { useChatScroll } from "./chat-scroll.jsx";
 import { ModelPicker } from "./model-picker.jsx";
 import { SkillSlash } from "./skills-modal.jsx";
-import { applyCommand } from "../core/skills.mjs";
+import {
+  MODE_COMMANDS,
+  applyCommand,
+  dropCommand,
+  leadingMode,
+} from "../core/skills.mjs";
 import {
   chatMarker,
   chatMarkerLabel,
@@ -285,6 +290,29 @@ export function ChatPane({
     field?.focus();
     field?.setSelectionRange(next.cursor, next.cursor);
   }
+  // /plan, /goal and /default switch the chat's mode, as the mode menu does.
+  const modeCommands = chat?.activeRun
+    ? []
+    : MODE_COMMANDS.filter(
+        (entry) => !(provider === "cursor" && entry.mode === "goal"),
+      ).map((entry) => ({
+        ...entry,
+        description: chatModes.find(([id]) => id === entry.mode)[2],
+      }));
+  function pickMode(next) {
+    const field = input.current;
+    const left = dropCommand(
+      field?.value ?? draft,
+      field?.selectionStart ?? caret,
+    );
+    flushSync(() => {
+      setDraft(left.text);
+      setCaret(left.cursor);
+    });
+    field?.focus();
+    field?.setSelectionRange(left.cursor, left.cursor);
+    if (next !== mode) changeMode(next);
+  }
   async function attachFiles(files, pasted = false) {
     if (!project || sending.current || uploadingRef.current || !files.length)
       return;
@@ -330,6 +358,19 @@ export function ChatPane({
   }
   async function send(override, turnMode = mode) {
     const text = typeof override === "string" ? override : draft;
+    const switched = typeof override === "string" ? null : leadingMode(text);
+    if (switched) {
+      if (provider === "cursor" && switched.mode === "goal") {
+        report(new Error("Cursor has no goal mode. Choose Codex or Claude Code."));
+        return;
+      }
+      if (busy || modeBusy || chat?.activeRun) return;
+      if (switched.mode !== mode) await changeMode(switched.mode);
+      if (switched.text.trim() || attachments.length)
+        await send(switched.text, switched.mode);
+      else setDraft("");
+      return;
+    }
     if (
       (!text.trim() && !attachments.length) ||
       !project ||
@@ -591,9 +632,11 @@ export function ChatPane({
         <SkillSlash
           ref={slash}
           skills={skills}
+          modes={modeCommands}
           text={draft}
           caret={caret}
           onPick={pickSkill}
+          onMode={pickMode}
           onCreate={onOpenSkills}
         />
         {connected?.blockReason && (
