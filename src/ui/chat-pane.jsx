@@ -922,7 +922,7 @@ export function ChatPane({
               aria-label="Send message"
               title={
                 chat?.activeRun
-                  ? "Queues until this turn finishes. Start with /steer to redirect it."
+                  ? "Queues until this turn finishes. Include /steer to redirect it."
                   : "Send message"
               }
               disabled={

@@ -16,7 +16,6 @@ import {
   deleteSkill,
   dropCommand,
   invokedSkills,
-  leadingMode,
   prepareMessage,
   listSkills,
   skillInstructions,
@@ -290,23 +289,45 @@ test("skill routes create, edit and delete, and publish the slash command", asyn
   }
 });
 
-test("/ask, /plan, /goal and /default at the start of a message switch the mode", () => {
-  assert.deepEqual(leadingMode("/ask How does the queue work?"), {
+test("/ask, /plan, /goal and /default anywhere in a message switch the mode", () => {
+  const mode = (text) => {
+    const { mode, text: rest } = prepareMessage(text);
+    return { mode, text: rest };
+  };
+  assert.deepEqual(mode("/ask How does the queue work?"), {
     mode: "ask",
     text: "How does the queue work?",
   });
-  assert.deepEqual(leadingMode("/plan Add a login page"), {
+  assert.deepEqual(mode("/plan Add a login page"), {
     mode: "plan",
     text: "Add a login page",
   });
-  assert.deepEqual(leadingMode("  /Goal\nAll tests pass"), {
+  assert.deepEqual(mode("  /Goal\nAll tests pass"), {
     mode: "goal",
     text: "All tests pass",
   });
-  assert.deepEqual(leadingMode("/default"), { mode: "default", text: "" });
-  assert.equal(leadingMode("/planning notes"), null);
-  assert.equal(leadingMode("Make a /plan first"), null);
-  assert.equal(leadingMode("/review-notes now"), null);
+  assert.deepEqual(mode("/default"), { mode: "default", text: "" });
+  assert.deepEqual(mode("Make a /plan first"), {
+    mode: "plan",
+    text: "Make a first",
+  });
+  assert.deepEqual(mode("What now? /ask"), { mode: "ask", text: "What now?" });
+  assert.deepEqual(mode("Try /ask then /plan it"), {
+    mode: "plan",
+    text: "Try then it",
+  });
+  assert.deepEqual(mode("/planning notes"), {
+    mode: null,
+    text: "/planning notes",
+  });
+  assert.deepEqual(mode("Open src/plan now"), {
+    mode: null,
+    text: "Open src/plan now",
+  });
+  assert.deepEqual(mode("Do /review-notes /plan"), {
+    mode: "plan",
+    text: "Do /review-notes",
+  });
   assert.deepEqual(prepareMessage("/steer /ask check this"), {
     delivery: "steer",
     mode: "ask",
@@ -322,7 +343,11 @@ test("/ask, /plan, /goal and /default at the start of a message switch the mode"
     mode: null,
     text: "",
   });
-  assert.equal(prepareMessage("Please /steer this").delivery, null);
+  assert.deepEqual(prepareMessage("Please /steer this"), {
+    delivery: "steer",
+    mode: null,
+    text: "Please this",
+  });
   assert.deepEqual(
     invokedSkills(
       [

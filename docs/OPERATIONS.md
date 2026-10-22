@@ -39,7 +39,8 @@ when permissions are Override. Claude Code is limited to read and search tools.
 **Plan** researches and proposes a plan. One **Confirm and build** button accepts
 it and returns the chat to Default so the plan can be built. **Goal** keeps Codex or Claude Code working until the
 message's condition is met. Cursor has no goal mode. `/ask`, `/plan`, `/goal`,
-and `/default` at the start of a message switch modes the same way.
+and `/default` anywhere in a message switch modes the same way. `/queue` and
+`/steer` work anywhere too.
 
 In Goal the agent stays in Goal until the condition is met. It does not suggest
 another mode, and carrying out a plan does not leave Goal. Permission requests

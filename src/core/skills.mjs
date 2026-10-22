@@ -204,35 +204,25 @@ export function dropCommand(text, caret) {
   };
 }
 
-// A message that opens with /ask, /plan, /goal or /default switches to that mode,
-// and the rest of the message is sent in it.
-export function leadingMode(text) {
-  const match = String(text ?? "").match(/^\s*\/([a-z]+)(?:$|\s+)/i);
-  const entry = match && modeFor(match[1]);
-  return entry
-    ? { mode: entry.mode, text: String(text).slice(match[0].length) }
-    : null;
-}
-
-// A message that opens with /queue or /steer says when to deliver the rest.
-export function leadingDelivery(text) {
-  const match = String(text ?? "").match(/^\s*\/(queue|steer)(?:$|\s+)/i);
-  const entry = match && deliveryFor(match[1]);
-  return entry
-    ? { delivery: entry.command, text: String(text).slice(match[0].length) }
-    : null;
-}
-
-// Delivery first, then a mode command, so /steer /ask still changes mode.
+// /ask, /plan, /goal and /default switch the mode, and /queue or /steer say when
+// to deliver the message. Each works as its own word anywhere in the message
+// and is removed from the text. The last of each kind wins. A path such as
+// src/plan does not count.
 export function prepareMessage(text) {
-  const delivery = leadingDelivery(text);
-  const body = delivery ? delivery.text : String(text ?? "");
-  const mode = leadingMode(body);
-  return {
-    delivery: delivery?.delivery ?? null,
-    mode: mode?.mode ?? null,
-    text: mode ? mode.text : body,
-  };
+  let delivery = null,
+    mode = null;
+  const rest = String(text ?? "").replace(
+    /(^|\s)\/([a-z]+)(?=$|\s)/gi,
+    (match, lead, word) => {
+      const modeEntry = modeFor(word),
+        deliveryEntry = !modeEntry && deliveryFor(word);
+      if (!modeEntry && !deliveryEntry) return match;
+      if (modeEntry) mode = modeEntry.mode;
+      else delivery = deliveryEntry.command;
+      return lead.includes("\n") ? lead : "";
+    },
+  );
+  return { delivery, mode, text: delivery || mode ? rest.trim() : rest };
 }
 
 // Skills whose /command appears as its own word. A path such as src/review-notes
