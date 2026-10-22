@@ -61,6 +61,22 @@ export class Store {
       CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT NOT NULL, file TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS runs_conversation ON runs(conversation_id,created_at);
       CREATE INDEX IF NOT EXISTS approvals_conversation ON approvals(conversation_id,status);
+      CREATE TABLE IF NOT EXISTS queued_inputs(
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        action_id TEXT NOT NULL UNIQUE,
+        text TEXT NOT NULL,
+        attachments TEXT NOT NULL DEFAULT '[]',
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        effort TEXT,
+        permissions TEXT,
+        mode TEXT,
+        status TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS queued_inputs_conversation ON queued_inputs(conversation_id, position);
     `);
     const columns = (table) =>
       this.db
@@ -401,6 +417,129 @@ export class Store {
       .prepare("SELECT * FROM runs WHERE action_id=?")
       .get(actionId);
   }
+  parseQueued(row) {
+    return row && { ...row, attachments: JSON.parse(row.attachments) };
+  }
+  inputForAction(actionId) {
+    return this.parseQueued(
+      this.db
+        .prepare("SELECT * FROM queued_inputs WHERE action_id=?")
+        .get(actionId),
+    );
+  }
+  queuedInput(id) {
+    return this.parseQueued(
+      this.db.prepare("SELECT * FROM queued_inputs WHERE id=?").get(id),
+    );
+  }
+  queuedInputs(conversationId) {
+    return this.db
+      .prepare(
+        "SELECT * FROM queued_inputs WHERE conversation_id=? AND status='queued' ORDER BY position, rowid",
+      )
+      .all(conversationId)
+      .map((row) => this.parseQueued(row));
+  }
+  enqueueInput({
+    conversationId,
+    actionId,
+    text,
+    attachments = [],
+    provider,
+    model,
+    effort = null,
+    permissions = null,
+    mode = null,
+    status = "queued",
+    position = null,
+  }) {
+    const existing = this.inputForAction(actionId);
+    if (existing) return { ...existing, duplicate: true };
+    const id = randomUUID(),
+      place =
+        position ??
+        this.db
+          .prepare(
+            "SELECT COALESCE(MAX(position), 0) AS n FROM queued_inputs WHERE conversation_id=?",
+          )
+          .get(conversationId).n + 1;
+    this.db
+      .prepare(
+        `INSERT INTO queued_inputs(id,conversation_id,action_id,text,attachments,provider,model,effort,permissions,mode,status,position,created_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        id,
+        conversationId,
+        actionId,
+        text,
+        JSON.stringify(attachments),
+        provider,
+        model,
+        effort,
+        permissions,
+        mode,
+        status,
+        place,
+        this.now(),
+      );
+    return this.inputForAction(actionId);
+  }
+  // An undelivered steer goes ahead of messages that were already waiting.
+  requeueInput(id) {
+    const row = this.queuedInput(id);
+    if (!row || row.status !== "steered") return null;
+    const front = this.db
+      .prepare(
+        "SELECT COALESCE(MIN(position), 1) AS n FROM queued_inputs WHERE conversation_id=? AND status='queued'",
+      )
+      .get(row.conversation_id).n;
+    this.db
+      .prepare(
+        "UPDATE queued_inputs SET status='queued', position=? WHERE id=?",
+      )
+      .run(front - 1, id);
+    return this.queuedInput(id);
+  }
+  claimNextQueued(conversationId) {
+    const row = this.db
+      .prepare(
+        "SELECT * FROM queued_inputs WHERE conversation_id=? AND status='queued' ORDER BY position, rowid LIMIT 1",
+      )
+      .get(conversationId);
+    if (!row) return null;
+    this.db.prepare("DELETE FROM queued_inputs WHERE id=?").run(row.id);
+    return this.parseQueued(row);
+  }
+  deleteQueued(id) {
+    const row = this.queuedInput(id);
+    if (!row || row.status !== "queued") return null;
+    this.db.prepare("DELETE FROM queued_inputs WHERE id=?").run(id);
+    return row;
+  }
+  restoreQueued(row) {
+    this.db
+      .prepare(
+        `INSERT INTO queued_inputs(id,conversation_id,action_id,text,attachments,provider,model,effort,permissions,mode,status,position,created_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        row.id,
+        row.conversation_id,
+        row.action_id,
+        row.text,
+        JSON.stringify(row.attachments ?? []),
+        row.provider,
+        row.model,
+        row.effort,
+        row.permissions,
+        row.mode,
+        "queued",
+        row.position,
+        row.created_at,
+      );
+    return this.queuedInput(row.id);
+  }
   activeRun(conversationId) {
     return this.db
       .prepare(
@@ -690,6 +829,7 @@ export class Store {
       ...this.conversation(id),
       messages: this.messages(id),
       activeRun: this.activeRun(id),
+      queue: this.queuedInputs(id),
       approvals: this.pendingApprovals(id),
       comments: this.comments(id),
       artifacts: this.db

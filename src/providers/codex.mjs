@@ -155,14 +155,16 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
   let turnId,
     threadId,
     finished = false,
+    steerOpen = false,
     rejectDone,
     resolveDone,
     polling = false,
     killTimer,
-    // A goal runs turn after turn until Codex marks it met, blocked or paused.
-    goalStatus = null,
-    goalWait,
-    onTurnStarted;
+    // A steer waits here until the open turn can be interrupted.
+    steerHold = null;
+  const steers = [];
+  // A goal runs turn after turn until Codex marks it met, blocked or paused.
+  ((goalStatus = null), goalWait, onTurnStarted);
   const goal = ctx.mode === "goal";
   const done = new Promise((resolve, reject) => {
     resolveDone = resolve;
@@ -177,6 +179,37 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
         resolve(true);
       };
     });
+  // One app-server turn takes one input. Steering interrupts that turn and
+  // starts the next on the same thread, so the session stays open. Stop uses
+  // the abort signal; this path does not.
+  const startSteeredTurn = async (item) => {
+    const mode = item.mode ?? ctx.mode;
+    const start = await rpc.call("turn/start", {
+      threadId,
+      model: ctx.model,
+      effort: ctx.effort || undefined,
+      serviceTierForTurn: "default",
+      collaborationMode: {
+        mode: codexCollaboration(mode),
+        settings: {
+          model: ctx.model,
+          reasoning_effort: ctx.effort || null,
+          developer_instructions: null,
+        },
+      },
+      input: [{ type: "text", text: item.text }],
+    });
+    turnId = start.turn.id;
+  };
+  const pumpSteer = () => {
+    if (steerHold || !turnId || !threadId || ctx.signal.aborted || finished)
+      return;
+    steerHold = steers.shift() ?? null;
+    if (!steerHold) return;
+    rpc.call("turn/interrupt", { threadId, turnId }).catch((error) => {
+      if (!finished) rejectDone(error);
+    });
+  };
   const cancel = async () => {
     killTimer ??= setTimeout(() => rpc.close(), 8000);
     // Stopping pauses the goal, as interrupting it does in Codex.
@@ -291,6 +324,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       clearTimeout(goalWait);
       onTurnStarted?.();
       ctx.emit("nativeTurn", { id: turnId });
+      pumpSteer();
     }
     if (method === "item/agentMessage/delta")
       ctx.emit("text", { nativeId: p.itemId, delta: p.delta });
@@ -356,6 +390,14 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       ctx.emit("work", { kind: "token-usage", ...p });
     if (method === "error") ctx.emit("work", { kind: "error", error: p.error });
     if (method === "turn/completed") {
+      if (!ctx.signal.aborted && !finished && (steerHold || steers.length)) {
+        const item = steerHold ?? steers.shift();
+        steerHold = null;
+        startSteeredTurn(item).catch((error) => {
+          if (!finished) rejectDone(error);
+        });
+        return;
+      }
       const finish = () => {
         finished = true;
         resolveDone({ status: p.turn.status, error: p.turn.error });
@@ -407,6 +449,13 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       });
     threadId = response.thread.id;
     ctx.saveSession({ id: threadId });
+    steerOpen = true;
+    ctx.attachSteer?.((item) => {
+      if (!steerOpen || finished || ctx.signal.aborted)
+        throw new Error("Codex's turn has ended");
+      steers.push(item);
+      pumpSteer();
+    });
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");
     // Setting a goal can start its first turn; start one only if it did not.
@@ -477,6 +526,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     return await done;
   } finally {
     finished = true;
+    steerOpen = false;
     clearInterval(timer);
     clearTimeout(killTimer);
     clearTimeout(goalWait);

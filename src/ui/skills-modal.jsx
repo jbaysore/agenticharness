@@ -68,10 +68,10 @@ export function SkillsModal({ skills, onSaved, onClose }) {
     <Modal title="Skills" wide onClose={onClose}>
       <p>
         A skill is a name and instructions. In a message, type its slash
-        command, such as /review-notes, and that message includes the full
-        text, for Codex, Claude Code and Cursor. A long skill spends included
-        usage each time you invoke it. Text that every chat should always see
-        belongs in Agent rules.
+        command, such as /review-notes, and that message includes the full text,
+        for Codex, Claude Code and Cursor. A long skill spends included usage
+        each time you invoke it. Text that every chat should always see belongs
+        in Agent rules.
       </p>
       <form
         className="rules-form"
@@ -91,15 +91,15 @@ export function SkillsModal({ skills, onSaved, onClose }) {
               aria-label="Skill name"
               maxLength={MAX_NAME}
               value={name}
-            placeholder="For example: Review notes"
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <p className="muted small">
-          {/^[a-z]/.test(skillCommand(name))
-            ? `Slash command: /${skillCommand(name)}`
-            : "The name needs a letter so it can be a /command."}
-        </p>
+              placeholder="For example: Review notes"
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <p className="muted small">
+            {/^[a-z]/.test(skillCommand(name))
+              ? `Slash command: /${skillCommand(name)}`
+              : "The name needs a letter so it can be a /command."}
+          </p>
           <label>
             Instructions
             <textarea
@@ -113,9 +113,7 @@ export function SkillsModal({ skills, onSaved, onClose }) {
           <div className="skill-actions">
             <button
               className="primary"
-              disabled={
-                saving || (!editing && skills.length >= MAX_SKILLS)
-              }
+              disabled={saving || (!editing && skills.length >= MAX_SKILLS)}
             >
               {saving ? "Saving…" : editing ? "Save skill" : "Create skill"}
             </button>
@@ -187,6 +185,7 @@ export function SkillSlash({
   ref,
   skills,
   modes = [],
+  commands = [],
   text,
   caret,
   onPick,
@@ -197,6 +196,10 @@ export function SkillSlash({
     key = token ? `${token.start}:${token.query}` : "";
   const matches = token
     ? [
+        ...commands.map((entry) => ({
+          ...entry,
+          id: "delivery:" + entry.command,
+        })),
         ...modes.map((entry) => ({
           ...entry,
           id: "mode:" + entry.command,
@@ -205,7 +208,7 @@ export function SkillSlash({
         ...skills,
       ]
         .filter((item) => item.command.startsWith(token.query))
-        .slice(0, 8)
+        .slice(0, 10)
     : [];
   const choose = (item) =>
     item.isMode ? onMode(item.mode) : onPick(item.command);
@@ -245,25 +248,27 @@ export function SkillSlash({
   return (
     <div className="slash-menu" role="listbox" aria-label="Skills and modes">
       {matches.map((skill, index) => (
-          <button
-            type="button"
-            role="option"
-            aria-selected={index === highlight}
-            key={skill.id}
-            className={index === highlight ? "active" : ""}
-            title={skill.description ?? skill.instructions}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              choose(skill);
-            }}
-            onMouseEnter={() => setHighlight(index)}
-          >
-            <strong>/{skill.command}</strong>
-            <span>{skill.name}</span>
-          </button>
+        <button
+          type="button"
+          role="option"
+          aria-selected={index === highlight}
+          key={skill.id}
+          className={index === highlight ? "active" : ""}
+          title={skill.description ?? skill.instructions}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            choose(skill);
+          }}
+          onMouseEnter={() => setHighlight(index)}
+        >
+          <strong>/{skill.command}</strong>
+          <span>{skill.name}</span>
+        </button>
       ))}
       {!matches.some((item) => !item.isMode) && (
-        <p>{skills.length ? `No skill for /${token.query}.` : "No skills yet."}</p>
+        <p>
+          {skills.length ? `No skill for /${token.query}.` : "No skills yet."}
+        </p>
       )}
       <button
         type="button"

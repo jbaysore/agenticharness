@@ -15,10 +15,11 @@ import { ModelPicker } from "./model-picker.jsx";
 import { DirectoryPicker } from "./directory-picker.jsx";
 import { SkillSlash } from "./skills-modal.jsx";
 import {
+  DELIVERY_COMMANDS,
   MODE_COMMANDS,
   applyCommand,
   dropCommand,
-  leadingMode,
+  prepareMessage,
 } from "../core/skills.mjs";
 import {
   chatMarker,
@@ -38,7 +39,10 @@ function Conversation({ chat, onOpenWork }) {
   for (const m of chat.messages) {
     const last = turns.at(-1);
     if (m.role !== "assistant") turns.push({ user: m });
-    else if (last?.replies && (last.replies[0].run_id ?? null) === (m.run_id ?? null))
+    else if (
+      last?.replies &&
+      (last.replies[0].run_id ?? null) === (m.run_id ?? null)
+    )
       last.replies.push(m);
     else turns.push({ replies: [m] });
   }
@@ -49,7 +53,10 @@ function Conversation({ chat, onOpenWork }) {
       model = first.model !== lastModel ? first.model : null;
     lastModel = first.model;
     const active = !!first.run_id && chat.activeRun?.id === first.run_id,
-      parts = interleave(replies, first.run_id ? chat.steps?.[first.run_id] : []),
+      parts = interleave(
+        replies,
+        first.run_id ? chat.steps?.[first.run_id] : [],
+      ),
       lastWork = parts.findLastIndex((part) => part.steps.length);
     return (
       <article
@@ -61,7 +68,10 @@ function Conversation({ chat, onOpenWork }) {
           <span className={"provider-dot " + first.provider} />
           <strong>{providerName(first.provider)}</strong>
           {model && <span>{model}</span>}
-          <a href={`/?chat=${chat.id}#${first.id}`} title="Link to this message">
+          <a
+            href={`/?chat=${chat.id}#${first.id}`}
+            title="Link to this message"
+          >
             <Icon name="link" size={13} />
           </a>
         </div>
@@ -328,15 +338,21 @@ export function ChatPane({
     field?.setSelectionRange(next.cursor, next.cursor);
   }
   // /ask, /plan, /goal and /default switch the chat's mode, as the mode menu does.
-  const modeCommands = chat?.activeRun
-    ? []
-    : MODE_COMMANDS.filter(
-        (entry) => !(provider === "cursor" && entry.mode === "goal"),
-      ).map((entry) => ({
-        ...entry,
-        description: chatModes.find(([id]) => id === entry.mode)[2],
-      }));
+  // During a turn they stay in the draft, so they apply to the queued message.
+  const modeCommands = MODE_COMMANDS.filter(
+    (entry) => !(provider === "cursor" && entry.mode === "goal"),
+  ).map((entry) => ({
+    ...entry,
+    description: chatModes.find(([id]) => id === entry.mode)[2],
+  }));
   function pickMode(next) {
+    if (chat?.activeRun) {
+      const command = MODE_COMMANDS.find(
+        (entry) => entry.mode === next,
+      )?.command;
+      if (command) pickSkill(command);
+      return;
+    }
     const field = input.current;
     const left = dropCommand(
       field?.value ?? draft,
@@ -434,28 +450,29 @@ export function ChatPane({
   }
   async function send(override, turnMode = mode) {
     const text = typeof override === "string" ? override : draft;
-    const switched = typeof override === "string" ? null : leadingMode(text);
-    if (switched) {
-      if (provider === "cursor" && switched.mode === "goal") {
-        report(new Error("Cursor has no goal mode. Choose Codex or Claude Code."));
+    const prepared = prepareMessage(text);
+    const hasBody = !!prepared.text.trim() || attachments.length > 0;
+    // /ask alone switches mode. /queue or /steer alone does nothing.
+    if (!hasBody) {
+      if (prepared.delivery || !prepared.mode) return;
+      if (busy || modeBusy || chat?.activeRun) return;
+      if (provider === "cursor" && prepared.mode === "goal") {
+        report(
+          new Error("Cursor has no goal mode. Choose Codex or Claude Code."),
+        );
         return;
       }
-      if (busy || modeBusy || chat?.activeRun) return;
-      if (switched.mode !== mode) await changeMode(switched.mode);
-      if (switched.text.trim() || attachments.length)
-        await send(switched.text, switched.mode);
-      else setDraft("");
+      if (prepared.mode !== mode) await changeMode(prepared.mode);
+      setDraft("");
       return;
     }
     if (
-      (!text.trim() && !attachments.length) ||
       !project ||
       busy ||
       sending.current ||
       uploadingRef.current ||
       permissionsBusy ||
       modeBusy ||
-      chat?.activeRun ||
       !model ||
       (selectedModel?.efforts?.length && !effort)
     )
@@ -720,12 +737,32 @@ export function ChatPane({
           ref={slash}
           skills={skills}
           modes={modeCommands}
+          commands={DELIVERY_COMMANDS}
           text={draft}
           caret={caret}
           onPick={pickSkill}
           onMode={pickMode}
           onCreate={onOpenSkills}
         />
+        {chat?.queue?.length > 0 && (
+          <ul className="queued-messages" aria-label="Queued messages">
+            {chat.queue.map((item) => (
+              <li key={item.id}>
+                <span>{item.text || "Attachment"}</span>
+                <button
+                  type="button"
+                  className="text-button"
+                  aria-label="Remove queued message"
+                  onClick={act(() =>
+                    api(`/api/chats/${chat.id}/queue/${item.id}`, {}, "DELETE"),
+                  )}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         {connected?.blockReason && (
           <button className="billing-notice" onClick={onOpenConnections}>
             <span className="status-dot warning" />
@@ -786,9 +823,11 @@ export function ChatPane({
             ref={input}
             aria-label="Message your coding agent"
             placeholder={
-              project
-                ? `Ask ${providerName(provider)} anything…`
-                : "Add a project to start a conversation…"
+              !project
+                ? "Add a project to start a conversation…"
+                : chat?.activeRun
+                  ? "Queues until this turn finishes. /steer redirects it…"
+                  : `Ask ${providerName(provider)} anything…`
             }
             value={draft}
             onChange={(e) => {
@@ -850,7 +889,7 @@ export function ChatPane({
               onOpenConnections={onOpenConnections}
             />
             <span className="composer-spacer" />
-            {chat?.activeRun ? (
+            {chat?.activeRun && (
               <button
                 type="button"
                 className="send-button stopping"
@@ -859,25 +898,29 @@ export function ChatPane({
               >
                 <Icon name="stop" size={16} />
               </button>
-            ) : (
-              <button
-                className="send-button"
-                aria-label="Send message"
-                disabled={
-                  busy ||
-                  uploading ||
-                  permissionsBusy ||
-                  modeBusy ||
-                  (!draft.trim() && !attachments.length) ||
-                  !project ||
-                  !model ||
-                  (selectedModel?.efforts?.length && !effort) ||
-                  !!connected?.blockReason
-                }
-              >
-                <Icon name="arrow" size={18} />
-              </button>
             )}
+            <button
+              className="send-button"
+              aria-label="Send message"
+              title={
+                chat?.activeRun
+                  ? "Queues until this turn finishes. Start with /steer to redirect it."
+                  : "Send message"
+              }
+              disabled={
+                busy ||
+                uploading ||
+                permissionsBusy ||
+                modeBusy ||
+                (!draft.trim() && !attachments.length) ||
+                !project ||
+                !model ||
+                (selectedModel?.efforts?.length && !effort) ||
+                !!connected?.blockReason
+              }
+            >
+              <Icon name="arrow" size={18} />
+            </button>
           </div>
         </form>
         <div className="composer-footer">

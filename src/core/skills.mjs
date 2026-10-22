@@ -15,8 +15,23 @@ export const MODE_COMMANDS = [
   { command: "plan", mode: "plan", name: "Plan mode" },
   { command: "goal", mode: "goal", name: "Goal mode" },
 ];
+// /queue waits for the current turn. /steer redirects that turn.
+export const DELIVERY_COMMANDS = [
+  {
+    command: "queue",
+    name: "Queue",
+    description: "Send this after the current turn finishes",
+  },
+  {
+    command: "steer",
+    name: "Steer",
+    description: "Redirect the turn that is running now",
+  },
+];
 const modeFor = (command) =>
   MODE_COMMANDS.find((entry) => entry.command === command.toLowerCase());
+const deliveryFor = (command) =>
+  DELIVERY_COMMANDS.find((entry) => entry.command === command.toLowerCase());
 
 // "Review notes" becomes /review-notes. Letters and digits stay; the rest
 // becomes a single hyphen, so the command is something a person can type.
@@ -61,9 +76,7 @@ function nameOf(name) {
     .replace(/\s+/g, " ");
   if (!text) throw new Error("Give the skill a name");
   if (text.length > MAX_NAME)
-    throw new Error(
-      `A skill name can be at most ${MAX_NAME} characters`,
-    );
+    throw new Error(`A skill name can be at most ${MAX_NAME} characters`);
   if (!/^[a-z][a-z0-9-]*$/.test(skillCommand(text)))
     throw new Error(
       "Use a name that starts with a letter, so it can be a /command",
@@ -71,6 +84,10 @@ function nameOf(name) {
   if (modeFor(skillCommand(text)))
     throw new Error(
       `/${skillCommand(text)} switches the chat's mode, so a skill cannot use that name`,
+    );
+  if (deliveryFor(skillCommand(text)))
+    throw new Error(
+      `/${skillCommand(text)} sends a message now or later, so a skill cannot use that name`,
     );
   return text;
 }
@@ -170,7 +187,8 @@ export function applyCommand(text, caret, command) {
   if (!token) return { text, cursor: caret ?? 0 };
   const insert = "/" + command + " ";
   return {
-    text: String(text).slice(0, token.start) + insert + String(text).slice(caret),
+    text:
+      String(text).slice(0, token.start) + insert + String(text).slice(caret),
     cursor: token.start + insert.length,
   };
 }
@@ -194,6 +212,27 @@ export function leadingMode(text) {
   return entry
     ? { mode: entry.mode, text: String(text).slice(match[0].length) }
     : null;
+}
+
+// A message that opens with /queue or /steer says when to deliver the rest.
+export function leadingDelivery(text) {
+  const match = String(text ?? "").match(/^\s*\/(queue|steer)(?:$|\s+)/i);
+  const entry = match && deliveryFor(match[1]);
+  return entry
+    ? { delivery: entry.command, text: String(text).slice(match[0].length) }
+    : null;
+}
+
+// Delivery first, then a mode command, so /steer /ask still changes mode.
+export function prepareMessage(text) {
+  const delivery = leadingDelivery(text);
+  const body = delivery ? delivery.text : String(text ?? "");
+  const mode = leadingMode(body);
+  return {
+    delivery: delivery?.delivery ?? null,
+    mode: mode?.mode ?? null,
+    text: mode ? mode.text : body,
+  };
 }
 
 // Skills whose /command appears as its own word. A path such as src/review-notes

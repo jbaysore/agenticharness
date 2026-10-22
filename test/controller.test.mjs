@@ -356,3 +356,178 @@ for (const stop of ["cancel", "close"])
       store.close();
     }
   });
+
+test("a follow-up queues until the turn ends, and /steer redirects that turn", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  const { createSkill } = await import("../src/core/skills.mjs");
+  createSkill(store, {
+    name: "Review notes",
+    instructions: "Write the decision down.",
+  });
+  const project = store.addProject("fixture", "C:\\queue-steer"),
+    chat = store.createConversation({
+      projectId: project.id,
+      provider: "codex",
+      model: "m",
+    });
+  const steered = [];
+  let holds = 0,
+    release;
+  controller.runners.codex = async (ctx) => {
+    holds += 1;
+    ctx.attachSteer?.((item) => steered.push(item.text));
+    if (holds === 1)
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    return { status: "completed" };
+  };
+  try {
+    controller.send(chat.id, {
+      actionId: "queue-steer-first-message",
+      text: "Do the first thing",
+      provider: "codex",
+      model: "m",
+    });
+    while (!release) await new Promise((r) => setTimeout(r, 5));
+    const queued = controller.send(chat.id, {
+      actionId: "queue-steer-second-message",
+      text: "Then do the second thing",
+      provider: "codex",
+      model: "m",
+    });
+    assert.equal(queued.queued, true);
+    assert.equal(queued.text, "Then do the second thing");
+    assert.equal(
+      controller.send(chat.id, {
+        actionId: "queue-steer-second-message",
+        text: "Then do the second thing",
+        provider: "codex",
+        model: "m",
+      }).duplicate,
+      true,
+    );
+    const explicit = controller.send(chat.id, {
+      actionId: "queue-steer-explicit-queue",
+      text: "/queue /ask Look only",
+      provider: "codex",
+      model: "m",
+    });
+    assert.equal(explicit.text, "Look only");
+    assert.equal(explicit.mode, "ask");
+    assert.equal(store.conversation(chat.id).mode, "default");
+    controller.removeQueued(chat.id, explicit.id);
+    assert.equal(store.queuedInputs(chat.id).length, 1);
+    const redirected = controller.send(chat.id, {
+      actionId: "queue-steer-redirect-now",
+      text: "/steer /review-notes Focus on the parser",
+      provider: "codex",
+      model: "m",
+    });
+    assert.equal(redirected.steered, true);
+    assert.equal(steered.length, 1);
+    assert.match(steered[0], /Focus on the parser/);
+    assert.match(steered[0], /Skill: Review notes/);
+    assert.equal(
+      store
+        .messages(chat.id)
+        .filter((message) => message.role === "user")
+        .at(-1).content,
+      "/review-notes Focus on the parser",
+    );
+    assert.equal(
+      controller.send(chat.id, {
+        actionId: "queue-steer-redirect-now",
+        text: "/steer Again",
+        provider: "codex",
+        model: "m",
+      }).duplicate,
+      true,
+    );
+    assert.equal(steered.length, 1);
+    const firstTask = controller.active.get(chat.id).task;
+    release();
+    await firstTask;
+    const second = controller.active.get(chat.id);
+    assert.equal(
+      store
+        .messages(chat.id)
+        .find((message) => message.run_id === second.run.id).content,
+      "Then do the second thing",
+    );
+    await second.task;
+    assert.equal(store.queuedInputs(chat.id).length, 0);
+    const idle = controller.send(chat.id, {
+      actionId: "queue-steer-idle-steer",
+      text: "/steer Just send this",
+      provider: "codex",
+      model: "m",
+    });
+    assert.notEqual(idle.queued, true);
+    assert.notEqual(idle.steered, true);
+    await controller.active.get(chat.id).task;
+    assert.equal(
+      store.messages(chat.id).find((message) => message.run_id === idle.id)
+        .content,
+      "Just send this",
+    );
+    assert.throws(
+      () =>
+        controller.send(chat.id, {
+          actionId: "queue-steer-empty-command",
+          text: "/queue",
+          provider: "codex",
+          model: "m",
+        }),
+      /Enter a message/,
+    );
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+test("a saved queue waits through a restart until the next submit, oldest first", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  const chat = store.createConversation({
+    projectId: store.addProject("fixture", "C:\\queue-restart").id,
+    provider: "codex",
+    model: "m",
+  });
+  store.enqueueInput({
+    conversationId: chat.id,
+    actionId: "saved-queue-older-message",
+    text: "Older",
+    provider: "codex",
+    model: "m",
+    permissions: "auto",
+    mode: "default",
+  });
+  assert.equal(controller.active.size, 0);
+  const seen = [];
+  controller.runners.codex = async (ctx) => {
+    seen.push(ctx.text);
+    return { status: "completed" };
+  };
+  try {
+    const queued = controller.send(chat.id, {
+      actionId: "saved-queue-newer-message",
+      text: "Newer",
+      provider: "codex",
+      model: "m",
+    });
+    assert.equal(queued.queued, true);
+    assert.equal(queued.text, "Newer");
+    const deadline = Date.now() + 2000;
+    while (seen.length < 2 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(seen, ["Older", "Newer"]);
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});

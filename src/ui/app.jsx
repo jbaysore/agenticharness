@@ -442,7 +442,11 @@ function App() {
             [c.id]: { ...c, steps: { ...c.steps, [e.runId]: next } },
           };
         });
-      if (["run", "approval", "approval-resolved", "chat"].includes(e.type))
+      if (
+        ["run", "approval", "approval-resolved", "chat", "queue"].includes(
+          e.type,
+        )
+      )
         reload(e.conversationId).catch(report);
       window.dispatchEvent(new CustomEvent("harness-activity", { detail: e }));
     };

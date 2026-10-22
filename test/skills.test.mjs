@@ -17,6 +17,7 @@ import {
   dropCommand,
   invokedSkills,
   leadingMode,
+  prepareMessage,
   listSkills,
   skillInstructions,
   slashToken,
@@ -34,7 +35,10 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
   const store = new Store(":memory:");
   assert.deepEqual(listSkills(store), []);
   assert.equal(skillInstructions([]), "");
-  assert.throws(() => createSkill(store, { name: "  ", instructions: "x" }), /name/);
+  assert.throws(
+    () => createSkill(store, { name: "  ", instructions: "x" }),
+    /name/,
+  );
   assert.throws(
     () => createSkill(store, { name: "Notes", instructions: "  " }),
     /instructions/,
@@ -78,7 +82,15 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
       () => createSkill(store, { name, instructions: "x" }),
       /switches the chat's mode/,
     );
-  assert.equal(notes.instructions, "Write the decision down.\nKeep the source.");
+  for (const name of ["Queue", "Steer"])
+    assert.throws(
+      () => createSkill(store, { name, instructions: "x" }),
+      /cannot use that name/,
+    );
+  assert.equal(
+    notes.instructions,
+    "Write the decision down.\nKeep the source.",
+  );
   assert.throws(
     () => createSkill(store, { name: "review notes", instructions: "Again." }),
     /already exists/,
@@ -96,7 +108,10 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
       }),
     /already exists/,
   );
-  assert.throws(() => updateSkill(store, "missing", { name: "A", instructions: "B" }), /no longer exists/);
+  assert.throws(
+    () => updateSkill(store, "missing", { name: "A", instructions: "B" }),
+    /no longer exists/,
+  );
   const listed = listSkills(store);
   assert.deepEqual(
     invokedSkills(listed, "/decisions look at src/release-notes").map(
@@ -111,7 +126,10 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
     ["release-notes", "decisions"],
   );
   assert.deepEqual(invokedSkills(listed, "no command here"), []);
-  assert.match(skillInstructions(invokedSkills(listed, "/decisions")), /Skill: Decisions/);
+  assert.match(
+    skillInstructions(invokedSkills(listed, "/decisions")),
+    /Skill: Decisions/,
+  );
   const token = slashToken("Please /rev", "Please /rev".length);
   assert.equal(token.query, "rev");
   assert.equal(
@@ -123,7 +141,9 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
   assert.throws(() => deleteSkill(store, notes.id), /no longer exists/);
   const many = [other];
   for (let i = 1; i <= MAX_PER_CHAT; i++)
-    many.push(createSkill(store, { name: "Skill " + i, instructions: "Do " + i }));
+    many.push(
+      createSkill(store, { name: "Skill " + i, instructions: "Do " + i }),
+    );
   assert.equal(
     invokedSkills(
       listSkills(store),
@@ -247,7 +267,11 @@ test("skill routes create, edit and delete, and publish the slash command", asyn
     );
     assert.equal(clash.status, 400);
     assert.match(clash.body.error, /slash command/);
-    const removed = await call("/api/skills/" + created.body.id, undefined, "DELETE");
+    const removed = await call(
+      "/api/skills/" + created.body.id,
+      undefined,
+      "DELETE",
+    );
     assert.equal(removed.status, 200);
     assert.deepEqual((await call("/api/state")).body.skills, []);
     const exported = await call("/api/export");
@@ -275,6 +299,36 @@ test("/ask, /plan, /goal and /default at the start of a message switch the mode"
   assert.equal(leadingMode("/planning notes"), null);
   assert.equal(leadingMode("Make a /plan first"), null);
   assert.equal(leadingMode("/review-notes now"), null);
+  assert.deepEqual(prepareMessage("/steer /ask check this"), {
+    delivery: "steer",
+    mode: "ask",
+    text: "check this",
+  });
+  assert.deepEqual(prepareMessage("/queue Later please"), {
+    delivery: "queue",
+    mode: null,
+    text: "Later please",
+  });
+  assert.deepEqual(prepareMessage("  /Steer"), {
+    delivery: "steer",
+    mode: null,
+    text: "",
+  });
+  assert.equal(prepareMessage("Please /steer this").delivery, null);
+  assert.deepEqual(
+    invokedSkills(
+      [
+        {
+          id: "1",
+          command: "review-notes",
+          name: "Review notes",
+          instructions: "Write it down.",
+        },
+      ],
+      prepareMessage("/steer /review-notes Focus").text,
+    ).map((skill) => skill.name),
+    ["Review notes"],
+  );
   assert.deepEqual(dropCommand("/pl", 3), { text: "", cursor: 0 });
   assert.deepEqual(dropCommand("Fix it /pl now", 10), {
     text: "Fix it now",

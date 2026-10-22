@@ -34,7 +34,12 @@ import {
   hostToolsForMode,
   modeSuggestionTool,
 } from "./modes.mjs";
-import { invokedSkills, listSkills, skillInstructions } from "./skills.mjs";
+import {
+  invokedSkills,
+  listSkills,
+  prepareMessage,
+  skillInstructions,
+} from "./skills.mjs";
 import { isDelegationTool, offeredTools } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
@@ -151,7 +156,25 @@ export class Controller extends EventEmitter {
     }
     return next;
   }
-  send(
+  send(chatId, input, releasing = false) {
+    const prepared = this.prepareSend(chatId, input);
+    if (prepared.duplicate) return prepared.duplicate;
+    const active = this.active.get(chatId);
+    // A running turn keeps the message until it finishes, unless /steer
+    // redirects that turn. A stopped turn still drains its queue afterward.
+    if (active && !releasing) {
+      if (prepared.delivery === "steer" && !active.cancelled)
+        return this.steer(prepared);
+      return this.enqueue(prepared);
+    }
+    if (!releasing && this.store.queuedInputs(chatId).length) {
+      const row = this.enqueue(prepared);
+      this.releaseQueue(chatId);
+      return { ...row, queued: true };
+    }
+    return this.startTurn(prepared);
+  }
+  prepareSend(
     chatId,
     {
       actionId,
@@ -162,6 +185,7 @@ export class Controller extends EventEmitter {
       effort,
       permissions,
       mode,
+      parsed = false,
     },
   ) {
     const chat = this.store.conversation(chatId);
@@ -175,13 +199,30 @@ export class Controller extends EventEmitter {
     permissions ??= chat.permissions;
     if (!PERMISSION_MODES.includes(permissions))
       throw new Error("Choose auto-review, manual review or override");
-    mode ??= chat.mode;
+    const opened = parsed
+      ? { delivery: null, mode: null, text: String(text) }
+      : prepareMessage(text);
+    const body = opened.text.trim();
+    mode = opened.mode ?? mode ?? chat.mode;
     checkMode(mode, provider);
     const prior = this.store.runForAction(actionId);
     if (prior) {
       if (prior.conversation_id !== chatId)
         throw new Error("Action ID belongs to another conversation");
-      return { ...prior, duplicate: true };
+      return { duplicate: { ...prior, duplicate: true } };
+    }
+    const existing = this.store.inputForAction(actionId);
+    if (existing) {
+      if (existing.conversation_id !== chatId)
+        throw new Error("Action ID belongs to another conversation");
+      return {
+        duplicate: {
+          ...existing,
+          duplicate: true,
+          queued: existing.status === "queued",
+          steered: existing.status === "steered",
+        },
+      };
     }
     const files = resolveAttachments(
       this.store,
@@ -189,10 +230,8 @@ export class Controller extends EventEmitter {
       attachments,
       this.dataDir,
     );
-    if (!text.trim() && !files.length)
+    if (!body && !files.length)
       throw new Error("Enter a message or attach a file");
-    if (this.active.has(chatId))
-      throw new Error("This chat already has active work");
     const selected = this.providers.find((p) => p.id === provider);
     if (!selected) throw new Error("Refresh provider connections first");
     if (selected.blockReason) throw new Error(selected.blockReason);
@@ -201,32 +240,188 @@ export class Controller extends EventEmitter {
       throw new Error("Select an available model");
     if (effort && !selectedModel.efforts.includes(effort))
       throw new Error("The selected model does not expose that effort setting");
-    const run = this.store.createRun({
-      conversationId: chatId,
+    return {
+      chat,
+      chatId,
       actionId,
-      provider,
-      model,
-      text: text.trim(),
-      attachments: files.map(attachmentInfo),
-    });
-    const abort = new AbortController();
-    this.active.set(chatId, { run, abort });
-    if (chat.archived_at) this.store.setArchived(chatId, false);
-    this.store.updateConversation(chatId, {
+      text: body,
+      delivery: opened.delivery,
+      files,
       provider,
       model,
       effort: effort || null,
       permissions,
       mode,
+    };
+  }
+  startTurn(prepared) {
+    const { chat, chatId } = prepared;
+    if (this.active.has(chatId))
+      throw new Error("This chat already has active work");
+    const run = this.store.createRun({
+      conversationId: chatId,
+      actionId: prepared.actionId,
+      provider: prepared.provider,
+      model: prepared.model,
+      text: prepared.text,
+      attachments: prepared.files.map(attachmentInfo),
     });
-    this.event(chatId, run.id, "run", { status: "starting", provider, model });
-    const task = this.execute(run, text.trim(), effort, abort).catch(
+    const abort = new AbortController();
+    this.active.set(chatId, { run, abort, pendingSteers: [] });
+    const entry = this.active.get(chatId);
+    entry.flushSteer = () => this.flushSteers(chatId);
+    if (chat.archived_at) this.store.setArchived(chatId, false);
+    this.store.updateConversation(chatId, {
+      provider: prepared.provider,
+      model: prepared.model,
+      effort: prepared.effort,
+      permissions: prepared.permissions,
+      mode: prepared.mode,
+    });
+    this.event(chatId, run.id, "run", {
+      status: "starting",
+      provider: prepared.provider,
+      model: prepared.model,
+    });
+    const task = this.execute(run, prepared.text, prepared.effort, abort).catch(
       (error) => {
         this.event(chatId, run.id, "error", { message: error.message });
       },
     );
-    this.active.get(chatId).task = task;
+    entry.task = task;
     return run;
+  }
+  enqueue(prepared) {
+    const row = this.store.enqueueInput({
+      conversationId: prepared.chatId,
+      actionId: prepared.actionId,
+      text: prepared.text,
+      attachments: prepared.files.map(attachmentInfo),
+      provider: prepared.provider,
+      model: prepared.model,
+      effort: prepared.effort,
+      permissions: prepared.permissions,
+      mode: prepared.mode,
+    });
+    this.event(prepared.chatId, null, "queue", { id: row.id });
+    return { ...row, queued: true };
+  }
+  steer(prepared) {
+    const active = this.active.get(prepared.chatId);
+    if (!active || active.cancelled) return this.enqueue(prepared);
+    const skills = invokedSkills(listSkills(this.store), prepared.text);
+    const modeNote =
+      prepared.mode === "ask"
+        ? "\n\n" + ASK_INSTRUCTIONS
+        : prepared.mode === "plan"
+          ? "\n\nPlan mode: propose the work before changing anything. Do not change the project yet."
+          : "";
+    if (prepared.mode !== prepared.chat.mode)
+      this.setMode(prepared.chatId, prepared.mode);
+    const row = this.store.enqueueInput({
+      conversationId: prepared.chatId,
+      actionId: prepared.actionId,
+      text: prepared.text,
+      attachments: prepared.files.map(attachmentInfo),
+      provider: prepared.provider,
+      model: prepared.model,
+      effort: prepared.effort,
+      permissions: prepared.permissions,
+      mode: prepared.mode,
+      status: "steered",
+    });
+    active.pendingSteers ??= [];
+    active.pendingSteers.push({
+      id: row.id,
+      text:
+        prepared.text +
+        attachmentContext(prepared.files) +
+        skillInstructions(skills) +
+        modeNote,
+      displayText: prepared.text,
+      attachments: prepared.files.map(attachmentInfo),
+      mode: prepared.mode,
+      skills,
+      delivered: false,
+    });
+    active.flushSteer?.();
+    this.event(prepared.chatId, active.run.id, "queue", {
+      steered: true,
+      id: row.id,
+    });
+    return { ...row, steered: true };
+  }
+  flushSteers(chatId) {
+    const entry = this.active.get(chatId);
+    if (!entry?.deliverSteer) return;
+    let added = false;
+    for (const item of entry.pendingSteers ?? []) {
+      if (item.delivered) continue;
+      try {
+        entry.deliverSteer(item);
+      } catch {
+        continue;
+      }
+      item.delivered = true;
+      added = true;
+      this.store.addMessage({
+        conversationId: chatId,
+        runId: entry.run.id,
+        role: "user",
+        content: item.displayText,
+        attachments: item.attachments,
+      });
+      if (item.skills?.length)
+        this.event(chatId, entry.run.id, "work", {
+          kind: "skills",
+          item: {
+            title:
+              item.skills.length === 1
+                ? `Skill · ${item.skills[0].name}`
+                : `Skills · ${item.skills.map((skill) => skill.name).join(", ")}`,
+            description: "Invoked by a slash command in this message.",
+          },
+        });
+    }
+    if (added) this.event(chatId, entry.run.id, "queue", { steered: true });
+  }
+  requeuePending(entry) {
+    for (const item of [...(entry?.pendingSteers ?? [])].reverse())
+      if (!item.delivered) this.store.requeueInput(item.id);
+    if (entry) entry.pendingSteers = [];
+  }
+  releaseQueue(chatId) {
+    if (this.active.has(chatId)) return;
+    const next = this.store.claimNextQueued(chatId);
+    if (!next) return;
+    try {
+      this.send(
+        chatId,
+        {
+          actionId: next.action_id,
+          text: next.text,
+          attachments: (next.attachments ?? []).map((file) => file.id),
+          provider: next.provider,
+          model: next.model,
+          effort: next.effort,
+          permissions: next.permissions,
+          mode: next.mode,
+          parsed: true,
+        },
+        true,
+      );
+    } catch (error) {
+      this.store.restoreQueued(next);
+      this.event(chatId, null, "error", { message: error.message });
+    }
+  }
+  removeQueued(chatId, id) {
+    const row = this.store.queuedInput(id);
+    if (!row || row.conversation_id !== chatId || row.status !== "queued")
+      throw new Error("That queued message is no longer waiting");
+    this.store.deleteQueued(id);
+    this.event(chatId, null, "queue", { id, removed: true });
+    return { id };
   }
   setPermissions(chatId, permissions) {
     const chat = this.store.conversation(chatId);
@@ -350,6 +545,8 @@ export class Controller extends EventEmitter {
     } catch (failure) {
       const error = `This chat's worktree could not be prepared: ${failure.message}`;
       this.store.setRun(run.id, "failed", null, error);
+      const entry = this.active.get(chat.id);
+      this.requeuePending(entry);
       this.active.delete(chat.id);
       this.event(chat.id, run.id, "run", {
         status: "failed",
@@ -357,6 +554,7 @@ export class Controller extends EventEmitter {
         provider: run.provider,
         model: run.model,
       });
+      this.releaseQueue(chat.id);
       return;
     }
     let actualModel =
@@ -784,6 +982,13 @@ export class Controller extends EventEmitter {
       ],
       browser,
       signal: abort.signal,
+      // The provider calls this once its session can take another user message.
+      attachSteer: (deliver) => {
+        const current = this.active.get(chat.id);
+        if (!current) return;
+        current.deliverSteer = deliver;
+        this.flushSteers(chat.id);
+      },
       emit,
       billingConfirmation: this.store.setting("cursor-billing"),
       learnEfforts: (options) => this.learnCursorEfforts(options),
@@ -885,6 +1090,7 @@ export class Controller extends EventEmitter {
     }
     const active = this.active.get(chat.id);
     if (active?.restart && !active.cancelled) {
+      active.deliverSteer = null;
       active.restart = false;
       const nextModeChange = active.modeChange;
       active.modeChange = null;
@@ -900,6 +1106,7 @@ export class Controller extends EventEmitter {
       );
     }
     this.store.setRun(run.id, status, null, error ?? null);
+    this.requeuePending(active);
     this.active.delete(chat.id);
     this.event(chat.id, run.id, "run", {
       status,
@@ -907,7 +1114,8 @@ export class Controller extends EventEmitter {
       provider: run.provider,
       model: run.model,
     });
-    if (project.worktree) this.tidy(chat.id);
+    if (project?.worktree) this.tidy(chat.id);
+    this.releaseQueue(chat.id);
   }
   waitApproval(run, request, signal) {
     if (signal.aborted) return Promise.resolve({ allow: false });

@@ -417,6 +417,7 @@ export async function runClaude(
     killTimer,
     polling = false,
     finished = false,
+    accepting = false,
     stopped = null;
   const cancel = () => {
     q.interrupt().catch(() => q.close());
@@ -439,6 +440,17 @@ export async function runClaude(
       },
       parent_tool_use_id: null,
       session_id: ctx.session?.id ?? "",
+    });
+    accepting = true;
+    ctx.attachSteer?.((item) => {
+      if (!accepting) throw new Error("Claude's turn has ended");
+      input.push({
+        type: "user",
+        message: { role: "user", content: item.text },
+        parent_tool_use_id: null,
+        priority: "now",
+        session_id: ctx.session?.id ?? "",
+      });
     });
     timer = setInterval(async () => {
       if (polling || finished || stopped || ctx.signal.aborted) return;
@@ -595,6 +607,7 @@ export async function runClaude(
     throw error;
   } finally {
     finished = true;
+    accepting = false;
     clearInterval(timer);
     clearTimeout(killTimer);
     ctx.signal.removeEventListener("abort", cancel);

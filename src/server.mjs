@@ -542,6 +542,11 @@ export async function createHarness({
           return json(res, 200, { ok: true });
         }
         if (
+          (match = path.match(/^\/api\/chats\/([^/]+)\/queue\/([^/]+)$/)) &&
+          method === "DELETE"
+        )
+          return json(res, 200, controller.removeQueued(match[1], match[2]));
+        if (
           (match = path.match(/^\/api\/chats\/([^/]+)\/messages$/)) &&
           method === "POST"
         )

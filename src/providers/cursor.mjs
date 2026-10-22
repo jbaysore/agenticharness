@@ -354,7 +354,9 @@ export async function runCursor(ctx) {
     messageId = cursorMessageIds();
   let sessionId,
     live = false,
+    accepting = false,
     killTimer;
+  const pending = [];
   const nativeTasks = new Set();
   const cancel = () => {
     if (sessionId && !rpc.closed) {
@@ -529,12 +531,42 @@ export async function runCursor(ctx) {
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");
     live = true;
-    const prompt = await cursorPrompt(ctx, rpc.promptCapabilities);
-    const result = await rpc.call(
+    accepting = true;
+    const timeout = 24 * 60 * 60 * 1000;
+    ctx.attachSteer?.((item) => {
+      if (!accepting) throw new Error("Cursor's turn has ended");
+      pending.push(item);
+      // session/prompt blocks until the turn ends, so cancel it and send
+      // the steer as the next prompt on this same session.
+      if (sessionId && !rpc.closed) rpc.notify("session/cancel", { sessionId });
+    });
+    const first = rpc.call(
       "session/prompt",
-      { sessionId, prompt },
-      24 * 60 * 60 * 1000,
+      { sessionId, prompt: await cursorPrompt(ctx, rpc.promptCapabilities) },
+      timeout,
     );
+    if (pending.length && !ctx.signal.aborted)
+      rpc.notify("session/cancel", { sessionId });
+    let result = await first;
+    while (pending.length && !ctx.signal.aborted) {
+      const item = pending.shift();
+      if (item.mode)
+        await rpc.call("session/set_mode", {
+          sessionId,
+          modeId: cursorModeId(item.mode),
+        });
+      result = await rpc.call(
+        "session/prompt",
+        {
+          sessionId,
+          prompt: await cursorPrompt(
+            { ...ctx, text: item.text, handoff: "", instructions: "" },
+            rpc.promptCapabilities,
+          ),
+        },
+        timeout,
+      );
+    }
     return {
       status:
         ctx.signal.aborted || result.stopReason === "cancelled"
@@ -545,6 +577,7 @@ export async function runCursor(ctx) {
       error: result.stopReason === "end_turn" ? null : result.stopReason,
     };
   } finally {
+    accepting = false;
     clearTimeout(killTimer);
     ctx.signal.removeEventListener("abort", cancel);
     rpc.close();
