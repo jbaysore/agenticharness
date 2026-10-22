@@ -75,6 +75,7 @@ const ASK_HOST_TOOLS = new Set([
   "workspace_activity",
   "rename_chat",
   "suggest_mode",
+  "ask_user",
   "delegate_read",
   "delegate_locate",
 ]);

@@ -5,6 +5,8 @@ import { checkCodexBilling, publicCodexUsage } from "../security/billing.mjs";
 import { historyTools } from "../core/history.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
 import { codexInput } from "./attachments.mjs";
+import { codexQuestionAnswers } from "../core/questions.mjs";
+import { proposalText } from "../core/plans.mjs";
 
 export function checkCodexRoute(config) {
   // config/read includes the official default even when the user set no override.
@@ -290,12 +292,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
         });
         if (!rpc.closed)
           rpc.respond(message.id, {
-            answers: Object.fromEntries(
-              (p.questions ?? []).map((q) => [
-                q.id,
-                { answers: [answer.answers?.[q.id] ?? "Cancelled by user"] },
-              ]),
-            ),
+            answers: codexQuestionAnswers(p.questions ?? [], answer),
           });
         return;
       }
@@ -334,12 +331,20 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     if (
       method === "item/completed" &&
       ["agentMessage", "plan"].includes(p.item?.type)
-    )
+    ) {
+      if (
+        ctx.mode === "plan" &&
+        (p.item.type === "plan" || p.item.phase === "final_answer")
+      ) {
+        const text = proposalText(p.item.text);
+        if (text) ctx.emit("proposed-plan", { text });
+      }
       ctx.emit("text", {
         nativeId: p.item.id,
         text: p.item.text,
         phase: p.item.phase,
       });
+    }
     if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
       goalStatus = p.goal?.status ?? null;
       ctx.emit("work", {

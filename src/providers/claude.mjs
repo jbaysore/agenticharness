@@ -6,10 +6,12 @@ import {
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncQueue } from "../core/queue.mjs";
 import { historyTools } from "../core/history.mjs";
+import { claudeQuestionAnswers } from "../core/questions.mjs";
+import { proposalText } from "../core/plans.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { claudeContent } from "./attachments.mjs";
@@ -174,6 +176,28 @@ const delegationShapes = {
     staged: z.boolean().optional(),
   },
 };
+
+// New SDKs keep the proposal in a file instead of ExitPlanMode's input.
+// Only this chat's files written during this run can supply its approval.
+export async function readClaudePlan(directory, since) {
+  if (!directory) return null;
+  const names = await readdir(directory).catch(() => []);
+  const files = await Promise.all(
+    names
+      .filter((name) => name.endsWith(".md"))
+      .map(async (name) => {
+        const path = join(directory, name);
+        const info = await stat(path).catch(() => null);
+        return info?.isFile() && info.mtimeMs >= since
+          ? { path, time: info.mtimeMs }
+          : null;
+      }),
+  );
+  const latest = files.filter(Boolean).sort((a, b) => b.time - a.time)[0];
+  return latest
+    ? proposalText(await readFile(latest.path, "utf8").catch(() => ""))
+    : null;
+}
 export async function runClaude(
   ctx,
   {
@@ -185,6 +209,13 @@ export async function runClaude(
     usageForAccount = claudeUsageForAccount,
   } = {},
 ) {
+  const planSince = Date.now();
+  const planDirectory =
+    ctx.dataDir && ctx.chat?.id
+      ? join(ctx.dataDir, "plans", "claude", ctx.chat.id)
+      : null;
+  if (planDirectory) await mkdir(planDirectory, { recursive: true });
+  const base = baseOptions(ctx.project.path);
   const input = new AsyncQueue();
   let currentId = "initial";
   const historyServer = createSdkMcpServer({
@@ -258,6 +289,43 @@ export async function runClaude(
         // Naming happens before task work, without a tool-discovery round trip.
         { alwaysLoad: true },
       ),
+      ...(ctx.tools ?? [])
+        .filter((t) => t.name === "ask_user")
+        .map((t) =>
+          tool(
+            t.name,
+            t.description,
+            {
+              questions: z
+                .array(
+                  z.object({
+                    id: z.string().min(1),
+                    question: z.string().min(1),
+                    multiSelect: z.boolean().optional(),
+                    options: z
+                      .array(
+                        z.object({
+                          label: z.string().min(1),
+                          description: z.string().min(1),
+                        }),
+                      )
+                      .min(2)
+                      .optional(),
+                  }),
+                )
+                .min(1)
+                .max(3),
+            },
+            async (args) => ({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(await ctx.history(t.name, args)),
+                },
+              ],
+            }),
+          ),
+        ),
       ...(ctx.tools ?? [])
         .filter((t) => t.name === "move_chat")
         .map((t) =>
@@ -350,7 +418,13 @@ export async function runClaude(
   const q = queryFn({
     prompt: input,
     options: {
-      ...baseOptions(ctx.project.path),
+      ...base,
+      ...(planDirectory && {
+        settings: {
+          ...base.settings,
+          plansDirectory: planDirectory,
+        },
+      }),
       ...permissionModes[ctx.permissions ?? "auto"],
       ...(ctx.mode === "plan" && { permissionMode: "plan" }),
       // Ask mode has no native permission mode. The allowlist removes write
@@ -359,7 +433,11 @@ export async function runClaude(
       model: ctx.model,
       effort: ctx.effort || undefined,
       resume: ctx.session?.id,
-      allowedTools: ["mcp__harness__rename_chat", "mcp__harness__suggest_mode"],
+      allowedTools: [
+        "mcp__harness__rename_chat",
+        "mcp__harness__suggest_mode",
+        "mcp__harness__ask_user",
+      ],
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
@@ -378,10 +456,13 @@ export async function runClaude(
         // Approving a plan leaves plan mode for the chat's permission mode,
         // as accepting one does in Claude Code.
         if (name === "ExitPlanMode") {
+          const plan =
+            proposalText(args.plan) ??
+            (await readClaudePlan(planDirectory, planSince));
           const answer = await ctx.approve({
             kind: "plan",
             title: "Review the plan before anything changes",
-            plan: args.plan,
+            plan,
             details: args,
           });
           if (!answer.allow)
@@ -415,7 +496,7 @@ export async function runClaude(
               behavior: "allow",
               updatedInput:
                 name === "AskUserQuestion"
-                  ? { ...args, answers: answer.answers }
+                  ? { ...args, answers: claudeQuestionAnswers(answer.answers) }
                   : args,
             }
           : {

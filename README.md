@@ -25,9 +25,15 @@ files onto the composer. Preview or remove attachments before sending, with or
 without message text. Each message accepts up to 10 files, 20 MB each; uploaded
 files stay on this PC and remain linked in chat history. Attachment handling has
 been checked in a real browser with a simulated agent.
-Up to three chats run side by side, the sidebar shows what every chat is doing,
-and agents sharing a folder are told about each other; this has been checked
-with a simulated provider, not yet with real providers running at once.
+Up to three chats run side by side; four use a two-by-two grid with compact,
+ready-to-type composers. Each sidebar folder starts with six chats. **Show more**
+doubles that limit to 12, 24, 48, and so on; **Show fewer** returns to six.
+The sidebar shows what every chat is doing, and agents sharing a folder are told
+about each other. These layouts have been checked with simulated providers,
+not yet with real providers running at once.
+Questions can offer one choice or several independent choices, with an Other
+response available in either case. All three agents can ask these through the
+shared Harness question tool.
 **Agent rules** holds standing instructions for every agent and can hand
 eight kinds of work (reading, extracting, sorting, summarising, locating, a
 single-file edit, running a command, drafting a commit message) to a cheaper
@@ -50,6 +56,9 @@ answers questions about the project and cannot change files, commits, or pages.
 Cursor uses its native Ask mode; Codex is held in a read-only sandbox; Claude
 Code can only read and search. **Plan** proposes work before changing anything,
 and **Goal** keeps Codex or Claude Code working until a condition is met.
+Plan approval cards include the complete proposal beside **Confirm and build**
+and **Keep planning**, including after a reload. Confirmation is unavailable when
+the proposal cannot be retrieved.
 An agent in Goal stays there until that condition is met. It does not suggest
 another mode, and carrying out a plan does not switch the chat back to Default.
 Permission requests in Goal are decided by the automatic reviewer, including

@@ -34,6 +34,8 @@ import { applyWork, verbLabels } from "../core/steps.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
 import {
   changeFolders,
+  folderPage,
+  INITIAL_CHAT_LIMIT,
   folderStorageKey,
   openFolderIds,
   readExpandedFolders,
@@ -100,6 +102,7 @@ function App() {
     [selectedProject, setSelectedProject] = useState(""),
     [expandedFolders, setExpandedFolders] = useState(loadExpandedFolders),
     [archivedOpen, setArchivedOpen] = useState([]),
+    [folderLimits, setFolderLimits] = useState({}),
     [terminalsOpen, setTerminalsOpen] = useState(loadTerminalsOpen),
     [windowVisible, setWindowVisible] = useState(
       () => document.visibilityState === "visible",
@@ -514,9 +517,14 @@ function App() {
           };
         });
       if (
-        ["run", "approval", "approval-resolved", "chat", "queue"].includes(
-          e.type,
-        )
+        [
+          "run",
+          "approval",
+          "approval-resolved",
+          "chat",
+          "queue",
+          "proposed-plan",
+        ].includes(e.type)
       )
         reload(e.conversationId).catch(report);
       window.dispatchEvent(new CustomEvent("harness-activity", { detail: e }));
@@ -981,6 +989,43 @@ function App() {
               openChats = sidebarOrder(mine.filter((c) => !c.archived_at)),
               open = foldersOpen.includes(p.id),
               showingArchived = archivedOpen.includes(p.id);
+            const chatLimit = folderLimits[p.id] ?? INITIAL_CHAT_LIMIT,
+              archiveKey = p.id + ":archived",
+              archiveLimit = folderLimits[archiveKey] ?? INITIAL_CHAT_LIMIT;
+            const listChats = (items, key, limit) => {
+              const page = folderPage(items.length, limit);
+              return (
+                <>
+                  {items.slice(0, page.visible).map((c) => chatRow(c))}
+                  {page.more > 0 && (
+                    <button
+                      className="folder-more"
+                      onClick={() =>
+                        setFolderLimits((limits) => ({
+                          ...limits,
+                          [key]: page.next,
+                        }))
+                      }
+                    >
+                      Show {page.more} more
+                    </button>
+                  )}
+                  {limit > INITIAL_CHAT_LIMIT && (
+                    <button
+                      className="folder-more"
+                      onClick={() =>
+                        setFolderLimits((limits) => ({
+                          ...limits,
+                          [key]: INITIAL_CHAT_LIMIT,
+                        }))
+                      }
+                    >
+                      Show fewer
+                    </button>
+                  )}
+                </>
+              );
+            };
             return (
               <div key={p.id} className="project">
                 <div
@@ -1032,7 +1077,7 @@ function App() {
                 </div>
                 {open && (
                   <div id={`project-${p.id}-chats`}>
-                    {openChats.map((c) => chatRow(c))}
+                    {listChats(openChats, p.id, chatLimit)}
                     {archived.length > 0 && (
                       <button
                         className="archived-toggle"
@@ -1050,7 +1095,8 @@ function App() {
                           : `Show archived (${archived.length})`}
                       </button>
                     )}
-                    {showingArchived && archived.map((c) => chatRow(c))}
+                    {showingArchived &&
+                      listChats(archived, archiveKey, archiveLimit)}
                   </div>
                 )}
               </div>
@@ -1215,6 +1261,7 @@ function App() {
                 providers={state.providers}
                 focused={p.key === current.key}
                 solo={view.panes.length === 1}
+                compact={shown.length === 4}
                 headerDrag={
                   shown.length > 1 ? paneHeaderDrag(p.key) : undefined
                 }

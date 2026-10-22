@@ -52,7 +52,7 @@ input.on("line", async (line) => {
           // Browser actions and mode suggestions may wait for user approval.
           // Landing runs the project's check command.
           signal: AbortSignal.timeout(
-            /^(?:browser(?:_|$)|land_changes|suggest_mode)$/.test(
+            /^(?:browser(?:_|$)|land_changes|suggest_mode|ask_user)$/.test(
               m.params?.name,
             )
               ? 15 * 60 * 1000

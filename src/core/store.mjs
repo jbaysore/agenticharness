@@ -834,10 +834,21 @@ export class Store {
       }),
     );
   }
+  proposedPlans(conversationId) {
+    return Object.fromEntries(
+      this.db
+        .prepare(
+          "SELECT run_id, payload FROM events WHERE id IN (SELECT MAX(id) FROM events WHERE conversation_id=? AND type='proposed-plan' GROUP BY run_id)",
+        )
+        .all(conversationId)
+        .map((event) => [event.run_id, JSON.parse(event.payload).text]),
+    );
+  }
   conversationSnapshot(id) {
     return {
       ...this.conversation(id),
       messages: this.messages(id),
+      proposedPlans: this.proposedPlans(id),
       activeRun: this.activeRun(id),
       queue: this.queuedInputs(id),
       approvals: this.pendingApprovals(id),

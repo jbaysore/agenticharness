@@ -54,6 +54,12 @@ import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { browserGateway, browserTitle } from "./browser.mjs";
 import {
+  askUserTool,
+  checkQuestions,
+  QUESTION_INSTRUCTIONS,
+} from "./questions.mjs";
+import { proposalText, taggedProposal, PLAN_INSTRUCTIONS } from "./plans.mjs";
+import {
   attachmentContext,
   attachmentInfo,
   resolveAttachments,
@@ -102,6 +108,7 @@ export class Controller extends EventEmitter {
     this.bridgeBrowser = new Map();
     this.bridgeLand = new Map();
     this.bridgeModes = new Map();
+    this.bridgeQuestions = new Map();
     // Where every new chat gets its own worktree.
     this.worktreeRoot = worktreeRoot;
     // Worktree removals in progress, by chat, so a new turn waits for them.
@@ -630,7 +637,8 @@ export class Controller extends EventEmitter {
   ) {
     const chat = this.store.conversation(run.conversation_id),
       home = this.store.project(chat.project_id),
-      messageMap = new Map();
+      messageMap = new Map(),
+      proposalBuffers = new Map();
     let project;
     try {
       project = await this.chatFolder(chat, home, run);
@@ -658,7 +666,17 @@ export class Controller extends EventEmitter {
     this.bridgeTokens.set(token, chat.id);
     let status = "failed",
       error;
+    let latestProposal = null;
+    const saveProposal = (text) => {
+      if (!text || text === latestProposal) return;
+      latestProposal = text;
+      this.event(chat.id, run.id, "proposed-plan", { text });
+    };
     const emit = (type, payload) => {
+      if (type === "proposed-plan") {
+        saveProposal(proposalText(payload.text));
+        return;
+      }
       if (type === "nativeModel" && typeof payload.model === "string")
         actualModel = payload.model;
       if (type === "text") {
@@ -676,6 +694,14 @@ export class Controller extends EventEmitter {
         if (payload.text !== undefined)
           this.store.replaceMessage(id, payload.text);
         else this.store.appendMessage(id, payload.delta ?? "");
+        if (chat.mode === "plan") {
+          const content =
+            payload.text ??
+            (proposalBuffers.get(id) ?? "") + (payload.delta ?? "");
+          proposalBuffers.set(id, content);
+          if (content.includes("</proposed_plan>"))
+            saveProposal(taggedProposal(content));
+        }
         this.event(chat.id, run.id, "text", {
           ...payload,
           messageId: id,
@@ -736,6 +762,13 @@ export class Controller extends EventEmitter {
     };
     const approve = async (request) => {
       if (abort.signal.aborted) return Promise.resolve({ allow: false });
+      if (request.kind === "plan") {
+        const text =
+          proposalText(request.plan) ??
+          this.store.proposedPlans(chat.id)[run.id];
+        request = { ...request, plan: text };
+        saveProposal(text);
+      }
       if (goal && request.kind === "mode-change")
         return {
           allow: false,
@@ -1082,6 +1115,13 @@ export class Controller extends EventEmitter {
       }
     };
     this.bridgeModes.set(token, suggestMode);
+    const askUser = async (input) =>
+      approve({
+        kind: "question",
+        title: "The agent needs your input",
+        questions: checkQuestions(input),
+      });
+    this.bridgeQuestions.set(token, askUser);
     const skills = invokedSkills(listSkills(this.store), text);
     if (skills.length)
       this.event(chat.id, run.id, "work", {
@@ -1101,6 +1141,8 @@ export class Controller extends EventEmitter {
         provisionalTitle(firstMessage.content, firstMessage.attachments);
     const prefix = [
       agentInstructions(project, chat),
+      QUESTION_INSTRUCTIONS,
+      chat.mode === "plan" ? PLAN_INSTRUCTIONS : "",
       standingInstructions(rules),
       chat.mode === "goal" ? GOAL_INSTRUCTIONS : MODE_SUGGESTION_INSTRUCTIONS,
       delegationInstructions(plan, this.providers, COMMAND_SHELL),
@@ -1141,6 +1183,7 @@ export class Controller extends EventEmitter {
     });
     const ctx = {
       project,
+      dataDir: this.dataDir,
       chat,
       attachments: files,
       text: continuationText,
@@ -1169,6 +1212,7 @@ export class Controller extends EventEmitter {
       tools: [
         ...hostToolsForMode(chat.mode, [
           ...historyTools,
+          askUserTool,
           ...(chat.mode === "goal" ? [] : [modeSuggestionTool]),
           ...(project.worktree ? [landTool] : []),
           ...plan.tools,
@@ -1194,6 +1238,7 @@ export class Controller extends EventEmitter {
         if (chat.mode === "ask" && !askHostAllowed(name))
           return { error: ASK_DENY };
         if (name === "suggest_mode") return suggestMode(input);
+        if (name === "ask_user") return askUser(input);
         if (name === "land_changes")
           return project.worktree
             ? land()
@@ -1264,6 +1309,7 @@ export class Controller extends EventEmitter {
       this.bridgeBrowser.delete(token);
       this.bridgeLand.delete(token);
       this.bridgeModes.delete(token);
+      this.bridgeQuestions.delete(token);
       for (const [id, waiter] of this.approvalWaiters)
         if (waiter.runId === run.id) {
           waiter.resolve({ allow: false });
@@ -1414,6 +1460,14 @@ export class Controller extends EventEmitter {
     const approval = this.store.approval(id);
     if (!approval) throw new Error("Approval not found");
     if (approval.status === "resolved") return approval;
+    if (
+      answer.allow === true &&
+      approval.request.kind === "plan" &&
+      !approval.request.plan?.trim()
+    )
+      throw new Error(
+        "The complete plan must be available before confirmation",
+      );
     const waiter = this.approvalWaiters.get(id);
     if (!waiter || approval.status !== "pending")
       throw new Error(

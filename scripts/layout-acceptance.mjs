@@ -247,6 +247,44 @@ try {
   expect(boxes[1].x).toBeGreaterThan(boxes[0].x);
   await expect(page.getByLabel("Add a pane beside")).toBeDisabled();
   await noOverflow();
+  // Four ready composers should leave room for reading even in a short window.
+  for (const viewport of [
+    { width: 1920, height: 940 },
+    { width: 1536, height: 730 },
+    { width: 1280, height: 600 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(panes).toHaveCount(4);
+    await noOverflow();
+    for (const pane of await panes.all()) {
+      expect(
+        (await pane.locator(".composer-area").boundingBox()).height,
+      ).toBeLessThanOrEqual(124);
+      expect(
+        (await pane.locator(".messages").boundingBox()).height,
+      ).toBeGreaterThan(100);
+    }
+  }
+  const compactDraft = paneFor("Second chat").getByLabel(
+    "Message your coding agent",
+  );
+  await compactDraft.fill("A long draft\n".repeat(20));
+  await expect
+    .poll(async () => (await compactDraft.boundingBox()).height)
+    .toBe(96);
+  await paneFor("Second chat").getByLabel("Conversation details").click();
+  await expect(
+    paneFor("Second chat").locator(".composer-details-popover"),
+  ).toContainText("History:");
+  await paneFor("Second chat")
+    .getByLabel("Conversation details")
+    .press("Escape");
+  await expect(
+    paneFor("Second chat").locator(".composer-details-popover"),
+  ).toBeHidden();
+  await compactDraft.fill("");
+  await page.screenshot({ path: ".local/screenshots/four-panes-compact.png" });
+  await page.setViewportSize({ width: 1920, height: 1000 });
   await page.keyboard.press("Alt+4");
   await expect(focused).toHaveAttribute("aria-label", "Fourth chat");
   await expect(focused.getByLabel("Message your coding agent")).toBeFocused();
@@ -622,6 +660,18 @@ try {
   await expect(page.locator(".message.assistant .reply")).toHaveCount(16);
   const projectList = page.locator(".project-list");
   const transcript = page.locator(".messages");
+  await expect(projectChats.locator(".chat-row")).toHaveCount(6);
+  for (const count of [12, 24, 48]) {
+    await projectChats
+      .getByRole("button", { name: `Show ${count / 2} more`, exact: true })
+      .click();
+    await expect(projectChats.locator(".chat-row")).toHaveCount(count);
+  }
+  const finalMore = projectChats.getByRole("button", {
+    name: /^Show \d+ more$/,
+  });
+  await finalMore.click();
+  await expect(finalMore).toHaveCount(0);
   // Browser chrome and Windows display scaling leave less than 1080 CSS px.
   for (const viewport of [
     { width: 1920, height: 940 },

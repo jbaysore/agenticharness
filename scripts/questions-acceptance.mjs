@@ -18,12 +18,18 @@ app.controller.providers = ["codex", "claude", "cursor"].map((id) => ({
   connected: true,
   models: [{ id: "fixture", name: "Question fixture", efforts: [] }],
 }));
-let request, browser;
+let request,
+  browser,
+  shared = false;
 const received = [],
   errors = [];
 for (const provider of app.controller.providers)
   app.controller.runners[provider.id] = async (ctx) => {
-    received.push(await ctx.approve(request));
+    received.push(
+      await (shared
+        ? ctx.history("ask_user", { questions: request.questions })
+        : ctx.approve(request)),
+    );
     return { status: "completed" };
   };
 try {
@@ -35,7 +41,8 @@ try {
   await page.goto(app.runtime.origin);
   const approval = page.locator(".approval"),
     send = approval.getByRole("button", { name: "Send answer", exact: true });
-  const ask = async (provider, questions) => {
+  const ask = async (provider, questions, useShared = false) => {
+    shared = useShared;
     request = {
       kind: "question",
       title: "Help choose the next step",
@@ -166,6 +173,44 @@ try {
   await page.unroute("**/api/approvals/*");
 
   await page.setViewportSize({ width: 1512, height: 982 });
+  for (const provider of ["codex", "claude", "cursor"]) {
+    await ask(
+      provider,
+      [
+        {
+          id: "combined",
+          question: "Which environments?",
+          multiSelect: true,
+          options: [
+            { label: "Desktop, Windows", description: "Check Windows." },
+            { label: "Mobile", description: "Check a phone." },
+          ],
+        },
+        {
+          id: "delivery",
+          question: "Which delivery?",
+          options: [
+            { label: "Now", description: "Deliver today." },
+            { label: "Later", description: "Deliver tomorrow." },
+          ],
+        },
+      ],
+      true,
+    );
+    await approval
+      .getByRole("checkbox", { name: "Desktop, Windows", exact: true })
+      .check();
+    await approval
+      .getByRole("checkbox", { name: "Mobile", exact: true })
+      .check();
+    await expect(send).toBeDisabled();
+    await approval.getByRole("radio", { name: "Now", exact: true }).check();
+    await send.click();
+    await sent({
+      allow: true,
+      answers: { combined: ["Desktop, Windows", "Mobile"], delivery: "Now" },
+    });
+  }
   await ask("claude", [
     {
       question: "Which checks should run?",
@@ -195,7 +240,9 @@ try {
   await send.click();
   await sent({
     allow: true,
-    answers: { "Which checks should run?": "Browser, Unit, Mobile review" },
+    answers: {
+      "Which checks should run?": ["Browser", "Unit", "Mobile review"],
+    },
   });
 
   await ask("cursor", [

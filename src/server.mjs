@@ -34,6 +34,7 @@ import {
   modeSuggestionTool,
 } from "./core/modes.mjs";
 import { landTool } from "./core/worktrees.mjs";
+import { askUserTool } from "./core/questions.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
 import { uploadAttachment, serveAttachment } from "./core/attachments.mjs";
@@ -204,6 +205,7 @@ export async function createHarness({
           tools: [
             ...hostToolsForMode(chat?.mode, historyTools),
             ...(controller.bridgeModes.has(token) ? [modeSuggestionTool] : []),
+            ...(controller.bridgeQuestions.has(token) ? [askUserTool] : []),
             ...(controller.bridgeLand.has(token) ? [landTool] : []),
             ...(controller.bridgeBrowser.get(token)?.tools ?? []),
           ],
@@ -225,6 +227,12 @@ export async function createHarness({
             await controller.requestChatMove(chatId, body.arguments?.directory),
           );
         const browser = controller.bridgeBrowser.get(token);
+        if (body.name === "ask_user" && controller.bridgeQuestions.has(token))
+          return json(
+            res,
+            200,
+            await controller.bridgeQuestions.get(token)(body.arguments ?? {}),
+          );
         if (body.name === "suggest_mode" && controller.bridgeModes.has(token))
           return json(
             res,

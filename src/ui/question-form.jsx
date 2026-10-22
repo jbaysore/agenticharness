@@ -14,11 +14,7 @@ export function questionAnswer(q, response = {}) {
     if (response.text?.trim()) values.push(response.text.trim());
   }
   if (!values.length) return undefined;
-  return multipleChoice(q)
-    ? q.selectionOnly
-      ? values
-      : values.join(", ")
-    : values[0];
+  return multipleChoice(q) ? values : values[0];
 }
 
 export function QuestionField({ question: q, value = {}, onChange, disabled }) {

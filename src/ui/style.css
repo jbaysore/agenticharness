@@ -641,13 +641,17 @@ small {
   padding: 5px 7px;
   font-size: 12px;
 }
-.archived-toggle {
+.archived-toggle,
+.folder-more {
   width: calc(100% - 26px);
   margin-left: 26px;
   padding: 7px 10px;
   text-align: left;
   font-size: 12px;
   color: var(--text-3);
+}
+.folder-more:hover {
+  color: var(--text);
 }
 .chat-row.selected {
   color: var(--text);
@@ -3118,6 +3122,112 @@ small {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   padding: 4px 16px;
+}
+/* Four panes share the available height as well as width. */
+.pane-strip.quad .pane-header {
+  height: 32px;
+  padding: 0 6px 0 10px;
+  gap: 6px;
+}
+.pane-strip.quad .chat-pane .messages {
+  padding: 12px 14px;
+}
+.pane-strip.quad .composer-area {
+  padding: 5px 10px 7px;
+}
+.pane-strip.quad .composer {
+  border-radius: 10px;
+}
+.pane-strip.quad .composer textarea {
+  min-height: 36px;
+  max-height: 96px;
+  padding: 7px 10px;
+  font-size: 14px;
+  line-height: 20px;
+  overflow-y: auto;
+}
+.pane-strip.quad .composer-controls {
+  gap: 3px;
+  padding: 0 7px 5px;
+}
+.pane-strip.quad .composer-controls .icon-button,
+.pane-strip.quad .send-button {
+  width: 28px;
+  height: 28px;
+}
+.pane-strip.quad .model-trigger {
+  min-height: 28px;
+  padding: 3px;
+}
+.pane-strip.quad .composer-footer {
+  margin: 4px 0 0;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.pane-strip.quad .composer-footer select,
+.pane-strip.quad .composer-footer .directory-picker {
+  padding: 3px 6px;
+}
+.pane-strip.quad .composer-footer .directory-picker {
+  max-width: 150px;
+  flex: 1;
+}
+.pane-strip.quad .composer > .attachments {
+  max-height: 68px;
+  padding: 5px 8px 0;
+}
+.pane-strip.quad .attachment img {
+  width: 28px;
+  height: 28px;
+}
+.pane-strip.quad .queued-messages {
+  max-height: 56px;
+  overflow-y: auto;
+}
+.pane-strip.quad .welcome h1 {
+  font-size: 24px;
+}
+.pane-strip.quad .welcome > p {
+  margin-bottom: 10px;
+}
+.pane-strip.quad .provider-card {
+  padding: 6px 10px;
+}
+.composer-details {
+  margin-left: auto;
+  position: relative;
+}
+.composer-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  list-style: none;
+}
+.composer-details summary:focus-visible {
+  outline: 2px solid var(--agent);
+}
+.composer-details-popover {
+  position: absolute;
+  z-index: 15;
+  right: 0;
+  bottom: 34px;
+  width: min(280px, 70vw);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: 0 8px 30px #0006;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+.composer-details-popover p {
+  margin: 4px 0;
 }
 .toast {
   position: fixed;

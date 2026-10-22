@@ -2,10 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   changeFolders,
+  folderPage,
   openFolderIds,
   readExpandedFolders,
   toggleFolder,
 } from "../src/ui/sidebar-folders.mjs";
+
+test("folder pages start at six and double, capping the final increment", () => {
+  assert.deepEqual(folderPage(80), { visible: 6, more: 6, next: 12 });
+  assert.deepEqual(folderPage(80, 12), { visible: 12, more: 12, next: 24 });
+  assert.deepEqual(folderPage(80, 24), { visible: 24, more: 24, next: 48 });
+  assert.deepEqual(folderPage(53, 48), { visible: 48, more: 5, next: 96 });
+  assert.deepEqual(folderPage(53, 96), { visible: 53, more: 0, next: 192 });
+  assert.deepEqual(folderPage(0), { visible: 0, more: 0, next: 12 });
+});
 
 test("a missing or broken folder preference opens only the selected project", () => {
   assert.equal(readExpandedFolders(null), null);

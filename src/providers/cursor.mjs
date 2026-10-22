@@ -450,7 +450,7 @@ export async function runCursor(ctx, deps = {}) {
           kind: planning ? "plan" : "permission",
           method: m.method,
           title: m.params.name ?? "Review Cursor plan",
-          plan: m.params.plan ?? m.params.overview,
+          plan: m.params.plan,
           details: m.params,
         });
         if (answer.allow && planning) {

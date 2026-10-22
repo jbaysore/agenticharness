@@ -10,6 +10,9 @@ import {
 } from "../src/core/modes.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { askUserTool } from "../src/core/questions.mjs";
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { resolve, join } from "node:path";
 import {
   codexAskBlocksApproval,
   codexCollaboration,
@@ -145,6 +148,104 @@ test("Claude plans in its plan mode, and an approved plan resumes the chat's per
   assert.deepEqual(decision.updatedPermissions, [
     { type: "setMode", mode: "default", destination: "session" },
   ]);
+});
+
+test("Claude exposes Harness multiple selection through its real MCP server", async () => {
+  const selections = ["Desktop, Windows", "Mobile"];
+  const { run } = fakeClaude(
+    {
+      mode: "ask",
+      text: "Choose environments",
+      tools: [askUserTool],
+      approve: async () => ({
+        allow: true,
+        answers: { environments: selections },
+      }),
+      history: async (name, args) => {
+        assert.equal(name, "ask_user");
+        assert.equal(args.questions[0].multiSelect, true);
+        return { allow: true, answers: { environments: selections } };
+      },
+    },
+    async (options) => {
+      const client = new Client({ name: "question-test", version: "1.0.0" });
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      const server = options.mcpServers.harness.instance;
+      try {
+        await server.connect(serverTransport);
+        await client.connect(clientTransport);
+        const tools = (await client.listTools()).tools;
+        assert.ok(tools.some((t) => t.name === "ask_user"));
+        const result = await client.callTool({
+          name: "ask_user",
+          arguments: {
+            questions: [
+              {
+                id: "environments",
+                question: "Which environments?",
+                multiSelect: true,
+                options: selections.map((label) => ({
+                  label,
+                  description: "Test " + label,
+                })),
+              },
+            ],
+          },
+        });
+        assert.deepEqual(
+          JSON.parse(result.content[0].text).answers.environments,
+          selections,
+        );
+        const native = await options.canUseTool("AskUserQuestion", {
+          questions: [],
+        });
+        assert.deepEqual(native.updatedInput.answers, {
+          environments: "Desktop, Windows, Mobile",
+        });
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+  await run;
+});
+
+test("Claude's ExitPlanMode without plan text reads this session's proposal", async (t) => {
+  await mkdir(".local", { recursive: true });
+  const dataDir = await mkdtemp(resolve(".local/sdk-plan-"));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const requests = [];
+  let approved = 0;
+  const { run } = fakeClaude(
+    {
+      mode: "plan",
+      text: "Propose the change",
+      dataDir,
+      chat: { id: "plan-fixture" },
+      approve: async (request) => {
+        requests.push(request);
+        return { allow: true };
+      },
+      planApproved: () => approved++,
+    },
+    async (options) => {
+      assert.equal(
+        options.settings.plansDirectory,
+        join(dataDir, "plans", "claude", "plan-fixture"),
+      );
+      await writeFile(
+        join(options.settings.plansDirectory, "proposal.md"),
+        "# The complete proposal\n\nBuild and verify it.",
+      );
+      const decision = await options.canUseTool("ExitPlanMode", {});
+      assert.equal(decision.behavior, "allow");
+    },
+  );
+  await run;
+  assert.equal(approved, 1);
+  assert.match(requests[0].plan, /The complete proposal/);
 });
 
 test("a Claude goal leaves plan mode without leaving Goal", async () => {

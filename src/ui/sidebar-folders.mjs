@@ -2,6 +2,15 @@
 // not chosen yet, so only the selected project is open. An array, including
 // an empty one, is an explicit choice and is remembered.
 export const folderStorageKey = "harness.sidebar-folders.v1";
+export const INITIAL_CHAT_LIMIT = 6;
+
+export function folderPage(total, limit = INITIAL_CHAT_LIMIT) {
+  return {
+    visible: Math.min(total, limit),
+    more: Math.max(0, Math.min(total - limit, limit)),
+    next: limit * 2,
+  };
+}
 
 export function readExpandedFolders(raw) {
   if (raw == null || raw === "") return null;

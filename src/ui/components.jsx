@@ -182,7 +182,12 @@ export function Approval({ approval, onAnswer }) {
           <div className="plan-body">
             <Markdown text={r.plan} />
           </div>
-        ) : null
+        ) : (
+          <p className="muted">
+            The plan is unavailable. Ask the agent to present the complete plan
+            before confirming.
+          </p>
+        )
       ) : r.kind === "mode-change" ? (
         <>
           <p>{r.reason}</p>
@@ -240,6 +245,7 @@ export function Approval({ approval, onAnswer }) {
           className="primary"
           disabled={
             submitting ||
+            (r.kind === "plan" && !r.plan?.trim()) ||
             (r.kind === "question" &&
               r.questions?.some((q) => answers[questionId(q)] === undefined))
           }

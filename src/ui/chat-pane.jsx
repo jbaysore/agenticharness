@@ -170,6 +170,7 @@ export function ChatPane({
   providers,
   focused,
   solo,
+  compact = false,
   headerDrag,
   dropTarget,
   peers,
@@ -222,6 +223,22 @@ export function ChatPane({
   useEffect(() => {
     saveDraft(draftKey, draft);
   }, [draftKey, draft]);
+  useEffect(() => {
+    const field = input.current;
+    if (!field) return;
+    const resize = () => {
+      field.style.height = "";
+      if (compact) {
+        field.style.height = "0px";
+        field.style.height =
+          Math.min(96, Math.max(36, field.scrollHeight)) + "px";
+      }
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(field.parentElement);
+    return () => observer.disconnect();
+  }, [draft, compact]);
   useEffect(() => {
     saveDraftAttachments(draftKey, attachments);
   }, [draftKey, attachments]);
@@ -725,7 +742,11 @@ export function ChatPane({
           <Approval
             approval={{
               provider: planReady.provider ?? provider,
-              request: { kind: "plan", title: "Happy with the plan?" },
+              request: {
+                kind: "plan",
+                title: "Happy with the plan?",
+                plan: chat.proposedPlans?.[planReady.id],
+              },
             }}
             onAnswer={async (answer) => {
               if (!answer.allow) {
@@ -839,6 +860,7 @@ export function ChatPane({
           )}
           <textarea
             ref={input}
+            rows={compact ? 1 : 2}
             aria-label="Message your coding agent"
             placeholder={
               !project
@@ -980,7 +1002,46 @@ export function ChatPane({
               ))}
             </select>
           </label>
-          {peers.length > 0 && (
+          {compact && (chat || peers.length > 0) && (
+            <details
+              className="composer-details"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.currentTarget.open = false;
+                  event.currentTarget.querySelector("summary").focus();
+                  event.stopPropagation();
+                }
+              }}
+            >
+              <summary
+                aria-label="Conversation details"
+                title="History and workspace details"
+              >
+                <Icon name="menu" size={15} />
+              </summary>
+              <div className="composer-details-popover">
+                {chat && (
+                  <p>
+                    History:{" "}
+                    {
+                      {
+                        none: "This conversation",
+                        project: "This project",
+                        all: "All projects",
+                      }[chat.scope]
+                    }
+                  </p>
+                )}
+                {peers.length > 0 && (
+                  <p>
+                    {workspacePeersLabel(peers)}:{" "}
+                    {peers.map((c) => c.title).join(", ")}
+                  </p>
+                )}
+              </div>
+            </details>
+          )}
+          {!compact && peers.length > 0 && (
             <span
               className="workspace-peers"
               title={
@@ -992,7 +1053,7 @@ export function ChatPane({
               {workspacePeersLabel(peers)}
             </span>
           )}
-          {chat && (
+          {!compact && chat && (
             <span
               className="history-scope"
               title="History access is fixed for this conversation. Set the default for new conversations in Connections & usage."
