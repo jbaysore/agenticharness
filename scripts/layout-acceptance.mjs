@@ -434,7 +434,7 @@ try {
         `Reply ${i + 1}\n\n` + "A paragraph in the conversation.\n\n".repeat(5),
     });
   await page.reload();
-  await expect(page.locator(".message.assistant")).toHaveCount(16);
+  await expect(page.locator(".message.assistant .reply")).toHaveCount(16);
   const projectList = page.locator(".project-list");
   const transcript = page.locator(".messages");
   // Browser chrome and Windows display scaling leave less than 1080 CSS px.

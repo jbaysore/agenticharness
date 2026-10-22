@@ -38,7 +38,7 @@ try {
     `${app.runtime.origin}/?chat=${chat.id}#pair=${app.auth.pairing()}`,
   );
   await expect(page.getByLabel("Message your coding agent")).toBeVisible();
-  await expect(page.locator(".message.assistant")).toHaveCount(
+  await expect(page.locator(".message.assistant .reply")).toHaveCount(
     app.store.messages(chat.id).filter((m) => m.role === "assistant").length,
   );
   await chooseModel(
@@ -143,7 +143,7 @@ try {
     timeout: 15000,
   });
   await page.reload();
-  await expect(page.locator(".message.assistant")).toHaveCount(
+  await expect(page.locator(".message.assistant .reply")).toHaveCount(
     app.store.messages(chat.id).filter((m) => m.role === "assistant").length,
   );
   result.browserReconnect = true;

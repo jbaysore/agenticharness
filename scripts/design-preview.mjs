@@ -29,9 +29,12 @@ try {
       model,
       text,
     });
-    for (const payload of work) store.appendEvent(chat.id, run.id, "work", payload);
-    for (const content of replies)
-      store.addMessage({
+    // Work is either one list before the replies, or one list per gap:
+    // before the first reply, then after each reply.
+    const groups = Array.isArray(work[0]) ? work : [work];
+    replies.forEach((content, i) => {
+      for (const payload of groups[i] ?? []) store.appendEvent(chat.id, run.id, "work", payload);
+      const messageId = store.addMessage({
         conversationId: chat.id,
         runId: run.id,
         role: "assistant",
@@ -39,6 +42,9 @@ try {
         model,
         content,
       });
+      store.appendEvent(chat.id, run.id, "text", { messageId, delta: content });
+    });
+    for (const payload of groups[replies.length] ?? []) store.appendEvent(chat.id, run.id, "work", payload);
     store.setRun(run.id, status);
     return run;
   };
@@ -52,14 +58,15 @@ try {
     "I'll find the permission dropdown, remove its text label, and check the layout before committing and pushing the change.",
     "I found the label beside the dropdown in the chat composer. I'll remove that visible text and keep the dropdown's accessible name.",
     "Removed the \"Permissions\" text, keeping the dropdown and its accessible label. Build and layout checks passed. Committed and pushed to `main`: `03c011e`.",
-  ], "completed", [
+  ], "completed", [[], [
     codexCommand("1", "read", "Get-Content src/ui/chat-pane.jsx", 38, { name: "chat-pane.jsx" }),
     codexCommand("2", "search", "rg \"Permissions\" src/ui", 52, { query: "Permissions" }),
+  ], [
     { kind: "tool", provider: "codex", method: "item/completed", item: { type: "fileChange", id: "3", status: "completed", changes: [{ path: "src/ui/chat-pane.jsx", diff: "@@\n-          Permissions\n-          <select\n+          <select\n-        </label>\n+        </label>" }] } },
     codexCommand("4", "unknown", "npm run build", 4100),
     codexCommand("5", "unknown", "npm run test:layout", 21900),
     codexCommand("6", "unknown", "git commit -m \"Remove visible permissions dropdown label\"", 310),
-  ]);
+  ]]);
   turn(codex, "codex", "gpt-6.1-sol", "How does the outbox keep a message from being sent twice?", [
     [
       "Every send carries an **action ID** that the host remembers. The flow has three parts:",

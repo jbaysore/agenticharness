@@ -28,43 +28,62 @@ import {
 } from "./status.mjs";
 import { elapsed, greeting, providerName, workingLine } from "./voice.mjs";
 import { StepSummary } from "./steps.jsx";
+import { interleave } from "../core/steps.mjs";
 
 // A turn's byline names the agent once, and the model only when it changed.
-// What the turn did sits under the byline as one summary line.
+// Below it the turn reads in order: short progress updates, each followed by
+// the work it led to, then the closing reply.
 function Conversation({ chat, onOpenWork }) {
+  const turns = [];
+  for (const m of chat.messages) {
+    const last = turns.at(-1);
+    if (m.role !== "assistant") turns.push({ user: m });
+    else if (last?.replies && (last.replies[0].run_id ?? null) === (m.run_id ?? null))
+      last.replies.push(m);
+    else turns.push({ replies: [m] });
+  }
   let lastModel = null;
-  return chat.messages.map((m, i) => {
-    if (m.role !== "assistant") return <UserTurn key={m.id} message={m} />;
-    const prev = chat.messages[i - 1],
-      sameTurn =
-        prev?.role === "assistant" &&
-        (prev.run_id ?? null) === (m.run_id ?? null),
-      model = !sameTurn && m.model !== lastModel ? m.model : null;
-    if (!sameTurn) lastModel = m.model;
+  return turns.map(({ user, replies }) => {
+    if (user) return <UserTurn key={user.id} message={user} />;
+    const first = replies[0],
+      model = first.model !== lastModel ? first.model : null;
+    lastModel = first.model;
+    const active = !!first.run_id && chat.activeRun?.id === first.run_id,
+      parts = interleave(replies, first.run_id ? chat.steps?.[first.run_id] : []),
+      lastWork = parts.findLastIndex((part) => part.steps.length);
     return (
       <article
-        className={"message assistant " + (m.provider ?? "")}
-        key={m.id}
-        id={m.id}
+        className={"message assistant " + (first.provider ?? "")}
+        key={first.id}
+        id={first.id}
       >
-        {!sameTurn && (
-          <div className="message-byline">
-            <span className={"provider-dot " + m.provider} />
-            <strong>{providerName(m.provider)}</strong>
-            {model && <span>{model}</span>}
-            <a href={`/?chat=${chat.id}#${m.id}`} title="Link to this message">
-              <Icon name="link" size={13} />
-            </a>
-          </div>
-        )}
-        {!sameTurn && m.run_id && (
-          <StepSummary
-            steps={chat.steps?.[m.run_id]}
-            active={chat.activeRun?.id === m.run_id}
-            onOpenWork={onOpenWork}
-          />
-        )}
-        <Markdown text={m.content} />
+        <div className="message-byline">
+          <span className={"provider-dot " + first.provider} />
+          <strong>{providerName(first.provider)}</strong>
+          {model && <span>{model}</span>}
+          <a href={`/?chat=${chat.id}#${first.id}`} title="Link to this message">
+            <Icon name="link" size={13} />
+          </a>
+        </div>
+        {parts.map(({ message, steps }, i) => (
+          <React.Fragment key={message?.id ?? "start"}>
+            {message?.content?.trim() && (
+              <div
+                className={"reply" + (i <= lastWork ? " update" : "")}
+                id={message === first ? undefined : message.id}
+              >
+                <Markdown text={message.content} />
+              </div>
+            )}
+            {steps.length > 0 && (
+              <StepSummary
+                steps={steps}
+                active={active && i === lastWork}
+                onOpenWork={onOpenWork}
+              />
+            )}
+          </React.Fragment>
+        ))}
       </article>
     );
   });

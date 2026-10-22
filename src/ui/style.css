@@ -969,9 +969,27 @@ small {
 .message-byline a:focus-visible {
   opacity: 1;
 }
-/* What a turn did: one quiet line that opens into the steps. */
+/* Updates written mid-turn read as quiet narration between the work; the
+   closing reply keeps the full reading size. */
+.message.assistant .reply.update .markdown {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.reply.update .markdown p {
+  margin-bottom: 6px;
+}
+.reply + .reply,
+.steps + .reply {
+  margin-top: 10px;
+}
+.steps + .reply:not(.update) {
+  margin-top: 16px;
+}
+/* What each stretch of work did: one quiet line that opens into the steps. */
 .steps {
-  margin: -2px 0 12px;
+  margin: 6px 0 4px;
   font-size: 13px;
   color: var(--text-3);
 }

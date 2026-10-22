@@ -170,13 +170,14 @@ function cursorStep(p, existing) {
   return step;
 }
 
-// Folds one work event into the list of steps, returning a new list.
-export function applyWork(steps, p) {
+// Folds one work event into the list of steps, returning a new list. A new
+// step remembers the reply it followed, so the chat can place it in the turn.
+export function applyWork(steps, p, after = null) {
   if (!p || p.parentId) return steps;
   let step = null;
   const merge = (next) => {
     const index = steps.findIndex((s) => s.id === next.id);
-    if (index < 0) return [...steps, next];
+    if (index < 0) return [...steps, { ...next, after }];
     const copy = steps.slice();
     copy[index] = {
       ...steps[index],
@@ -219,7 +220,29 @@ export function applyWork(steps, p) {
   return step ? merge(step) : steps;
 }
 
-export const buildSteps = (payloads) => payloads.reduce(applyWork, []);
+// Takes work payloads, or saved events where a text event marks the reply
+// that later steps follow.
+export const buildSteps = (items) => {
+  let after = null;
+  return items.reduce((steps, item) => {
+    if (item.type === "text") {
+      after = item.payload?.messageId ?? after;
+      return steps;
+    }
+    return applyWork(steps, item.type === "work" ? item.payload : item, after);
+  }, []);
+};
+
+// Splits a turn into replies and the work between them: the steps before
+// the first reply, then each reply followed by the steps that came after it.
+export function interleave(messages, steps = []) {
+  const ids = new Set(messages.map((m) => m.id)),
+    after = (id) => steps.filter((s) => (ids.has(s.after) ? s.after : null) === id);
+  return [
+    { message: null, steps: after(null) },
+    ...messages.map((m) => ({ message: m, steps: after(m.id) })),
+  ];
+}
 
 // When a turn is over, a step that never reported back is treated as done.
 export const settle = (steps) =>

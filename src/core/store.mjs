@@ -644,14 +644,18 @@ export class Store {
     const byRun = {};
     for (const e of this.db
       .prepare(
-        `SELECT e.run_id, e.payload, r.status FROM events e JOIN runs r ON r.id=e.run_id
+        // A reply's first text event is enough to place the steps after it.
+        `SELECT e.run_id, e.type, e.payload, r.status FROM events e JOIN runs r ON r.id=e.run_id
         WHERE e.run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
-        AND e.type='work' AND json_extract(e.payload,'$.kind') NOT IN ('command-output','token-usage')
+        AND ((e.type='work' AND json_extract(e.payload,'$.kind') NOT IN ('command-output','token-usage'))
+          OR e.id IN (SELECT MIN(id) FROM events WHERE conversation_id=? AND type='text'
+            AND run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
+            GROUP BY json_extract(payload,'$.messageId')))
         ORDER BY e.id`,
       )
-      .all(conversationId)) {
+      .all(conversationId, conversationId, conversationId)) {
       const run = (byRun[e.run_id] ??= { status: e.status, payloads: [] });
-      run.payloads.push(JSON.parse(e.payload));
+      run.payloads.push({ type: e.type, payload: JSON.parse(e.payload) });
     }
     return Object.fromEntries(
       Object.entries(byRun).map(([runId, { status, payloads }]) => {

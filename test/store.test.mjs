@@ -423,3 +423,23 @@ test("an agent names a chat once from its first message and never replaces the u
   assert.throws(() => historyCall(db, named.id, "rename_chat", { title: " " }));
   assert.ok(historyTools.some((t) => t.name === "rename_chat"));
 });
+
+test("saved steps remember which reply they followed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "harness-store-")),
+    db = new Store(join(directory, "db.sqlite"));
+  const p = db.addProject("Project", "C:\example"),
+    c = db.createConversation({ projectId: p.id }),
+    run = db.createRun({ conversationId: c.id, actionId: "steps-after-1", provider: "claude", model: "m", text: "Fix it" });
+  const read = (id) => ({ kind: "tool", provider: "claude", item: { type: "tool_use", id, name: "Read", input: { file_path: id } } });
+  db.appendEvent(c.id, run.id, "work", read("a"));
+  db.appendEvent(c.id, run.id, "text", { messageId: "m1", delta: "Looking" });
+  db.appendEvent(c.id, run.id, "text", { messageId: "m1", delta: " closer" });
+  db.appendEvent(c.id, run.id, "work", read("b"));
+  db.appendEvent(c.id, run.id, "text", { messageId: "m2", delta: "Done" });
+  assert.deepEqual(
+    db.steps(c.id)[run.id].map((s) => [s.target, s.after]),
+    [["a", null], ["b", "m1"]],
+  );
+  db.close();
+  await rm(directory, { recursive: true, force: true });
+});

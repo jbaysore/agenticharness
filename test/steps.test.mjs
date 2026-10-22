@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyWork,
   buildSteps,
+  interleave,
   presentTense,
   settle,
   summarize,
@@ -133,4 +134,24 @@ test("A summary gives one phrase per kind of work", () => {
   assert.deepEqual([summary[1].added, summary[1].removed], [3, 7]);
   assert.equal(summary[2].failed, 1);
   assert.equal(applyWork([], null).length, 0);
+});
+
+test("Steps are placed after the reply they followed", () => {
+  const read = (id) => ({ kind: "tool", provider: "claude", item: { type: "tool_use", id, name: "Read", input: { file_path: `src/${id}.mjs` } } });
+  const steps = buildSteps([
+    { type: "work", payload: read("a") },
+    { type: "text", payload: { messageId: "m1" } },
+    { type: "work", payload: read("b") },
+    { type: "work", payload: read("c") },
+    { type: "text", payload: { messageId: "m2" } },
+  ]);
+  assert.deepEqual(steps.map((s) => [s.target, s.after]), [["a.mjs", null], ["b.mjs", "m1"], ["c.mjs", "m1"]]);
+  const parts = interleave([{ id: "m1" }, { id: "m2" }], steps);
+  assert.deepEqual(
+    parts.map((p) => [p.message?.id ?? null, p.steps.map((s) => s.target)]),
+    [[null, ["a.mjs"]], ["m1", ["b.mjs", "c.mjs"]], ["m2", []]],
+  );
+  // A later status update keeps the step where it first appeared.
+  const done = applyWork(steps, { kind: "tool-result", provider: "claude", toolUseId: "b" }, "m2");
+  assert.equal(done[1].after, "m1");
 });

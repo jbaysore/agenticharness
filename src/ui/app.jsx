@@ -413,7 +413,10 @@ function App() {
         setChats((all) => {
           const c = all[e.conversationId],
             steps = c?.steps?.[e.runId] ?? [],
-            next = c && applyWork(steps, e.payload);
+            reply = c?.messages.findLast(
+              (m) => m.role === "assistant" && m.run_id === e.runId,
+            ),
+            next = c && applyWork(steps, e.payload, reply?.id ?? null);
           if (!c || next === steps) return all;
           return {
             ...all,
