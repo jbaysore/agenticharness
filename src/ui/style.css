@@ -2245,6 +2245,20 @@ small {
 .terminal-container .xterm {
   height: 100%;
 }
+.terminal-pane .terminal-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.terminal-pane .terminal-container {
+  flex: 1;
+}
+.terminal-row .chat-open svg {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
 .modal-scrim {
   position: fixed;
   inset: 0;

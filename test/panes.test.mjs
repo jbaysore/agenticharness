@@ -12,6 +12,7 @@ import {
   movePane,
   openBeside,
   openInFocused,
+  openTerminal,
   parseSearch,
   readPanes,
   savePanes,
@@ -198,4 +199,24 @@ test("the pane layout is remembered, and broken storage opens an empty workspace
   };
   assert.deepEqual(readPanes(blocked), { chats: [], focused: 0 });
   assert.equal(savePanes(state, blocked), false);
+});
+test("a terminal opens in the focused pane, or beside it when asked", () => {
+  let state = openInFocused(initialPanes(), "a");
+  state = openTerminal(state, "t1", "project");
+  assert.deepEqual(chats(state), [null]);
+  assert.equal(focusedPane(state).terminalId, "t1");
+  state = openInFocused(state, "a");
+  state = openTerminal(state, "t1", "project", true);
+  assert.deepEqual(
+    state.panes.map((p) => p.terminalId),
+    [null, "t1"],
+  );
+  assert.equal(openTerminal(state, "t1").panes.length, 2);
+  assert.equal(focusedPane(openTerminal(state, "t1")).terminalId, "t1");
+});
+test("a pane holding a terminal is not treated as empty", () => {
+  const state = openTerminal(initialPanes(), "t1", "project");
+  assert.equal(openBeside(state, "a").panes.length, 2);
+  assert.equal(showHome(state, "project").panes[0].terminalId, null);
+  assert.equal(toSearch(state), "/");
 });

@@ -1,15 +1,17 @@
-// Which chats are open together. A pane's key is its identity: replacing
-// the chat in a pane makes a new key, so the composer starts fresh for it.
+// Which chats and terminals are open together. A pane's key is its identity:
+// replacing what a pane shows makes a new key, so the composer starts fresh.
 // One to three panes share a row. Four panes are a two-by-two grid.
 export const MAX_PANES = 4;
 export const MIN_PANE_WIDTH = 390;
 const storageKey = "harness.panes.v1";
 let created = 0;
-const pane = (chatId = null, projectId = "") => ({
+const pane = (chatId = null, projectId = "", terminalId = null) => ({
   key: "pane-" + ++created,
   chatId,
   projectId,
+  terminalId,
 });
+const occupied = (p) => !!(p.chatId || p.terminalId);
 const unique = (ids) =>
   [...new Set(ids.filter((id) => typeof id === "string" && id))].slice(
     0,
@@ -49,12 +51,44 @@ export function openInFocused(state, chatId, projectId = "") {
     focused: next.key,
   };
 }
+// A terminal is open at most once too. Beside only splits when there is room.
+export function openTerminal(
+  state,
+  terminalId,
+  projectId = "",
+  beside = false,
+  limit = MAX_PANES,
+) {
+  const existing = state.panes.find((p) => p.terminalId === terminalId);
+  if (existing) return focusPane(state, existing.key);
+  const current = focusedPane(state),
+    next = pane(null, projectId, terminalId);
+  if (
+    beside &&
+    occupied(current) &&
+    canOpenAnother(state.panes.length, limit)
+  ) {
+    const index = state.panes.indexOf(current);
+    return {
+      panes: [
+        ...state.panes.slice(0, index + 1),
+        next,
+        ...state.panes.slice(index + 1),
+      ],
+      focused: next.key,
+    };
+  }
+  return {
+    panes: state.panes.map((p) => (p.key === current.key ? next : p)),
+    focused: next.key,
+  };
+}
 // `limit` is how many columns the window can hold, not a pane count.
 export function openBeside(state, chatId, projectId = "", limit = MAX_PANES) {
   const existing = chatId && state.panes.find((p) => p.chatId === chatId);
   if (existing) return focusPane(state, existing.key);
   const current = focusedPane(state);
-  if (!current.chatId)
+  if (!occupied(current))
     return chatId ? openInFocused(state, chatId, projectId) : state;
   if (!canOpenAnother(state.panes.length, limit))
     return chatId ? openInFocused(state, chatId, projectId) : state;
@@ -79,7 +113,7 @@ export function setPaneChat(state, key, chatId) {
 // Home is one fresh conversation. Staying there keeps whatever is already typed.
 export function showHome(state, projectId = "") {
   const only = state.panes.length === 1 ? state.panes[0] : null;
-  if (only && !only.chatId && (only.projectId || projectId) === projectId)
+  if (only && !occupied(only) && (only.projectId || projectId) === projectId)
     return state;
   const blank = pane(null, projectId);
   return { panes: [blank], focused: blank.key };

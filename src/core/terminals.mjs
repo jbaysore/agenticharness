@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 export class Terminals {
   sessions = new Map();
+  opened = 0;
   constructor(onEvent) {
     this.onEvent = onEvent;
   }
@@ -37,7 +38,7 @@ export class Terminals {
     const session = {
       id,
       projectId: project.id,
-      title: "Terminal",
+      title: "Terminal " + ++this.opened,
       output: "",
       status: "running",
       process: child,
@@ -50,7 +51,9 @@ export class Terminals {
     child.onExit(({ exitCode }) => {
       session.status = "exited";
       this.onEvent("terminal-exit", { id, exitCode });
+      this.onEvent("terminals", {});
     });
+    this.onEvent("terminals", {});
     return {
       id,
       projectId: project.id,
@@ -84,7 +87,12 @@ export class Terminals {
       // Use the library's full cleanup, which disposes its output worker and
       // terminates console descendants. The Windows helper may log a benign
       // AttachConsole race; its bounded fallback still completes shutdown.
-      s.process.kill();
+      try {
+        s.process.kill();
+      } catch {
+        // Already exited; there is nothing left to stop.
+      }
+      this.onEvent("terminals", {});
     }
   }
   async closeAll() {

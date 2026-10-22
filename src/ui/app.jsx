@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/newsreader/opsz.css";
 import "@fontsource-variable/newsreader/opsz-italic.css";
@@ -11,6 +8,11 @@ import { api } from "./api.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
 import { ChatRow } from "./chat-row.jsx";
+import {
+  TerminalRow,
+  TerminalSession,
+  TerminalView,
+} from "./terminal-session.jsx";
 import { RulesModal } from "./rules-modal.jsx";
 import { SkillsModal } from "./skills-modal.jsx";
 import { UsageGlance } from "./usage-glance.jsx";
@@ -43,6 +45,7 @@ import {
   movePane,
   openBeside,
   openInFocused,
+  openTerminal,
   parseSearch,
   readPanes,
   savePanes,
@@ -374,6 +377,7 @@ function App() {
           "rules",
           "settings",
           "skills",
+          "terminals",
         ].includes(e.type)
       )
         refresh().catch(report);
@@ -540,6 +544,9 @@ function App() {
     document.title =
       (attention ? `(${attention}) ` : "") + "Harness — Your coding workspace";
   }, [attention]);
+  const occupied = (p) => !!(p.chatId || p.terminalId),
+    sessions = state.terminals ?? [],
+    currentSession = sessions.find((s) => s.id === current.terminalId);
   const emptyPane = (projectId) =>
     setView((v) => openInFocused(v, null, projectId));
   async function archiveChat(c, archived) {
@@ -561,7 +568,7 @@ function App() {
       }
       canSplit={
         !mobile &&
-        !!current.chatId &&
+        occupied(current) &&
         !openIds.includes(c.id) &&
         canOpenAnother(view.panes.length, columnBudget)
       }
@@ -575,6 +582,31 @@ function App() {
       onArchive={(archived) => action(() => archiveChat(c, archived))()}
     />
   );
+  async function newTerminal(beside = false) {
+    const target = state.projects.find((p) => p.id === selectedProject);
+    if (!target) {
+      setModal("project");
+      return;
+    }
+    const session = await api("/api/terminals", { projectId: target.id });
+    await refresh();
+    openShell(session, beside);
+  }
+  function openShell(session, beside = false) {
+    setView((v) =>
+      openTerminal(v, session.id, session.projectId, beside, limit.current),
+    );
+    setSelectedProject(session.projectId);
+    setSidebar(false);
+  }
+  async function endTerminal(id) {
+    await api(`/api/terminals/${id}/close`, {});
+    setView((v) => {
+      const open = v.panes.find((p) => p.terminalId === id);
+      return open ? closePane(v, open.key, selectedProject) : v;
+    });
+    await refresh();
+  }
   async function newChat(beside = false) {
     const target = state.projects.find((p) => p.id === selectedProject);
     if (!target) {
@@ -751,10 +783,41 @@ function App() {
           <Icon name="plus" />
           New conversation
         </button>
+        <button
+          className="sidebar-action"
+          title="Open a PowerShell terminal in this project. Ctrl-click to open it beside this one."
+          onClick={(e) => action(() => newTerminal(e.ctrlKey || e.metaKey))()}
+        >
+          <Icon name="terminal" />
+          New terminal
+        </button>
         <button className="sidebar-action" onClick={() => setModal("search")}>
           <Icon name="search" />
           Search conversations
         </button>
+        {sessions.length > 0 && (
+          <>
+            <div className="section-label">Terminals</div>
+            <div className="active-list" role="group" aria-label="Terminals">
+              {sessions.map((t) => (
+                <TerminalRow
+                  key={t.id}
+                  session={t}
+                  project={state.projects.find((p) => p.id === t.projectId)}
+                  placement={
+                    t.id === current.terminalId
+                      ? "selected"
+                      : view.panes.some((p) => p.terminalId === t.id)
+                        ? "open"
+                        : ""
+                  }
+                  onOpen={(beside) => openShell(t, beside)}
+                  onEnd={() => action(() => endTerminal(t.id))()}
+                />
+              ))}
+            </div>
+          </>
+        )}
         {active.length > 0 && (
           <>
             <div className="section-label">Active</div>
@@ -932,7 +995,11 @@ function App() {
           <div className="breadcrumbs">
             <span>{project?.name ?? "Your workspace"}</span>
             <b>/</b>
-            <strong>{chat?.title ?? "New conversation"}</strong>
+            <strong>
+              {current.terminalId
+                ? (currentSession?.title ?? "Terminal")
+                : (chat?.title ?? "New conversation")}
+            </strong>
           </div>
           <UsageGlance
             providers={state.providers}
@@ -951,7 +1018,7 @@ function App() {
               }
               disabled={
                 !canOpenAnother(view.panes.length, columnBudget) ||
-                !current.chatId
+                !occupied(current)
               }
               onClick={() =>
                 setView((v) =>
@@ -980,54 +1047,79 @@ function App() {
           </div>
         )}
         <div className={"pane-strip" + (shown.length === 4 ? " quad" : "")}>
-          {shown.map((p) => (
-            <ChatPane
-              key={p.key}
-              ref={(handle) => {
-                if (handle) paneRefs.current[p.key] = handle;
-                else delete paneRefs.current[p.key];
-              }}
-              chat={(p.chatId && chats[p.chatId]) || null}
-              project={paneProject(p)}
-              projects={state.projects}
-              onChangeProject={(target, chosen) =>
-                changePaneProject(p, target, chosen)
-              }
-              providers={state.providers}
-              focused={p.key === current.key}
-              solo={view.panes.length === 1}
-              headerDrag={shown.length > 1 ? paneHeaderDrag(p.key) : undefined}
-              dropTarget={paneDrop === p.key}
-              peers={workspacePeers(
-                state.conversations,
-                paneProject(p)?.id,
-                p.chatId,
-              )}
-              selection={selection.current}
-              onSelection={(chosen) => {
-                if (p.key === view.focused) selection.current = chosen;
-              }}
-              onFocus={() => setView((v) => focusPane(v, p.key))}
-              onClose={() =>
-                setView((v) => closePane(v, p.key, selectedProject))
-              }
-              onOpenChat={(id, beside, anchor) =>
-                followLink(id, beside, anchor).catch(report)
-              }
-              ensureChat={(chosen) => ensureChat(p, chosen)}
-              skills={state.skills ?? []}
-              onOpenSkills={() => setModal("skills")}
-              reload={reload}
-              refresh={refresh}
-              report={report}
-              onOpenConnections={() => setModal("connections")}
-              onOpenWork={() => {
-                setView((v) => focusPane(v, p.key));
-                setPanel("activity");
-                setShowPanel(true);
-              }}
-            />
-          ))}
+          {shown.map((p) =>
+            p.terminalId ? (
+              <TerminalSession
+                key={p.key}
+                ref={(handle) => {
+                  if (handle) paneRefs.current[p.key] = handle;
+                  else delete paneRefs.current[p.key];
+                }}
+                session={sessions.find((s) => s.id === p.terminalId)}
+                project={paneProject(p)}
+                focused={p.key === current.key}
+                headerDrag={
+                  shown.length > 1 ? paneHeaderDrag(p.key) : undefined
+                }
+                dropTarget={paneDrop === p.key}
+                onFocus={() => setView((v) => focusPane(v, p.key))}
+                onClose={() =>
+                  setView((v) => closePane(v, p.key, selectedProject))
+                }
+                onEnd={() => action(() => endTerminal(p.terminalId))()}
+                report={report}
+              />
+            ) : (
+              <ChatPane
+                key={p.key}
+                ref={(handle) => {
+                  if (handle) paneRefs.current[p.key] = handle;
+                  else delete paneRefs.current[p.key];
+                }}
+                chat={(p.chatId && chats[p.chatId]) || null}
+                project={paneProject(p)}
+                projects={state.projects}
+                onChangeProject={(target, chosen) =>
+                  changePaneProject(p, target, chosen)
+                }
+                providers={state.providers}
+                focused={p.key === current.key}
+                solo={view.panes.length === 1}
+                headerDrag={
+                  shown.length > 1 ? paneHeaderDrag(p.key) : undefined
+                }
+                dropTarget={paneDrop === p.key}
+                peers={workspacePeers(
+                  state.conversations,
+                  paneProject(p)?.id,
+                  p.chatId,
+                )}
+                selection={selection.current}
+                onSelection={(chosen) => {
+                  if (p.key === view.focused) selection.current = chosen;
+                }}
+                onFocus={() => setView((v) => focusPane(v, p.key))}
+                onClose={() =>
+                  setView((v) => closePane(v, p.key, selectedProject))
+                }
+                onOpenChat={(id, beside, anchor) =>
+                  followLink(id, beside, anchor).catch(report)
+                }
+                ensureChat={(chosen) => ensureChat(p, chosen)}
+                skills={state.skills ?? []}
+                onOpenSkills={() => setModal("skills")}
+                reload={reload}
+                refresh={refresh}
+                report={report}
+                onOpenConnections={() => setModal("connections")}
+                onOpenWork={() => {
+                  setView((v) => focusPane(v, p.key));
+                  setPanel("activity");
+                  setShowPanel(true);
+                }}
+              />
+            ),
+          )}
         </div>
       </main>
       {showPanel && (
@@ -2000,83 +2092,6 @@ function TerminalPane({ project, chat, report }) {
       })
       .catch(report);
   }, [project.id]);
-  useEffect(() => {
-    if (!id || !container.current) return;
-    const t = new Terminal({
-        fontFamily: "Cascadia Code, Consolas, monospace",
-        fontSize: 13,
-        // The workspace palette, so command output matches the chats.
-        theme: {
-          background: "#101010",
-          foreground: "#e4e4e4",
-          cursor: "#ececec",
-          selectionBackground: "#3d7bff55",
-          black: "#1b1b1b",
-          red: "#ff5c5c",
-          green: "#4fd18b",
-          yellow: "#ffe14d",
-          blue: "#5b8dff",
-          magenta: "#b57aff",
-          cyan: "#4fc4d9",
-          white: "#d8d8d8",
-          brightBlack: "#6f6f6f",
-          brightRed: "#ff8a8a",
-          brightGreen: "#7fe0aa",
-          brightYellow: "#fff08a",
-          brightBlue: "#7ea6ff",
-          brightMagenta: "#c197ff",
-          brightCyan: "#7fd8e8",
-          brightWhite: "#ffffff",
-        },
-        cursorBlink: true,
-        scrollback: 5000,
-      }),
-      fit = new FitAddon();
-    t.loadAddon(fit);
-    t.open(container.current);
-    terminal.current = t;
-    active.current = id;
-    api("/api/terminals")
-      .then((all) => {
-        const s = all.find((s) => s.id === id);
-        if (s) t.write(s.output);
-      })
-      .catch(report);
-    const resize = () => {
-      try {
-        fit.fit();
-        api(`/api/terminals/${id}/resize`, {
-          cols: t.cols,
-          rows: t.rows,
-        }).catch(() => {});
-      } catch {}
-    };
-    const observer = new ResizeObserver(resize);
-    observer.observe(container.current);
-    resize();
-    let inputQueue = Promise.resolve();
-    const input = t.onData((data) => {
-      inputQueue = inputQueue
-        .then(() => api(`/api/terminals/${id}/input`, { data }))
-        .catch(report);
-    });
-    const output = (e) => {
-      if (e.detail.id === id) t.write(e.detail.data);
-    };
-    const exit = (e) => {
-      if (e.detail.id === id)
-        t.write(`\r\n[Terminal exited: ${e.detail.exitCode}]\r\n`);
-    };
-    window.addEventListener("terminal-output", output);
-    window.addEventListener("terminal-exit", exit);
-    return () => {
-      observer.disconnect();
-      input.dispose();
-      window.removeEventListener("terminal-output", output);
-      window.removeEventListener("terminal-exit", exit);
-      t.dispose();
-    };
-  }, [id]);
   return (
     <div className="terminal-panel">
       <div className="terminal-toolbar">
@@ -2127,7 +2142,7 @@ function TerminalPane({ project, chat, report }) {
         )}
       </div>
       {id ? (
-        <div className="terminal-container" ref={container} />
+        <TerminalView id={id} report={report} />
       ) : (
         <div className="panel-empty">
           <Icon name="terminal" size={28} />

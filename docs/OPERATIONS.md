@@ -402,6 +402,13 @@ Save a project decision with its source conversation. **Flag stale** keeps the
 evidence while excluding the note from automatic handoffs. Refresh a decision by
 saving a new evidence-backed note; the old flagged note remains inspectable.
 
+**New terminal** in the sidebar opens PowerShell in the selected project as its
+own pane, the way a conversation opens. Ctrl-click opens it beside the current
+pane. Open terminals are listed under **Terminals** in the sidebar; closing a
+pane keeps the shell running, and the **End** button or the sidebar close button
+stops it. The Terminal tab in the work panel starts shells in the focused
+chat's worktree.
+
 Terminal starts PowerShell in the selected primary project. It continues when
 you change panels or disconnect the browser. Close terminals when finished. A
 host restart ends terminals; reopen one afterward. Live terminal streams and work
