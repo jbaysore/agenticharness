@@ -33,6 +33,7 @@ export function DirectoryPicker({ project, projects, disabled, onChange }) {
         className="directory-picker"
         aria-label="Change directory"
         aria-haspopup="dialog"
+        aria-expanded={open}
         title={
           project ? `Change directory: ${project.path}` : "Choose a directory"
         }
@@ -44,9 +45,11 @@ export function DirectoryPicker({ project, projects, disabled, onChange }) {
           setOpen(true);
         }}
       >
-        <Icon name="folder" size={16} />
-        <span>{project?.path ?? "Choose a directory"}</span>
-        <span className="directory-action">Change</span>
+        <Icon name="folder" size={14} />
+        <span>{project?.name ?? "Choose a directory"}</span>
+        <span className="directory-chevron" aria-hidden="true">
+          ▾
+        </span>
       </button>
       {open &&
         createPortal(

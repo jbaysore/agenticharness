@@ -710,17 +710,6 @@ export function ChatPane({
         ))}
       </div>
       <div className="composer-area">
-        {!chat?.messages?.length &&
-          !chat?.runs?.length &&
-          !Object.keys(chat?.sessions ?? {}).length &&
-          !chat?.worktree && (
-            <DirectoryPicker
-              project={project}
-              projects={projects}
-              disabled={busy || uploading || permissionsBusy || modeBusy}
-              onChange={changeDirectory}
-            />
-          )}
         <SkillSlash
           ref={slash}
           skills={skills}
@@ -951,6 +940,17 @@ export function ChatPane({
               }
             </span>
           )}
+          {!chat?.messages?.length &&
+            !chat?.runs?.length &&
+            !Object.keys(chat?.sessions ?? {}).length &&
+            !chat?.worktree && (
+              <DirectoryPicker
+                project={project}
+                projects={projects}
+                disabled={busy || uploading || permissionsBusy || modeBusy}
+                onChange={changeDirectory}
+              />
+            )}
         </div>
       </div>
     </section>

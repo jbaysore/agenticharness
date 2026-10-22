@@ -72,12 +72,19 @@ try {
   );
   await dialog.getByRole("button", { name: "Use directory" }).click();
   await expect(dialog.getByRole("alert")).toContainText("Copy fixture failed");
-  await expect(trigger).toContainText(firstPath);
+  await expect(trigger).toHaveAttribute(
+    "title",
+    `Change directory: ${firstPath}`,
+  );
   await expect(files.getByText("notes.txt")).toBeVisible();
   await page.unroute(`**/api/projects/${second.id}/attachments`);
   await dialog.getByRole("button", { name: "Use directory" }).click();
   await expect(dialog).toBeHidden();
-  await expect(trigger).toContainText(secondPath);
+  await expect(trigger).toContainText("Second project");
+  await expect(trigger).toHaveAttribute(
+    "title",
+    `Change directory: ${secondPath}`,
+  );
   await expect(input).toHaveValue(
     "Keep this first message while changing folders",
   );
@@ -86,7 +93,10 @@ try {
   const chat = app.store.conversations()[0];
   expect(chat.project_id).toBe(second.id);
   await page.reload();
-  await expect(trigger).toContainText(secondPath);
+  await expect(trigger).toHaveAttribute(
+    "title",
+    `Change directory: ${secondPath}`,
+  );
   await expect(input).toHaveValue(
     "Keep this first message while changing folders",
   );
@@ -106,7 +116,10 @@ try {
   await dialog.getByLabel("Folder path").fill(newPath);
   await dialog.getByRole("button", { name: "Use directory" }).click();
   await expect(dialog).toBeHidden();
-  await expect(trigger).toContainText(newPath);
+  await expect(trigger).toHaveAttribute(
+    "title",
+    `Change directory: ${newPath}`,
+  );
   expect(app.store.conversation(empty.id).id).toBe(empty.id);
   expect(
     app.store.project(app.store.conversation(empty.id).project_id).path,
@@ -167,7 +180,7 @@ try {
   );
   await expect(
     pane.getByRole("button", { name: "Change directory", exact: true }),
-  ).toContainText(firstPath);
+  ).toHaveAttribute("title", `Change directory: ${firstPath}`);
   expect(app.store.conversation(chat.id).project_id).toBe(second.id);
   await expect(
     page.locator(".chat-pane").first().getByLabel("Message your coding agent"),
