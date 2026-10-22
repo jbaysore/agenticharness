@@ -7,7 +7,41 @@ import {
   cursorQuestionOutcome,
   cursorSpeedFollowUp,
   cursorWorkKind,
+  isHarnessTool,
 } from "../src/providers/cursor.mjs";
+
+test("Harness's own history and browser tools skip Cursor's prompt; other requests do not", () => {
+  const tools = [
+      { name: "history_search" },
+      { name: "browser_click" },
+      { name: "land_changes" },
+    ],
+    call = (title, kind = "other") => ({ title, kind });
+  assert.equal(
+    isHarnessTool(
+      call("harness-history-history_search: history_search"),
+      tools,
+    ),
+    true,
+  );
+  assert.equal(
+    isHarnessTool(call("harness-history-browser_click: browser_click"), tools),
+    true,
+  );
+  for (const toolCall of [
+    // Landing changes is still reviewed.
+    call("harness-history-land_changes: land_changes"),
+    // A browser tool Harness is not offering this turn.
+    call("harness-history-browser_tabs: browser_tabs"),
+    // Mismatched names, other kinds and shell commands.
+    call("harness-history-history_search: browser_click"),
+    call("harness-history-history_search: history_search", "execute"),
+    call("`harness-history-history_search: history_search`", "execute"),
+    call("other-server-history_search: history_search"),
+    null,
+  ])
+    assert.equal(isHarnessTool(toolCall, tools), false);
+});
 
 test("Cursor question answers preserve selected IDs, custom responses, and cancellation", () => {
   const questions = [

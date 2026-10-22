@@ -79,6 +79,9 @@ test("review sessions disable command tools, hooks, agents, web, inherited MCP s
   assert.equal(restricted.agents.enabled, false);
   assert.equal(restricted.web_search, "disabled");
   assert.equal(restricted.project_doc_max_bytes, 0);
+  // The reviewer's own sandbox is never described to it as the agent's.
+  assert.equal(restricted.include_permissions_instructions, false);
+  assert.equal(restricted.include_environment_context, false);
   assert.deepEqual(restricted.mcp_servers.browser, { enabled: false });
   assert.deepEqual(restricted.apps.connected, { enabled: false });
   assert.deepEqual(restricted.apps._default, { enabled: false });

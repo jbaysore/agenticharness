@@ -6,7 +6,24 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { cursorPrompt } from "./attachments.mjs";
+import { historyTools } from "../core/history.mjs";
+import { isBrowserTool } from "../core/browser.mjs";
 const exec = promisify(execFile);
+
+// Harness's history and browser tools need no prompt of Cursor's, as with
+// Claude: Harness itself asks the user before any browser action that can
+// change a page. Landing changes and other tools still ask.
+const historyNames = new Set(historyTools.map((t) => t.name));
+export function isHarnessTool(toolCall, tools = []) {
+  const name = /^harness-history-(\w+): (\w+)$/.exec(toolCall?.title ?? "");
+  return (
+    toolCall?.kind === "other" &&
+    !!name &&
+    name[1] === name[2] &&
+    (historyNames.has(name[1]) || isBrowserTool(name[1])) &&
+    tools.some((t) => t.name === name[1])
+  );
+}
 
 export async function cursorAuth() {
   const c = cursorCommand();
@@ -249,6 +266,14 @@ export async function runCursor(ctx) {
   rpc.on("request", async (m) => {
     try {
       if (m.method === "session/request_permission") {
+        const allowOnce = m.params.options.find((o) => o.kind === "allow_once");
+        if (allowOnce && isHarnessTool(m.params.toolCall, ctx.tools)) {
+          if (!rpc.closed)
+            rpc.respond(m.id, {
+              outcome: { outcome: "selected", optionId: allowOnce.optionId },
+            });
+          return;
+        }
         const answer = await ctx.approve({
           kind: "permission",
           method: m.method,

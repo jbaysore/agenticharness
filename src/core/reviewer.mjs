@@ -1,5 +1,6 @@
 // Cursor's ACP permission requests are reviewed in separate subscription sessions.
-// The user authorized sharing task instructions, rules, refusals and the action.
+// The user authorized sharing task instructions, rules, refusals, the agent's
+// recent actions this turn and the action under review.
 import { randomUUID } from "node:crypto";
 import { agentInstructions } from "./history.mjs";
 import { readRepositoryFile } from "./repository.mjs";
@@ -17,6 +18,39 @@ export class CursorReviewer {
     const result = this.queue.then(() => this.decide(request));
     this.queue = result.catch(() => {});
     return result;
+  }
+  // The agent's earlier actions this turn, so a step is judged by what it is
+  // part of. Only actions, never the agent's prose, which could argue its case.
+  recentSteps(request) {
+    const calls = new Map(),
+      clip = (text, length) =>
+        text.length > length ? text.slice(0, length - 1) + "…" : text;
+    for (const row of this.controller.store.db
+      .prepare(
+        "SELECT payload FROM events WHERE run_id=? AND type='work' AND json_extract(payload,'$.kind') IN ('tool_call','tool_call_update') ORDER BY id",
+      )
+      .all(this.run.id)) {
+      const item = JSON.parse(row.payload).item ?? {},
+        id = item.toolCallId;
+      if (!id || id === request.details?.toolCallId) continue;
+      const step = calls.get(id) ?? {};
+      calls.delete(id);
+      if (item.title && item.title !== "MCP: tool") step.title = item.title;
+      if (item.kind) step.kind = item.kind;
+      if (item.status) step.status = item.status;
+      if (item.rawInput && Object.keys(item.rawInput).length)
+        step.input = item.rawInput;
+      calls.set(id, step);
+    }
+    return [...calls.values()]
+      .filter((step) => step.title)
+      .slice(-15)
+      .map(({ title, kind, status, input }) => ({
+        title: clip(title, 200),
+        kind,
+        status,
+        ...(input && { input: clip(JSON.stringify(input), 300) }),
+      }));
   }
   async context(request) {
     const { controller, project, chat } = this;
@@ -57,6 +91,7 @@ export class CursorReviewer {
         .map((m) => ({ content: m.content, createdAt: m.created_at })),
       currentRequest: this.text,
       userRefusals,
+      recentSteps: this.recentSteps(request),
       proposedAction: request,
     });
     // An approval must never be based on an action or instructions cut in half.

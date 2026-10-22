@@ -145,6 +145,72 @@ test("Cursor auto-review allows routine work with task/rules context and records
   assert.equal(f.store.steps(f.chat.id)[f.run.id][0].status, "ok");
 });
 
+test("the reviewer sees the agent's earlier actions this turn, but not its prose", async (t) => {
+  const f = await fixture(t);
+  const work = (item) =>
+    f.controller.event(f.chat.id, f.run.id, "work", {
+      kind: item.sessionUpdate,
+      provider: "cursor",
+      item,
+    });
+  work({
+    sessionUpdate: "tool_call",
+    toolCallId: "build",
+    title: "`npm run build`",
+    kind: "execute",
+    status: "pending",
+    rawInput: { command: "npm run build" },
+  });
+  work({
+    sessionUpdate: "tool_call_update",
+    toolCallId: "build",
+    status: "completed",
+  });
+  work({
+    sessionUpdate: "tool_call",
+    toolCallId: "mcp",
+    title: "MCP: tool",
+    kind: "other",
+    status: "pending",
+    rawInput: {},
+  });
+  work({
+    sessionUpdate: "tool_call_update",
+    toolCallId: "mcp",
+    title: "harness-history: browser_navigate",
+    rawInput: {
+      toolName: "browser_navigate",
+      args: { url: "http://localhost:5173" },
+    },
+  });
+  // The request under review is not listed as an earlier step.
+  work({
+    sessionUpdate: "tool_call",
+    toolCallId: "npm test",
+    title: "`npm test`",
+    kind: "execute",
+  });
+  f.controller.event(f.chat.id, f.run.id, "text", { delta: "AGENT_PROSE" });
+  assert.equal((await f.ctx.approve(action())).allow, true);
+  const context = JSON.parse(f.jobs[0].task);
+  assert.deepEqual(context.recentSteps, [
+    {
+      title: "`npm run build`",
+      kind: "execute",
+      status: "completed",
+      input: '{"command":"npm run build"}',
+    },
+    {
+      title: "harness-history: browser_navigate",
+      kind: "other",
+      status: "pending",
+      input:
+        '{"toolName":"browser_navigate","args":{"url":"http://localhost:5173"}}',
+    },
+  ]);
+  assert.doesNotMatch(f.jobs[0].task, /AGENT_PROSE/);
+});
+
 test("reviewer declines actions and reviews plans, while questions and browser requests reach the user", async (t) => {
   const f = await fixture(t);
   let calls = 0;
