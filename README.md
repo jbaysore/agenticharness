@@ -47,7 +47,9 @@ turn and completed work. **Override** bypasses permission review; questions stil
 require your input. Existing conversations keep their saved mode.
 Cursor's **Auto-review**, and browser actions under every agent's **Auto-review**,
 use a separate Codex session, with a Claude subscription fallback if Codex cannot
-review. Choose each model and effort in **Agent rules → Automatic reviewer**. Unpinned defaults show their current model names;
+review. Cursor's read-only Git commands, such as `git status` or `git diff`,
+are allowed without a review unless you have refused an action in that chat.
+Choose each model and effort in **Agent rules → Automatic reviewer**. Unpinned defaults show their current model names;
 pinned choices never silently change. Saving applies to the next review, even
 during a running turn. The reviewer evaluates each proposed action
 against your request and project rules, then allows, declines, or asks you when
@@ -67,7 +69,8 @@ endpoint and physical laptop/iPhone validation are pending. See [daily-use instr
 - Cursor must use native login. Confirm **on-demand usage off** in its dashboard
   once. The app keeps that confirmation for the signed-in account. ACP supplies no
   reliable quota meter. Auto is omitted from the picker. Models that offer Fast
-  are pinned to standard speed.
+  are pinned to standard speed. A model offers effort levels once Harness has
+  used it in a Cursor session.
 
 Connection checks and live catalogs adapt to plan changes. Claude requires
 verified subscription-only usage once per signed-in account during each host

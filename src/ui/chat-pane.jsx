@@ -251,6 +251,12 @@ export function ChatPane({
     if (selectedModel && effort && !selectedModel.efforts.includes(effort))
       setEffort("");
   }, [model]);
+  // A Cursor model's effort levels appear once Harness has used it, so a chat
+  // already on it starts from the default instead of blocking the next send.
+  useEffect(() => {
+    if (provider === "cursor" && !effort && selectedModel?.defaultEffort)
+      setEffort(selectedModel.defaultEffort);
+  }, [provider, effort, selectedModel?.defaultEffort]);
   async function changePermissions(next) {
     setPermissions(next);
     if (!chat) return;

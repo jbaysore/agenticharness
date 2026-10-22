@@ -4,6 +4,8 @@ import {
   configureCursorModel,
   cursorConfigDrift,
   cursorMessageIds,
+  configureCursorEffort,
+  learnCursorEfforts,
   cursorModels,
   cursorQuestionOutcome,
   cursorSpeedFollowUp,
@@ -300,4 +302,73 @@ test("Cursor text either side of a tool call becomes separate messages", () => {
     null,
   );
   assert.equal(id(text(" Done.")), "cursor-response-2");
+});
+
+test("Cursor effort levels are learned per model and keep the first default", () => {
+  const options = (model, effort, levels = ["low", "medium", "high"]) => [
+    { id: "model", currentValue: model },
+    ...(levels.length
+      ? [
+          {
+            id: "reasoning_effort",
+            currentValue: effort,
+            options: levels.map((value) => ({ value })),
+          },
+        ]
+      : []),
+  ];
+  let known = learnCursorEfforts({}, options("grok-4.7", "high"));
+  assert.deepEqual(known, {
+    "grok-4.7": { efforts: ["low", "medium", "high"], defaultEffort: "high" },
+  });
+  // Cursor reports the last level chosen anywhere; the default stays.
+  assert.equal(learnCursorEfforts(known, options("grok-4.7", "low")), known);
+  known = learnCursorEfforts(known, options("composer-2.5", null, []));
+  assert.deepEqual(known["composer-2.5"], { efforts: [], defaultEffort: null });
+  const [grok] = cursorModels(
+    { models: { availableModels: [{ modelId: "grok-4.7", name: "Grok" }] } },
+    known,
+  );
+  assert.deepEqual(
+    [grok.efforts, grok.defaultEffort],
+    [["low", "medium", "high"], "high"],
+  );
+});
+
+test("Cursor effort is set only when it differs, and must be confirmed", async () => {
+  const current = [
+    { id: "model", currentValue: "grok-4.7" },
+    { id: "fast", currentValue: "false" },
+    {
+      id: "reasoning_effort",
+      currentValue: "high",
+      options: [{ value: "low" }, { value: "high" }],
+    },
+  ];
+  const calls = [];
+  const rpc = (confirm) => ({
+    async call(_method, params) {
+      calls.push(params.value);
+      return {
+        configOptions: current.map((o) =>
+          o.id === "reasoning_effort" ? { ...o, currentValue: confirm } : o,
+        ),
+      };
+    },
+  });
+  await configureCursorEffort(rpc("low"), "s", current, "high");
+  await configureCursorEffort(rpc("low"), "s", current, null);
+  assert.deepEqual(calls, []);
+  await configureCursorEffort(rpc("low"), "s", current, "low");
+  assert.deepEqual(calls, ["low"]);
+  await assert.rejects(
+    configureCursorEffort(rpc("high"), "s", current, "low"),
+    /did not confirm/,
+  );
+  await assert.rejects(
+    configureCursorEffort(rpc("low"), "s", current, "xhigh"),
+    /does not offer/,
+  );
+  // A model without effort levels ignores the setting.
+  await configureCursorEffort(rpc("low"), "s", current.slice(0, 2), "low");
 });

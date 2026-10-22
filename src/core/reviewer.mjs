@@ -6,7 +6,11 @@ import { randomUUID } from "node:crypto";
 import { agentInstructions } from "./history.mjs";
 import { readRepositoryFile } from "./repository.mjs";
 import { readRules } from "./rules.mjs";
-import { cursorReviewer, parseReview } from "./review-policy.mjs";
+import {
+  cursorReviewer,
+  parseReview,
+  readOnlyGitCommand,
+} from "./review-policy.mjs";
 import { applyWork } from "./steps.mjs";
 
 const agentNames = { cursor: "Cursor", codex: "Codex", claude: "Claude Code" };
@@ -94,6 +98,23 @@ export class ActionReviewer {
         status,
       }));
   }
+  userRefusals() {
+    return this.controller.store.db
+      .prepare(
+        "SELECT request,response,created_at FROM approvals WHERE conversation_id=? AND status='resolved' ORDER BY rowid DESC LIMIT 12",
+      )
+      .all(this.chat.id)
+      .map((row) => ({
+        request: JSON.parse(row.request),
+        response: JSON.parse(row.response),
+        createdAt: row.created_at,
+      }))
+      .filter(
+        (row) =>
+          row.request.kind !== "question" && row.response.allow === false,
+      )
+      .map(({ request, createdAt }) => ({ request, createdAt }));
+  }
   async context(request) {
     const { controller, project, chat } = this;
     if (!request.details)
@@ -106,21 +127,7 @@ export class ActionReviewer {
       if (error.code !== "ENOENT")
         throw new Error("Project instructions could not be read for review.");
     }
-    const userRefusals = controller.store.db
-      .prepare(
-        "SELECT request,response,created_at FROM approvals WHERE conversation_id=? AND status='resolved' ORDER BY rowid DESC LIMIT 12",
-      )
-      .all(chat.id)
-      .map((row) => ({
-        request: JSON.parse(row.request),
-        response: JSON.parse(row.response),
-        createdAt: row.created_at,
-      }))
-      .filter(
-        (row) =>
-          row.request.kind !== "question" && row.response.allow === false,
-      )
-      .map(({ request, createdAt }) => ({ request, createdAt }));
+    const userRefusals = this.userRefusals();
     const task = JSON.stringify({
       agent: agentNames[this.run.provider] ?? this.run.provider,
       hostPolicies: agentInstructions(project, chat),
@@ -196,6 +203,14 @@ export class ActionReviewer {
         });
     if (signal.aborted)
       return { decision: "deny", reason: "The turn was stopped." };
+    // A refusal from the user could cover even a read, so it goes to review.
+    if (readOnlyGitCommand(request) && !this.userRefusals().length) {
+      const reason = "Read-only Git command; allowed without a model review.";
+      note("allow", `Auto-review allowed ${agent} action`, reason, {
+        decision: "allow",
+      });
+      return { decision: "allow", reason };
+    }
     try {
       const settings = readRules(controller.store).review,
         candidates = ["codex", ...(settings.claudeFallback ? ["claude"] : [])],

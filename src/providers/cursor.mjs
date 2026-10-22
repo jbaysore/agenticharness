@@ -76,7 +76,30 @@ export async function openCursor(cwd) {
     throw error;
   }
 }
-export function cursorModels(session) {
+// Cursor lists a model's effort levels only once a session has selected it,
+// and a session starts on the last model used, so Harness keeps what it sees.
+// The first level seen stays the default: Cursor's current value is whatever
+// was chosen last, here or in another client.
+export function learnCursorEfforts(known, configOptions) {
+  const model = configOptions?.find((o) => o.id === "model")?.currentValue,
+    option = configOptions?.find((o) => o.id === "reasoning_effort");
+  if (!model) return known;
+  const efforts = option?.options?.map((o) => o.value) ?? [],
+    previous = known[model];
+  if (previous && previous.efforts.join() === efforts.join()) return known;
+  return {
+    ...known,
+    [model]: {
+      efforts,
+      defaultEffort: efforts.includes(previous?.defaultEffort)
+        ? previous.defaultEffort
+        : efforts.includes(option?.currentValue)
+          ? option.currentValue
+          : null,
+    },
+  };
+}
+export function cursorModels(session, known = {}) {
   const advertised = session.models?.availableModels ?? [];
   const fromConfig =
     session.configOptions?.find((option) => option.id === "model")?.options ??
@@ -92,8 +115,8 @@ export function cursorModels(session) {
         id: model.id,
         name: model.name,
         description: model.id,
-        efforts: [],
-        defaultEffort: null,
+        efforts: known[model.id]?.efforts ?? [],
+        defaultEffort: known[model.id]?.defaultEffort ?? null,
         isDefault: false,
         billing: fastOnly
           ? "Unavailable: ACP only exposes this fast preset"
@@ -159,6 +182,31 @@ export async function configureCursorModel(rpc, sessionId, modelId, current) {
   }
   return configured;
 }
+export async function configureCursorEffort(
+  rpc,
+  sessionId,
+  configOptions,
+  effort,
+) {
+  const option = configOptions?.find((o) => o.id === "reasoning_effort");
+  if (!effort || !option || option.currentValue === effort) return;
+  if (!option.options?.some((o) => o.value === effort))
+    throw new Error("Cursor does not offer that effort for this model");
+  const configured = await rpc.call("session/set_config_option", {
+    sessionId,
+    configId: "reasoning_effort",
+    value: effort,
+  });
+  if (
+    configured.configOptions?.find((o) => o.id === "reasoning_effort")
+      ?.currentValue !== effort ||
+    cursorConfigDrift(
+      configured.configOptions,
+      configOptions.find((o) => o.id === "model")?.currentValue,
+    )
+  )
+    throw new Error("Cursor did not confirm the requested effort");
+}
 export function cursorWorkKind(update, nativeTasks) {
   if (
     update.rawInput?._toolName === "task" ||
@@ -186,7 +234,7 @@ export function cursorMessageIds() {
     return `cursor-response-${count}`;
   };
 }
-export async function inspectCursor(cwd, confirmation) {
+export async function inspectCursor(cwd, confirmation, learn = () => ({})) {
   const auth = await cursorAuth();
   if (!auth.connected)
     return {
@@ -213,15 +261,15 @@ export async function inspectCursor(cwd, confirmation) {
         authoritative: false,
         windows: [],
       },
-      models: cursorModels(session),
+      models: cursorModels(session, learn(session.configOptions)),
       capabilities: {
         nativeResume: true,
         nativeSubagents: true,
-        effort: false,
+        effort: true,
         usage: false,
         historyTools: true,
       },
-      note: "Auto is omitted. Models that offer Fast are pinned to standard speed, and a turn stops if Fast turns back on. Effort stays at the provider default.",
+      note: "Auto is omitted. Models that offer Fast are pinned to standard speed, and a turn stops if Fast turns back on. A model's effort levels appear once Harness has used it in a Cursor session.",
     };
   } finally {
     rpc.close();
@@ -421,11 +469,18 @@ export async function runCursor(ctx) {
       throw new Error(
         "Choose an available standard Cursor preset from the live ACP catalog",
       );
-    await configureCursorModel(
+    const configured = await configureCursorModel(
       rpc,
       sessionId,
       ctx.model,
       session.configOptions,
+    );
+    const known = ctx.learnEfforts?.(configured.configOptions) ?? {};
+    await configureCursorEffort(
+      rpc,
+      sessionId,
+      configured.configOptions,
+      ctx.effort ?? known[ctx.model]?.defaultEffort,
     );
     // Cursor's own read-only Plan mode; a saved session keeps its last mode.
     await rpc.call("session/set_mode", {

@@ -3,7 +3,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { inspectCodex, runCodex } from "../providers/codex.mjs";
 import { inspectClaude, runClaude } from "../providers/claude.mjs";
-import { inspectCursor, runCursor } from "../providers/cursor.mjs";
+import {
+  inspectCursor,
+  learnCursorEfforts,
+  runCursor,
+} from "../providers/cursor.mjs";
 import {
   agentInstructions,
   handoffContext,
@@ -92,7 +96,11 @@ export class Controller extends EventEmitter {
         () => inspectCodex(this.probePath),
         () => inspectClaude(this.probePath),
         () =>
-          inspectCursor(this.probePath, this.store.setting("cursor-billing")),
+          inspectCursor(
+            this.probePath,
+            this.store.setting("cursor-billing"),
+            (options) => this.learnCursorEfforts(options),
+          ),
       ];
       const ids = ["codex", "claude", "cursor"],
         names = ["Codex", "Claude Code", "Cursor"];
@@ -115,6 +123,27 @@ export class Controller extends EventEmitter {
       this.refreshing = null;
     });
     return this.refreshing;
+  }
+  // Effort levels Cursor has shown for a model, kept for its picker.
+  learnCursorEfforts(configOptions) {
+    const known = this.store.setting("cursor-efforts") ?? {},
+      next = learnCursorEfforts(known, configOptions);
+    if (next === known) return known;
+    this.store.setting("cursor-efforts", next);
+    if (this.providers.some((p) => p.id === "cursor")) {
+      this.providers = this.providers.map((p) =>
+        p.id === "cursor"
+          ? {
+              ...p,
+              models: p.models.map((m) =>
+                next[m.id] ? { ...m, ...next[m.id] } : m,
+              ),
+            }
+          : p,
+      );
+      this.event(null, null, "providers", { providers: this.providers });
+    }
+    return next;
   }
   send(
     chatId,
@@ -610,6 +639,7 @@ export class Controller extends EventEmitter {
       signal: abort.signal,
       emit,
       billingConfirmation: this.store.setting("cursor-billing"),
+      learnEfforts: (options) => this.learnCursorEfforts(options),
       saveSession: (session) => {
         const current = this.store.conversation(chat.id);
         if (current.sessions[run.provider]?.id !== session.id)

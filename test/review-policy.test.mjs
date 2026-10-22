@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   cursorReviewer,
   parseReview,
+  readOnlyGitCommand,
   reviewConfig,
 } from "../src/core/review-policy.mjs";
 
@@ -87,4 +88,48 @@ test("review sessions disable command tools, hooks, agents, web, inherited MCP s
   assert.deepEqual(restricted.apps._default, { enabled: false });
   assert.deepEqual(restricted.plugins.extension, { enabled: false });
   assert.deepEqual(configured, before);
+});
+
+test("only Cursor requests for read-only Git commands skip the model review", () => {
+  const request = (title, kind = "execute") => ({
+    kind: "permission",
+    method: "session/request_permission",
+    title,
+    details: { kind, title },
+  });
+  for (const title of [
+    "`git status`",
+    "`git status --short; git diff --stat`",
+    "`git log -8 --oneline`",
+    '`git log -1 --format="%H %s"`',
+    "`git diff -- src/ui/app.jsx`",
+    "`git status --short && git diff --cached --stat`",
+  ])
+    assert.equal(readOnlyGitCommand(request(title)), true, title);
+  for (const title of [
+    "`git add -A`",
+    "`git commit -m x`",
+    "`git push origin main`",
+    "`git branch -D old`",
+    "`git -c core.pager=evil log`",
+    "`git diff --output=.local/a.patch`",
+    "`git diff --ext-diff`",
+    "`git diff | node -e x`",
+    "`git log > out.txt`",
+    "`git status; npm test`",
+    "`git log $(rm -rf x)`",
+    "`git status & calc`",
+    "`git log @args`",
+    "`git status`\n`rm x`",
+    "git status",
+  ])
+    assert.equal(readOnlyGitCommand(request(title)), false, title);
+  assert.equal(readOnlyGitCommand(request("`git status`", "other")), false);
+  assert.equal(
+    readOnlyGitCommand({
+      ...request("`git status`"),
+      method: "cursor/create_plan",
+    }),
+    false,
+  );
 });

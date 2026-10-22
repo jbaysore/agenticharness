@@ -137,6 +137,42 @@ export function parseReview(text) {
   return { decision: value.decision, reason: value.reason.trim() };
 }
 
+// Git commands that only read repository state skip the reviewer's several
+// seconds. Anything that can write a file, run a configured program, take
+// global options or chain into another command is still reviewed.
+const READ_ONLY_GIT = new Set([
+  "status",
+  "diff",
+  "log",
+  "show",
+  "rev-parse",
+  "ls-files",
+  "blame",
+]);
+export function readOnlyGitCommand(request) {
+  const details = request?.details;
+  if (
+    request?.method !== "session/request_permission" ||
+    details?.kind !== "execute"
+  )
+    return false;
+  const command = /^`([^`]+)`$/.exec(details.title ?? "")?.[1];
+  if (!command || /[|<>`$&(){}@\r\n]/.test(command.replaceAll("&&", ";")))
+    return false;
+  return command.split(/;|&&/).every((part) => {
+    const words = part.trim().split(/\s+/);
+    return (
+      words[0] === "git" &&
+      READ_ONLY_GIT.has(words[1]) &&
+      words
+        .slice(2)
+        .every(
+          (word) => !/^["']?(--output|--ext-diff|--textconv|-o)/.test(word),
+        )
+    );
+  });
+}
+
 export function reviewConfig(config) {
   return {
     web_search: "disabled",

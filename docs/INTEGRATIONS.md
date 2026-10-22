@@ -58,8 +58,9 @@ provider telemetry, not a local usage estimate. Cursor 2026.10.01-e373342 return
 bare model ids, including Composer and Grok, when the client advertises
 `parameterizedModelPicker`. Those models default the new session to Fast, so the
 app sets `fast=false` and stops unless Cursor confirms standard speed. Auto is
-omitted from the picker. Exploded fast-only presets remain disabled. Effort stays
-at the provider default.
+omitted from the picker. Exploded fast-only presets remain disabled. Cursor lists a
+model's `reasoning_effort` levels only once a session has selected it, so the
+app records them as it sees them; the first level seen is the default.
 
 Cursor native task progress arrived as standard `tool_call`/`tool_call_update`
 events (`rawInput._toolName=task`), rather than the documented optional

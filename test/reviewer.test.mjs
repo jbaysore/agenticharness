@@ -791,3 +791,28 @@ for (const option of [
         false,
       );
   });
+
+test("a read-only Git command is allowed without a reviewer session unless the user refused something", async (t) => {
+  const f = await fixture(t);
+  const git = {
+    ...action("`git status --short`"),
+    details: {
+      kind: "execute",
+      title: "`git status --short`",
+      toolCallId: "g",
+    },
+  };
+  assert.equal((await f.ctx.approve(git)).allow, true);
+  assert.equal(f.jobs.length, 0);
+  assert.deepEqual(
+    f.store
+      .events()
+      .filter((e) => e.payload.kind === "permission-review")
+      .map((e) => e.payload.status),
+    ["allow"],
+  );
+  const prior = f.store.addApproval(f.chat.id, f.run.id, "cursor", action("x"));
+  f.store.resolveApproval(prior.id, { allow: false });
+  assert.equal((await f.ctx.approve(git)).allow, true);
+  assert.equal(f.jobs.length, 1);
+});
