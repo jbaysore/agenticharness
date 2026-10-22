@@ -27,7 +27,12 @@ import {
   readRepositoryFile,
 } from "./core/repository.mjs";
 import { historyCall, historyTools } from "./core/history.mjs";
-import { modeSuggestionTool } from "./core/modes.mjs";
+import {
+  ASK_DENY,
+  askHostAllowed,
+  hostToolsForMode,
+  modeSuggestionTool,
+} from "./core/modes.mjs";
 import { landTool } from "./core/worktrees.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
@@ -193,9 +198,11 @@ export async function createHarness({
         const token = req.headers.authorization?.replace(/^Bearer /, "");
         if (!controller.bridgeTokens.has(token))
           return json(res, 401, { error: "History capability expired" });
+        const chatId = controller.bridgeTokens.get(token),
+          chat = store.conversation(chatId);
         return json(res, 200, {
           tools: [
-            ...historyTools,
+            ...hostToolsForMode(chat?.mode, historyTools),
             ...(controller.bridgeModes.has(token) ? [modeSuggestionTool] : []),
             ...(controller.bridgeLand.has(token) ? [landTool] : []),
             ...(controller.bridgeBrowser.get(token)?.tools ?? []),
@@ -208,7 +215,16 @@ export async function createHarness({
         if (!chatId)
           return json(res, 401, { error: "History capability expired" });
         const body = await readJson(req),
-          browser = controller.bridgeBrowser.get(token);
+          chat = store.conversation(chatId);
+        if (chat?.mode === "ask" && !askHostAllowed(body.name))
+          return json(res, 403, { error: ASK_DENY });
+        if (body.name === "move_chat")
+          return json(
+            res,
+            200,
+            await controller.requestChatMove(chatId, body.arguments?.directory),
+          );
+        const browser = controller.bridgeBrowser.get(token);
         if (body.name === "suggest_mode" && controller.bridgeModes.has(token))
           return json(
             res,

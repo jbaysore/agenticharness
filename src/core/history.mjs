@@ -88,6 +88,17 @@ export const historyTools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "move_chat",
+    description:
+      "Move this chat to an existing directory on this computer. Call this only when the user explicitly asks to move this chat. Give the destination as an absolute path. Harness applies the move after this turn ends, resets the provider session, and starts future turns in the new directory. After calling this tool, stop task work, end your turn, and tell the user the move is queued rather than complete. Harness reports whether it completed. Existing chat history stays with the chat. If the chat has unfinished work in its current worktree, Harness keeps the old directory and reports that the move could not be completed.",
+    inputSchema: {
+      type: "object",
+      properties: { directory: { type: "string", minLength: 1 } },
+      required: ["directory"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 // The title a chat gets from its first message until it is renamed.

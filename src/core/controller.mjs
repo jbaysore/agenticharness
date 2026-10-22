@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomBytes, randomUUID } from "node:crypto";
+import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectCodex, runCodex } from "../providers/codex.mjs";
 import { inspectClaude, runClaude } from "../providers/claude.mjs";
@@ -19,7 +20,7 @@ import {
   workspaceNotice,
   workspacePeers,
 } from "./history.mjs";
-import { repositoryState } from "./repository.mjs";
+import { projectPath, repositoryState } from "./repository.mjs";
 import {
   delegationInstructions,
   planDelegation,
@@ -73,6 +74,8 @@ export { CHAT_MODES, checkMode } from "./modes.mjs";
 // Who answers permission requests: a native or separate reviewer (auto),
 // the user (manual), or nobody, because everything is allowed (override).
 export const PERMISSION_MODES = ["auto", "manual", "override"];
+const sameDirectory = (a, b) =>
+  process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 
 export class Controller extends EventEmitter {
   constructor(
@@ -480,8 +483,8 @@ export class Controller extends EventEmitter {
   }
   // The folder a chat works in: its own worktree, created on its first turn,
   // or the project folder when that is not a Git repository on a branch or the
-  // chat began before worktrees were given to every chat. A chat keeps that
-  // folder for good, because native sessions are tied to it.
+  // chat began before worktrees were given to every chat. Explicit moves reset
+  // the native session before changing this folder.
   async chatFolder(chat, home, run) {
     await this.tidying.get(chat.id);
     let worktree = chat.worktree;
@@ -526,6 +529,78 @@ export class Controller extends EventEmitter {
         },
       });
     return { ...home, path: worktree.path, home: home.path, worktree };
+  }
+  async requestChatMove(chatId, directory) {
+    const chat = this.store.conversation(chatId);
+    if (!chat) throw new Error("Conversation not found");
+    if (chat.mode === "ask") throw new Error(ASK_DENY);
+    const active = this.active.get(chatId);
+    if (!active) throw new Error("Move this chat during an active turn");
+    if (active.pendingMove)
+      throw new Error("A move is already queued for this turn");
+    if (typeof directory !== "string" || !directory.trim())
+      throw new Error("Choose an existing absolute destination directory");
+    const path = await projectPath(directory.trim()),
+      home = this.store.project(chat.project_id);
+    if (this.active.get(chatId) !== active)
+      throw new Error("The turn ended before the move could be queued");
+    if (active.pendingMove)
+      throw new Error("A move is already queued for this turn");
+    if (!home) throw new Error("The current project is no longer available");
+    if (chat.worktree && sameDirectory(path, chat.worktree.path))
+      throw new Error(
+        "That is this chat's temporary worktree. Choose the project directory or another destination.",
+      );
+    this.event(chatId, active.run.id, "work", {
+      kind: "history-tool",
+      name: "move_chat",
+      scope: chat.scope,
+      sources: [],
+    });
+    if (sameDirectory(path, home.path))
+      return { queued: false, moved: false, directory: path };
+    active.pendingMove = { path };
+    return {
+      queued: true,
+      directory: path,
+      instruction:
+        "Harness will move the chat after this turn ends. Stop task work now and tell the user the move is queued, not complete. Harness will report whether it completed; future turns will start in the destination directory.",
+    };
+  }
+  async finishChatMove(chatId, pendingMove) {
+    const chat = this.store.conversation(chatId),
+      home = chat && this.store.project(chat.project_id);
+    if (!chat || !home) return false;
+    const destination = await projectPath(pendingMove.path);
+    if (chat.worktree) {
+      const removed = await tidyWorktree(home.path, chat.worktree);
+      if (!removed) {
+        this.event(chatId, null, "work", {
+          kind: "chat-move-failed",
+          item: {
+            title: "Chat was not moved",
+            description:
+              "Its current worktree has uncommitted changes or commits that have not landed. Keep working in the old directory, then land or save that work before asking to move the chat again.",
+          },
+        });
+        return false;
+      }
+    }
+    const project = this.store.addProject(
+        basename(destination) || destination,
+        destination,
+      ),
+      moved = this.store.moveConversation(chatId, project.id);
+    this.event(null, null, "projects", {});
+    this.event(chatId, null, "chat", moved);
+    this.event(chatId, null, "work", {
+      kind: "chat-moved",
+      item: {
+        title: "Chat moved",
+        description: `Future turns will work in ${project.path}. The provider session was reset, and chat history stays available.`,
+      },
+    });
+    return true;
   }
   // Between turns, a worktree whose work has all landed is removed, so a
   // project left idle is back to its one folder.
@@ -1123,6 +1198,8 @@ export class Controller extends EventEmitter {
           return project.worktree
             ? land()
             : { error: "This chat works in the shared project folder." };
+        if (name === "move_chat")
+          return this.requestChatMove(chat.id, input.directory);
         if (isDelegationTool(name))
           return delegator
             ? delegator.handle(name, input)
@@ -1212,14 +1289,26 @@ export class Controller extends EventEmitter {
     }
     this.store.setRun(run.id, status, null, error ?? null);
     this.requeuePending(active);
-    this.active.delete(chat.id);
     this.event(chat.id, run.id, "run", {
       status,
       error,
       provider: run.provider,
       model: run.model,
     });
-    if (project?.worktree) this.tidy(chat.id);
+    if (active?.pendingMove)
+      await this.finishChatMove(chat.id, active.pendingMove).catch(
+        (failure) => {
+          this.event(chat.id, null, "work", {
+            kind: "chat-move-failed",
+            item: {
+              title: "Chat was not moved",
+              description: failure.message,
+            },
+          });
+        },
+      );
+    this.active.delete(chat.id);
+    if (!active?.pendingMove && project?.worktree) this.tidy(chat.id);
     this.releaseQueue(chat.id);
   }
   // A Goal question waits out its deadline, then the agent chooses. Any other

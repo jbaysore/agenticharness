@@ -258,6 +258,24 @@ export async function runClaude(
         // Naming happens before task work, without a tool-discovery round trip.
         { alwaysLoad: true },
       ),
+      ...(ctx.tools ?? [])
+        .filter((t) => t.name === "move_chat")
+        .map((t) =>
+          tool(
+            t.name,
+            t.description,
+            { directory: z.string().min(1) },
+            async (args) => ({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(await ctx.history(t.name, args)),
+                },
+              ],
+            }),
+            { alwaysLoad: true },
+          ),
+        ),
       // Offered only on turns where the user's rules allow a hand-off.
       ...(ctx.tools ?? [])
         .filter((t) => delegationShapes[t.name])

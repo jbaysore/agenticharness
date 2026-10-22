@@ -282,6 +282,16 @@ export class Store {
       .run(projectId, this.now(), id);
     return this.conversation(id);
   }
+  moveConversation(id, projectId) {
+    if (!this.conversation(id)) throw new Error("Conversation not found");
+    if (!this.project(projectId)) throw new Error("Project not found");
+    this.db
+      .prepare(
+        "UPDATE conversations SET project_id=?,sessions='{}',worktree=NULL,updated_at=? WHERE id=?",
+      )
+      .run(projectId, this.now(), id);
+    return this.conversation(id);
+  }
   // Empty unused chats can be dropped. A typed composer draft is a client
   // concern; anything that has started a turn stays.
   discardUnusedConversation(id) {
