@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "./components.jsx";
+import { ClaudeResets } from "./claude-resets.jsx";
 import { serverClock } from "./clock.mjs";
 import {
   providerStatusLabel,
@@ -12,7 +13,7 @@ import {
 
 // Included usage left for each agent, at a glance in the top bar. Clicking it
 // opens every limit window with its reset time.
-export function UsageGlance({ providers, onOpenConnections }) {
+export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshing }) {
   const [open, setOpen] = useState(false),
     [now, setNow] = useState(() => serverClock.now()),
     root = useRef(null);
@@ -154,6 +155,9 @@ export function UsageGlance({ providers, onOpenConnections }) {
                       ? "This integration doesn’t report quota."
                       : (p.blockReason ?? "Not connected")}
                   </p>
+                )}
+                {p.id === "claude" && (
+                  <ClaudeResets onRefresh={onRefresh} refreshing={refreshing} />
                 )}
               </section>
             );

@@ -171,6 +171,10 @@ try {
       name: "Usage remaining",
       exact: true,
     });
+    await expect(popover.getByRole("link", { name: "Open Claude resets" })).toHaveAttribute(
+      "href", "https://claude.ai/settings/usage",
+    );
+    await expect(popover.getByRole("button", { name: "Refresh usage", exact: true })).toBeVisible();
     await expect(popover.locator(".usage-provider.cursor")).toHaveCount(0);
     await expect(
       page.locator(".usage-chip.claude .usage-chip-row.unknown"),
@@ -200,6 +204,8 @@ try {
       name: "Connections & usage",
       exact: true,
     });
+    await expect(connections.getByRole("link", { name: "Open Claude resets" })).toBeVisible();
+    await expect(connections.getByRole("button", { name: "Refresh usage", exact: true })).toBeVisible();
     await expect(connections.getByText("Cursor", { exact: true })).toBeVisible();
     await expect(connections.getByRole("status")).toHaveText(
       /Unknown · last confirmed at/,
@@ -237,6 +243,14 @@ try {
     "A Claude included-usage limit is exhausted.",
   );
   const context = await browser.newContext();
+  // External navigation and refresh stay synthetic: no live redemption or
+  // provider probes. Opening Claude alone must not change an exhausted meter.
+  await context.route("https://claude.ai/**", (route) => route.fulfill({
+    contentType: "text/html", body: "<title>Claude usage fixture</title>",
+  }));
+  const exhausted = monitor.update(reading(100));
+  app.controller.providers[0].usage = exhausted.usage;
+  app.controller.providers[0].blockReason = exhausted.reason;
   const page = await context.newPage();
   await page.goto(`${app.runtime.origin}/#pair=${app.auth.pairing()}`);
   await page
@@ -246,9 +260,42 @@ try {
   await expect(page.locator(".notice.failed")).toContainText(
     "A Claude included-usage limit is exhausted.",
   );
+  await page.locator(".usage-glance-trigger").click();
+  const popover = page.getByRole("dialog", { name: "Usage remaining", exact: true });
+  const popupOpened = page.waitForEvent("popup");
+  await popover.getByRole("link", { name: "Open Claude resets" }).click();
+  const popup = await popupOpened;
+  await expect(popup).toHaveURL("https://claude.ai/settings/usage");
+  await popup.close();
+  await expect(page.locator(".usage-chip.claude .usage-chip-value").first()).toHaveText("0%");
+  let releaseRefresh, refreshCalls = 0;
+  await page.route("**/api/providers/refresh", async (route) => {
+    refreshCalls++;
+    await new Promise((resolve) => { releaseRefresh = resolve; });
+    const restored = monitor.update(reading(refreshCalls === 1 ? 0 : 9));
+    app.controller.providers[0].usage = restored.usage;
+    app.controller.providers[0].blockReason = restored.reason;
+    await route.fulfill({ json: { providers: app.controller.providers } });
+  });
+  await popover.getByRole("button", { name: "Refresh usage", exact: true }).click();
+  await expect(popover.getByRole("button", { name: "Checking…", exact: true })).toBeDisabled();
+  await expect.poll(() => typeof releaseRefresh).toBe("function");
+  releaseRefresh();
+  await expect(page.locator(".usage-chip.claude .usage-chip-value").first()).toHaveText("100%");
+  await expect(popover.getByRole("button", { name: "Refresh usage", exact: true })).toBeEnabled();
+  await expect(popover.getByText("Out of usage", { exact: true })).toHaveCount(0);
+  await page.locator(".usage-popover-link").click();
+  const connections = page.getByRole("dialog", { name: "Connections & usage", exact: true });
+  releaseRefresh = null;
+  await connections.getByRole("button", { name: "Refresh usage", exact: true }).click();
+  await expect(connections.getByRole("button", { name: "Checking…", exact: true })).toHaveCount(2);
+  await expect.poll(() => typeof releaseRefresh).toBe("function");
+  releaseRefresh();
+  await expect(page.locator(".usage-chip.claude .usage-chip-value").first()).toHaveText("91%");
+  expect(refreshCalls).toBe(2);
   expect(errors).toEqual([]);
   console.log(
-    "Claude usage UI passed: six header widths, visible provider/window labels, stable countdown columns, seconds/milliseconds, wrong and changed device clocks, Cursor excluded, unknown timestamps, retained values, reload, recovery and visible stop reason.",
+    "Claude usage UI passed: six header widths, stable countdown columns, host clocks, unknown telemetry, reset links in both panels, external navigation from exhausted quota, refresh loading and quota recovery, and visible stop reason.",
   );
 } finally {
   await browser?.close();

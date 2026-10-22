@@ -14,6 +14,7 @@ import { ChatRow } from "./chat-row.jsx";
 import { RulesModal } from "./rules-modal.jsx";
 import { SkillsModal } from "./skills-modal.jsx";
 import { UsageGlance } from "./usage-glance.jsx";
+import { ClaudeResets } from "./claude-resets.jsx";
 import {
   activeChats,
   attentionCount,
@@ -622,6 +623,15 @@ function App() {
       report(e);
     }
   };
+  const refreshProviders = action(async () => {
+    setBusy(true);
+    try {
+      const r = await api("/api/providers/refresh", {});
+      setState((s) => ({ ...s, providers: r.providers }));
+    } finally {
+      setBusy(false);
+    }
+  });
   async function connectBrowser() {
     try {
       await api("/api/pair", { code: pair.trim() });
@@ -906,6 +916,8 @@ function App() {
           <UsageGlance
             providers={state.providers}
             onOpenConnections={() => setModal("connections")}
+            onRefresh={refreshProviders}
+            refreshing={busy}
           />
           {!mobile && (
             <button
@@ -1132,15 +1144,8 @@ function App() {
             <p>Each agent uses its own subscription and native sign-in.</p>
             <button
               className="secondary"
-              onClick={action(async () => {
-                setBusy(true);
-                try {
-                  const r = await api("/api/providers/refresh", {});
-                  setState((s) => ({ ...s, providers: r.providers }));
-                } finally {
-                  setBusy(false);
-                }
-              })}
+              disabled={busy}
+              onClick={refreshProviders}
             >
               <Icon name="refresh" size={14} />
               {busy ? "Checking…" : "Refresh"}
@@ -1205,6 +1210,9 @@ function App() {
                   </div>
                 )}
                 {p.note && <p className="muted small">{p.note}</p>}
+                {p.id === "claude" && (
+                  <ClaudeResets onRefresh={refreshProviders} refreshing={busy} />
+                )}
                 {p.id === "cursor" && (
                   <div className="confirmation">
                     <a

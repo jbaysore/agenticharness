@@ -93,6 +93,10 @@ Claude usage reads are shared across chats, connection refreshes and workers,
 at most once a minute while active. Missing or failed readings retry after five,
 then ten, then fifteen minutes; a longer provider Retry-After is honored. Cached
 reads retain their original confirmation time. Refresh also respects this cooldown.
+For an available free Claude reset, use **Open Claude resets** in the header's
+usage panel or **Connections & usage**. Redeem it on Claude's account usage page,
+then return to Harness and choose **Refresh usage**. Claude controls reset
+eligibility and confirmation; Harness does not redeem resets itself.
 Unknown or exhausted quota stops Codex. Cursor's account-level disabled on-demand setting is the
 billing boundary. The app never supplies an inference API key or buys credits.
 

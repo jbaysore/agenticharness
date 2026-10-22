@@ -2537,6 +2537,26 @@ small {
 .usage-popover-link:hover {
   color: var(--text);
 }
+.claude-resets {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.claude-resets > p {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+.claude-reset-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  font-size: 12px;
+}
+.claude-reset-actions > .secondary {
+  padding: 6px 8px;
+  font-size: 12px;
+}
 .rules-form {
   display: grid;
   gap: 13px;
