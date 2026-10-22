@@ -414,6 +414,10 @@ Prompt tab to that terminal, in the same folder. The arrow beside **New
 terminal** starts a new terminal window with either shell. Each tab is its own
 shell and keeps running while hidden or while the pane is closed. Ending a
 terminal stops all of its tabs. Up to sixteen tabs can be open in total.
+The **Terminals** section of the sidebar folds away, and stays folded after a
+reload. A terminal that nobody has run a command in is removed, not kept, when
+its pane is closed or replaced; once any tab has had a line submitted, it stays
+in the list until you end it.
 
 Terminal starts PowerShell in the selected primary project. It continues when
 you change panels or disconnect the browser. Close terminals when finished. A

@@ -412,6 +412,26 @@ small {
   width: 20px;
   height: 20px;
 }
+.section-label.section-toggle {
+  width: calc(100% - 20px);
+  padding: 0;
+  height: auto;
+  text-align: left;
+}
+.section-toggle > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.section-toggle svg {
+  transition: transform var(--dur-fast) var(--ease);
+}
+.section-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.section-toggle > small {
+  font-weight: 500;
+}
 .project-list {
   overflow: auto;
   flex: 1;

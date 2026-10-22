@@ -61,6 +61,15 @@ import {
   visiblePanes,
 } from "./panes.mjs";
 
+const terminalsKey = "harness.terminals.open.v1";
+function loadTerminalsOpen() {
+  try {
+    return localStorage.getItem(terminalsKey) !== "false";
+  } catch {
+    return true;
+  }
+}
+
 function loadExpandedFolders() {
   try {
     return readExpandedFolders(localStorage.getItem(folderStorageKey));
@@ -91,6 +100,7 @@ function App() {
     [selectedProject, setSelectedProject] = useState(""),
     [expandedFolders, setExpandedFolders] = useState(loadExpandedFolders),
     [archivedOpen, setArchivedOpen] = useState([]),
+    [terminalsOpen, setTerminalsOpen] = useState(loadTerminalsOpen),
     [windowVisible, setWindowVisible] = useState(
       () => document.visibilityState === "visible",
     );
@@ -257,6 +267,24 @@ function App() {
     savePanes(view);
     saveLayout(view);
   }, [openIds.join(","), terminalIds.join(","), view.focused, ready]);
+  // A terminal nothing was ever run in is dropped when its pane goes away.
+  const previousTerminals = useRef([]);
+  useEffect(() => {
+    const closed = previousTerminals.current.filter(
+      (id) => !terminalIds.includes(id),
+    );
+    previousTerminals.current = terminalIds;
+    if (!ready) return;
+    for (const id of closed)
+      api(`/api/terminals/group/${id}/release`, {}).catch(report);
+  }, [terminalIds.join(","), ready]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(terminalsKey, String(terminalsOpen));
+    } catch {
+      // The section still opens and closes for this visit.
+    }
+  }, [terminalsOpen]);
   useEffect(() => {
     let ignore = false,
       retry;
@@ -637,6 +665,7 @@ function App() {
     setView((v) =>
       openTerminal(v, group.id, group.projectId, beside, limit.current),
     );
+    setTerminalsOpen(true);
     setSelectedProject(group.projectId);
     setSidebar(false);
   }
@@ -869,8 +898,25 @@ function App() {
         </button>
         {groups.length > 0 && (
           <>
-            <div className="section-label">Terminals</div>
-            <div className="active-list" role="group" aria-label="Terminals">
+            <button
+              className="section-label section-toggle"
+              aria-expanded={terminalsOpen}
+              aria-controls="terminal-list"
+              onClick={() => setTerminalsOpen(!terminalsOpen)}
+            >
+              <span>
+                <Icon name="chevron" size={12} />
+                Terminals
+              </span>
+              {!terminalsOpen && <small>{groups.length}</small>}
+            </button>
+            <div
+              className="active-list"
+              id="terminal-list"
+              role="group"
+              aria-label="Terminals"
+              hidden={!terminalsOpen}
+            >
               {groups.map((t) => (
                 <TerminalRow
                   key={t.id}

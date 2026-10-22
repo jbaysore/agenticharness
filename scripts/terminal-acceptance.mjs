@@ -149,7 +149,40 @@ try {
   await expect(
     sidebar.getByRole("button", { name: "Terminal 1", exact: true }),
   ).toHaveCount(0);
-  expect(app.terminals.list()).toHaveLength(1);
+  expect(app.terminals.list()).toHaveLength(0);
+
+  // A terminal nothing was run in is dropped when its pane goes away; one
+  // that was used stays in the sidebar.
+  await page.getByRole("button", { name: "New terminal", exact: true }).click();
+  await page.locator(".xterm-helper-textarea").fill("echo kept");
+  await page.locator(".xterm-helper-textarea").press("Enter");
+  await expect.poll(() => app.terminals.list()[0]?.used).toBe(true);
+  await page.locator(".new-chat").click();
+  await expect(page.locator(".terminal-row")).toHaveCount(1);
+  const kept = app.terminals.list().length;
+  expect(kept).toBe(1);
+  await page.getByRole("button", { name: "New terminal", exact: true }).click();
+  await expect.poll(() => app.terminals.list().length).toBe(kept + 1);
+  await page.locator(".xterm-helper-textarea").fill("typed but not sent");
+  await page.locator(".new-chat").click();
+  await expect.poll(() => app.terminals.list().length).toBe(kept);
+  await expect(page.locator(".terminal-row")).toHaveCount(1);
+  await page.getByRole("button", { name: "New terminal", exact: true }).click();
+  await expect.poll(() => app.terminals.list().length).toBe(kept + 1);
+  await page.getByLabel("Close pane").first().click();
+  await expect.poll(() => app.terminals.list().length).toBe(kept);
+  await expect(page.locator(".terminal-row")).toHaveCount(1);
+
+  // The Terminals section folds away, and stays that way after a reload.
+  const toggle = page.getByRole("button", { name: /^Terminals/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".terminal-row")).toBeHidden();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: /^Terminals/ }),
+  ).toHaveAttribute("aria-expanded", "false");
   expect(errors).toEqual([]);
   console.log(
     "Terminal pane checks passed: opens from the sidebar, runs a command, splits beside, reopens, ends.",

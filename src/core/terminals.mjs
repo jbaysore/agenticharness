@@ -71,6 +71,8 @@ export class Terminals {
       title,
       output: "",
       status: "running",
+      // Set once a line has been submitted, so an untouched terminal can be dropped.
+      used: false,
       process: child,
     };
     this.sessions.set(id, session);
@@ -100,7 +102,17 @@ export class Terminals {
     if (!s || s.status !== "running") throw new Error("Terminal has ended");
     if (typeof data !== "string" || data.length > 10000)
       throw new Error("Invalid terminal input");
+    if (/[\r\n]/.test(data)) s.used = true;
     s.process.write(data);
+  }
+  // A terminal nobody has typed a command into is removed when it is left.
+  async discardUnused(groupId) {
+    const tabs = [...this.sessions.values()].filter(
+      (s) => s.groupId === groupId,
+    );
+    if (!tabs.length || tabs.some((s) => s.used)) return false;
+    await Promise.all(tabs.map((s) => this.close(s.id)));
+    return true;
   }
   resize(id, cols, rows) {
     if (

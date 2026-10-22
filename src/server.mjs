@@ -709,6 +709,13 @@ export async function createHarness({
           );
         }
         if (
+          (match = path.match(/^\/api\/terminals\/group\/([^/]+)\/release$/)) &&
+          method === "POST"
+        )
+          return json(res, 200, {
+            discarded: await terminals.discardUnused(match[1]),
+          });
+        if (
           (match = path.match(
             /^\/api\/terminals\/([^/]+)\/(input|resize|close)$/,
           )) &&
