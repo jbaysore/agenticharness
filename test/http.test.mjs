@@ -348,6 +348,69 @@ test("a chat can be renamed, archived and marked read, and each change is announ
   }
 });
 
+test("an unused empty chat can be discarded, and a started chat cannot", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-http-discard-")),
+    app = await createHarness({ dataDir: dir, port: 0, startProviders: false });
+  const url = app.runtime.origin;
+  try {
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Harness-Client": "1",
+    };
+    const paired = await fetch(url + "/api/pair", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ code: app.auth.pairing() }),
+    });
+    headers.cookie = paired.headers.get("set-cookie").split(";")[0];
+    const call = async (path, body, method = "POST") => {
+      const response = await fetch(url + path, {
+        method,
+        headers,
+        body: body && JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const project = app.store.addProject("Discard project", dir),
+      unused = app.store.createConversation({ projectId: project.id }),
+      kept = app.store.createConversation({ projectId: project.id });
+    app.store.addMessage({
+      conversationId: kept.id,
+      role: "user",
+      content: "Keep this chat",
+    });
+    const announced = [];
+    app.controller.on("event", (e) => announced.push(e));
+    const discarded = await call(
+      `/api/chats/${unused.id}`,
+      undefined,
+      "DELETE",
+    );
+    assert.equal(discarded.status, 200);
+    assert.equal(app.store.conversation(unused.id), undefined);
+    assert.equal(
+      (await call(`/api/chats/${unused.id}`, undefined, "GET")).status,
+      404,
+    );
+    const deleted = announced.find(
+      (e) => e.type === "chat" && e.payload?.deleted,
+    );
+    assert.equal(deleted.conversationId, unused.id);
+    assert.equal(
+      (await call(`/api/chats/${kept.id}`, undefined, "DELETE")).status,
+      409,
+    );
+    assert.ok(app.store.conversation(kept.id));
+    assert.equal(
+      (await call("/api/chats/missing", undefined, "DELETE")).status,
+      404,
+    );
+  } finally {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("agent rules are saved through the API, validated, and announced", async () => {
   const dir = await mkdtemp(join(tmpdir(), "harness-http-")),
     app = await createHarness({ dataDir: dir, port: 0, startProviders: false });

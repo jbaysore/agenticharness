@@ -24,6 +24,7 @@ import {
   workspacePeersLabel,
 } from "./status.mjs";
 import { readAllPending } from "./outbox.mjs";
+import { unusedClosedChats } from "./discard.mjs";
 import { applyWork, verbLabels } from "../core/steps.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
 import {
@@ -216,8 +217,15 @@ function App() {
     [admit],
   );
   const openIds = view.panes.map((p) => p.chatId).filter(Boolean);
+  const previousOpen = useRef([]);
   useEffect(() => {
-    const open = new Set(openIds);
+    const open = new Set(openIds),
+      closed = unusedClosedChats(
+        previousOpen.current,
+        openIds,
+        (id) => chats[id] ?? state.conversations.find((c) => c.id === id),
+      );
+    previousOpen.current = openIds;
     for (const id of tracked.current)
       if (!open.has(id)) tracked.current.delete(id);
     setChats((all) => {
@@ -227,6 +235,11 @@ function App() {
         : Object.fromEntries(kept);
     });
     if (!ready) return;
+    for (const id of closed)
+      api("/api/chats/" + id, undefined, "DELETE").then(refresh, (error) => {
+        if ([400, 404, 409].includes(error.status)) return;
+        report(error);
+      });
     history.replaceState({}, "", toSearch(view));
     savePanes(view);
   }, [openIds.join(","), view.focused, ready]);
@@ -360,6 +373,11 @@ function App() {
         ].includes(e.type)
       )
         refresh().catch(report);
+      if (e.type === "chat" && e.payload?.deleted)
+        setView((v) => {
+          const open = v.panes.find((p) => p.chatId === e.conversationId);
+          return open ? closePane(v, open.key) : v;
+        });
       if (e.type.startsWith("terminal-"))
         window.dispatchEvent(new CustomEvent(e.type, { detail: e.payload }));
       if (e.type === "usage" && e.payload.provider) {

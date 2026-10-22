@@ -337,6 +337,64 @@ try {
   await expect(panes).toHaveCount(1);
   await expect(focused).toHaveAttribute("aria-label", "Layout check");
   await expect(page.getByLabel("Close pane")).toHaveCount(0);
+
+  // Unused new chats disappear when closed; typed composer text stays as a draft.
+  const newChatButton = page.locator("button.new-chat");
+  const unusedRow = () =>
+    left.locator(".chat-row", { hasText: "New conversation" });
+  const unusedCount = () =>
+    app.store.conversations().filter((c) => c.title === "New conversation")
+      .length;
+  await newChatButton.click({ modifiers: ["Control"] });
+  await expect(panes).toHaveCount(2);
+  await expect(unusedRow()).toBeVisible();
+  await paneFor("New conversation").getByLabel("Close pane").click();
+  await expect(panes).toHaveCount(1);
+  await expect.poll(unusedCount).toBe(0);
+  await expect(unusedRow()).toHaveCount(0);
+
+  await newChatButton.click({ modifiers: ["Control"] });
+  await expect(panes).toHaveCount(2);
+  await paneFor("New conversation")
+    .getByLabel("Message your coding agent")
+    .fill("Keep this draft");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const drafts = JSON.parse(
+          sessionStorage.getItem("harness.drafts.v1") || "{}",
+        );
+        return Object.values(drafts).some((text) =>
+          String(text).includes("Keep this draft"),
+        );
+      }),
+    )
+    .toBe(true);
+  await paneFor("New conversation").getByLabel("Close pane").click();
+  await expect(panes).toHaveCount(1);
+  await expect.poll(unusedCount).toBe(1);
+  await unusedRow().locator(".chat-open").click();
+  await expect(focused).toHaveAttribute("aria-label", "New conversation");
+  await expect(focused.getByLabel("Message your coding agent")).toHaveValue(
+    "Keep this draft",
+  );
+  await focused.getByLabel("Message your coding agent").fill("");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const drafts = JSON.parse(
+          sessionStorage.getItem("harness.drafts.v1") || "{}",
+        );
+        return Object.values(drafts).some((text) =>
+          String(text).includes("Keep this draft"),
+        );
+      }),
+    )
+    .toBe(false);
+  await sidebarChat("Layout check").click();
+  await expect.poll(unusedCount).toBe(0);
+  await expect(unusedRow()).toHaveCount(0);
+
   await page.setViewportSize({ width: 1512, height: 982 });
   await expect(right).toBeVisible();
 
@@ -501,7 +559,7 @@ try {
   await expect.poll(() => width(left)).toBe(256);
   expect(errors).toEqual([]);
   console.log(
-    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, header drag reordering and cancellation, draft preservation, pin and unpin, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
+    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, header drag reordering and cancellation, draft preservation, unused empty chats discarded on close, pin and unpin, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
   );
 } finally {
   await browser?.close();

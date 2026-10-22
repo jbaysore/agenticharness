@@ -483,6 +483,17 @@ export async function createHarness({
             return json(res, 404, { error: "Conversation not found" });
           if (method === "GET")
             return json(res, 200, store.conversationSnapshot(id));
+          if (method === "DELETE") {
+            if (controller.active.has(id))
+              throw new Error("Stop the turn before discarding this chat");
+            try {
+              store.discardUnusedConversation(id);
+            } catch (error) {
+              return json(res, 409, { error: error.message });
+            }
+            controller.event(id, null, "chat", { deleted: true });
+            return json(res, 200, { ok: true });
+          }
           if (method === "PATCH") {
             const body = await readJson(req),
               fields = {};

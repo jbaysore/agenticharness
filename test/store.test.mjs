@@ -354,6 +354,46 @@ test("pinning floats a chat without moving its activity time", () => {
   assert.equal(db.conversations()[0].id, older.id);
   db.close();
 });
+test("an unused empty chat can be discarded, but started or kept chats cannot", () => {
+  const db = new Store(":memory:"),
+    p = db.addProject("P", "C:\\p"),
+    empty = db.createConversation({ projectId: p.id }),
+    named = db.createConversation({ projectId: p.id, title: "Keep me" }),
+    messaged = db.createConversation({ projectId: p.id }),
+    pinned = db.createConversation({ projectId: p.id }),
+    archived = db.createConversation({ projectId: p.id }),
+    resumed = db.createConversation({ projectId: p.id });
+  db.addMessage({
+    conversationId: messaged.id,
+    role: "user",
+    content: "Hello",
+  });
+  db.setPinned(pinned.id, true);
+  db.setArchived(archived.id, true);
+  db.updateConversation(resumed.id, { sessions: { codex: { id: "native" } } });
+  db.discardUnusedConversation(empty.id);
+  assert.equal(db.conversation(empty.id), undefined);
+  db.discardUnusedConversation(named.id);
+  assert.equal(db.conversation(named.id), undefined);
+  assert.throws(
+    () => db.discardUnusedConversation(messaged.id),
+    /already has messages/,
+  );
+  assert.throws(
+    () => db.discardUnusedConversation(pinned.id),
+    /Unpin this chat/,
+  );
+  assert.throws(() => db.discardUnusedConversation(archived.id), /archived/);
+  assert.throws(
+    () => db.discardUnusedConversation(resumed.id),
+    /already has messages/,
+  );
+  assert.throws(
+    () => db.discardUnusedConversation("missing"),
+    /Conversation not found/,
+  );
+  db.close();
+});
 test("an existing workspace gains the chat columns with its history already read", async () => {
   const directory = await mkdtemp(join(tmpdir(), "harness-migrate-")),
     path = join(directory, "db.sqlite"),

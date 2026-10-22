@@ -53,3 +53,8 @@ export function saveDraftAttachments(
     return false;
   }
 }
+export function hasComposerDraft(id, storage = window.sessionStorage) {
+  return Boolean(
+    readDraft(id, storage).trim() || readDraftAttachments(id, storage).length,
+  );
+}
