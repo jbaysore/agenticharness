@@ -11,6 +11,10 @@ let browser;
 const errors = [];
 try {
   const project = app.store.addProject("Sidebar fixture", process.cwd());
+  const folderActionProject = app.store.addProject(
+    "Folder action fixture",
+    resolve(dataDir, "folder-action-project"),
+  );
   const chat = app.store.createConversation({
     projectId: project.id,
     title: "Layout check",
@@ -436,6 +440,67 @@ try {
   await expect.poll(unusedCount).toBe(0);
   await expect(unusedRow()).toHaveCount(0);
 
+  // A folder action creates a conversation for that folder and opens it.
+  await page
+    .getByRole("button", {
+      name: "New conversation in Folder action fixture",
+      exact: true,
+    })
+    .click();
+  await expect(panes).toHaveCount(1);
+  await expect(focused).toHaveAttribute("aria-label", "New conversation");
+  await expect.poll(() =>
+    app.store
+      .conversations()
+      .some(
+        (c) =>
+          c.title === "New conversation" &&
+          c.project_id === folderActionProject.id,
+      ),
+  ).toBe(true);
+  await expect(page.locator(".project-row.selected")).toContainText(
+    "Folder action fixture",
+  );
+  await expect(
+    page.getByLabel("Collapse Folder action fixture", { exact: true }),
+  ).toBeVisible();
+
+  // Ctrl-click creates the conversation for the clicked folder beside it.
+  await page
+    .getByRole("button", {
+      name: "New conversation in Sidebar fixture",
+      exact: true,
+    })
+    .click({ modifiers: ["Control"] });
+  await expect(panes).toHaveCount(2);
+  await expect(focused).toHaveAttribute("aria-label", "New conversation");
+  await expect.poll(() =>
+    app.store
+      .conversations()
+      .some(
+        (c) =>
+          c.title === "New conversation" && c.project_id === project.id,
+      ),
+  ).toBe(true);
+
+  await focused.getByLabel("Close pane").click();
+  await expect(panes).toHaveCount(1);
+  await left
+    .locator(".project-row")
+    .filter({ hasText: "Sidebar fixture" })
+    .locator(".project-open")
+    .click();
+  await sidebarChat("Layout check").click();
+  await expect.poll(() =>
+    app.store
+      .conversations()
+      .filter(
+        (c) =>
+          c.title === "New conversation" &&
+          [project.id, folderActionProject.id].includes(c.project_id),
+      ).length,
+  ).toBe(0);
+
   await page.setViewportSize({ width: 1512, height: 982 });
   await expect(right).toBeVisible();
 
@@ -499,6 +564,27 @@ try {
   await expect(phone.getByLabel("Add a pane beside")).toHaveCount(0);
   await phone.getByLabel("Show sidebar", { exact: true }).click();
   await expect(phone.locator(".sidebar")).toBeVisible();
+  await phone
+    .getByRole("button", {
+      name: "New conversation in Folder action fixture",
+      exact: true,
+    })
+    .click();
+  await expect(phone.locator(".sidebar")).toBeHidden();
+  await expect(phone.locator(".chat-pane")).toHaveAttribute(
+    "aria-label",
+    "New conversation",
+  );
+  await expect.poll(() =>
+    app.store
+      .conversations()
+      .some(
+        (c) =>
+          c.title === "New conversation" &&
+          c.project_id === folderActionProject.id,
+      ),
+  ).toBe(true);
+  await phone.getByLabel("Show sidebar", { exact: true }).click();
   await phone
     .getByLabel("Dismiss sidebar")
     .click({ position: { x: 375, y: 400 } });

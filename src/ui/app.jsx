@@ -697,8 +697,8 @@ function App() {
     });
     await refresh();
   }
-  async function newChat(beside = false) {
-    const target = state.projects.find((p) => p.id === selectedProject);
+  async function newChat(beside = false, projectId = selectedProject) {
+    const target = state.projects.find((p) => p.id === projectId);
     if (!target) {
       setModal("project");
       return;
@@ -1018,6 +1018,16 @@ function App() {
                     <Icon name="folder" />
                     <span>{p.name}</span>
                     <small>{mine.length - archived.length}</small>
+                  </button>
+                  <button
+                    className="icon-button folder-new-chat"
+                    aria-label={`New conversation in ${p.name}`}
+                    title={`New conversation in ${p.name}`}
+                    onClick={(e) =>
+                      action(() => newChat(e.ctrlKey || e.metaKey, p.id))()
+                    }
+                  >
+                    <Icon name="plus" size={15} />
                   </button>
                 </div>
                 {open && (

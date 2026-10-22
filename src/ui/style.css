@@ -491,6 +491,12 @@ small {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+.folder-new-chat {
+  width: 26px;
+  height: 26px;
+  margin-right: 3px;
+  color: var(--text-3);
+}
 .project-row.selected {
   color: var(--text);
 }
