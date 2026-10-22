@@ -96,6 +96,13 @@ fails if the project folder has uncommitted changes in the same files, or is on
 another branch. Before each turn, a worktree with no commits of its own catches
 up with the project's branch.
 
+When a chat's turn ends and everything in its worktree has landed, with no
+uncommitted, untracked or unlanded work left, Harness removes the worktree and
+its branch. The next turn recreates it at the same path from the project's
+branch, so a project with nothing left to land is back to its one folder.
+Worktrees that still hold work are kept, as are any a terminal or other program
+has open; Harness tries again after the chat's next turn and at startup.
+
 A chat that began before every chat got a worktree, or whose project folder is
 not the top of a Git repository on a branch, stays in the shared project
 folder. When a turn starts while another chat is working in that folder, or in a

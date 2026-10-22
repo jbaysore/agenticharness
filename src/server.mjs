@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { readFile, mkdir, writeFile, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { resolve, join, basename, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -115,6 +116,8 @@ export async function createHarness({
     res.end(JSON.stringify(value));
   };
   // A chat in its own worktree sees that worktree as its primary repository.
+  // Between turns a fully landed worktree is removed, and the project folder
+  // then holds the same work.
   const projectRoot = (projectId, index, chatId) => {
     const project = store.project(projectId);
     if (!project) throw new Error("Project not found");
@@ -125,7 +128,9 @@ export async function createHarness({
       index === "primary"
     ) {
       const chat = chatId && store.conversation(chatId);
-      return chat?.project_id === project.id && chat.worktree
+      return chat?.project_id === project.id &&
+        chat.worktree &&
+        existsSync(chat.worktree.path)
         ? chat.worktree.path
         : project.path;
     }
@@ -803,6 +808,7 @@ export async function createHarness({
     browser: startProviders ? new Browser(dataDir) : null,
     worktreeRoot: join(dataDir, "worktrees"),
   });
+  controller.tidyAll();
   controller.on("event", (event) => {
     const data = `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of clients) {

@@ -51,8 +51,9 @@
     per-provider limit in `Controller.send` with a clear message. Both checks use
     included subscription usage. Everything verified so far used a simulated
     provider.
-14. Worktree follow-ups. Worktrees are never removed: a chat keeps its folder
-    for good, so removal needs a rule tied to archiving or deleting chats. A new
+14. Worktree follow-ups. A worktree is removed only once all its work has
+    landed, so a chat that leaves uncommitted or unlanded work keeps its folder
+    until that work lands or is discarded; nothing yet surfaces those. A new
     worktree links `node_modules` from the project folder but gets no `.env` or
     local databases, and an `npm install` in it changes the shared
     `node_modules`. Codex's workspace-write sandbox covers the worktree but not

@@ -4,13 +4,16 @@ import {
   appendFile,
   realpath,
   symlink,
+  lstat,
+  unlink,
 } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { git } from "./repository.mjs";
 
 // Every new chat gets its own Git worktree, so no chat edits, builds or commits
-// on top of another's unfinished work. Its commits reach the project's branch through land_changes.
+// on top of another's unfinished work. Between turns, a worktree whose work has
+// all landed is removed and comes back at the same path on the next turn. Its commits reach the project's branch through land_changes.
 
 export const landTool = {
   name: "land_changes",
@@ -84,14 +87,63 @@ export async function createWorktree({ projectPath, root, chatId }) {
   return { path: await realpath(path), branch, base };
 }
 
-// Brings back a worktree whose folder was deleted, on the chat's own branch.
+// Brings back a worktree whose folder was removed, on the chat's own branch,
+// starting that branch again from the project's branch if it was deleted.
 export async function restoreWorktree(projectPath, worktree) {
-  if (existsSync(worktree.path)) return;
+  const { path, branch, base } = worktree;
+  if (existsSync(path)) return;
   await git(projectPath, ["worktree", "prune"]);
-  await git(projectPath, ["worktree", "add", worktree.path, worktree.branch], {
-    timeout: 120000,
-  });
-  await linkDependencies(projectPath, worktree.path);
+  const kept = await git(projectPath, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `refs/heads/${branch}`,
+  ]).then(
+    () => true,
+    () => false,
+  );
+  await git(
+    projectPath,
+    [
+      "worktree",
+      "add",
+      ...(kept ? [path, branch] : ["-b", branch, path, base]),
+    ],
+    { timeout: 120000 },
+  );
+  await linkDependencies(projectPath, path);
+}
+
+// Removes a worktree and its branch once nothing in them is missing from the
+// project's branch: no uncommitted or untracked files and no unlanded commits.
+// Anything else is left alone. Returns whether the folder is gone.
+export async function tidyWorktree(projectPath, worktree) {
+  const { path, branch, base } = worktree;
+  if (!existsSync(path)) return true;
+  try {
+    if ((await git(path, ["branch", "--show-current"])).trim() !== branch)
+      return false;
+    if ((await git(path, ["status", "--porcelain"])).trim()) return false;
+    if (await count(path, `${base}..HEAD`)) return false;
+  } catch {
+    return false;
+  }
+  // Unlink the shared node_modules first so removal cannot reach into it.
+  const modules = join(path, "node_modules");
+  const linked = await lstat(modules).then(
+    (s) => s.isSymbolicLink(),
+    () => false,
+  );
+  if (linked) await unlink(modules);
+  try {
+    await git(projectPath, ["worktree", "remove", path], { timeout: 120000 });
+  } catch {
+    // Usually a file held open, such as a terminal in the folder.
+    if (linked) await linkDependencies(projectPath, path).catch(() => {});
+    return false;
+  }
+  await git(projectPath, ["branch", "-d", branch]).catch(() => {});
+  return true;
 }
 
 // Before a turn, a worktree with nothing of its own moves up to the project's

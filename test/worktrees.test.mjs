@@ -17,7 +17,9 @@ import { workspacePeers as uiPeers } from "../src/ui/status.mjs";
 import {
   createWorktree,
   landWorktree,
+  restoreWorktree,
   syncWorktree,
+  tidyWorktree,
 } from "../src/core/worktrees.mjs";
 
 const git = (cwd, ...args) =>
@@ -209,6 +211,51 @@ test("a worktree with nothing of its own catches up before a turn", async () => 
   }
 });
 
+test("a fully landed worktree is removed and comes back at the same path", async () => {
+  const f = fixture();
+  try {
+    const worktree = await createWorktree({
+      projectPath: f.project,
+      root: f.root,
+      chatId: "1234abcd-0000-0000-0000-000000000000",
+    });
+    const branches = () => git(f.project, "branch", "--list", "harness/*");
+    // Uncommitted, untracked or unlanded work keeps the folder.
+    writeFileSync(join(worktree.path, "a.txt"), "unsaved\n");
+    assert.equal(await tidyWorktree(f.project, worktree), false);
+    git(worktree.path, "checkout", "-q", "a.txt");
+    writeFileSync(join(worktree.path, "new.txt"), "draft\n");
+    assert.equal(await tidyWorktree(f.project, worktree), false);
+    commit(worktree.path, "new.txt", "draft\n");
+    assert.equal(await tidyWorktree(f.project, worktree), false);
+    assert.ok(existsSync(worktree.path));
+
+    const landed = await landWorktree({
+      projectPath: f.project,
+      worktree,
+      check: "",
+      run: passing,
+    });
+    assert.equal(landed.landed, true, landed.reason);
+    assert.equal(await tidyWorktree(f.project, worktree), true);
+    assert.ok(!existsSync(worktree.path));
+    assert.equal(branches(), "");
+    // The shared dependencies survive the removal.
+    assert.ok(existsSync(join(f.project, "node_modules", "dep", "index.js")));
+
+    await restoreWorktree(f.project, worktree);
+    assert.equal(
+      git(worktree.path, "branch", "--show-current"),
+      worktree.branch,
+    );
+    assert.ok(existsSync(join(worktree.path, "new.txt")));
+    assert.ok(existsSync(join(worktree.path, "node_modules", "dep")));
+    assert.equal(git(worktree.path, "status", "--porcelain"), "");
+  } finally {
+    f.done();
+  }
+});
+
 test("every new chat gets its own worktree and land_changes", async () => {
   const f = fixture(),
     store = new Store(":memory:"),
@@ -282,11 +329,18 @@ test("every new chat gets its own worktree and land_changes", async () => {
     finish[second.id]();
     finish[older.id]();
     while (controller.active.size) await new Promise((r) => setTimeout(r, 5));
-    // The chat keeps its worktree on later turns.
+    await Promise.all(controller.tidying.values());
+    // Once idle with everything landed, only the project folder is left.
+    assert.ok(!existsSync(own.path));
+    assert.ok(!existsSync(worktree.path));
+    assert.ok(existsSync(f.project));
+    // The chat keeps its worktree path on later turns.
     const later = await start(second, "And another");
     assert.equal(later.project.path, worktree.path);
+    assert.ok(existsSync(join(worktree.path, "b.txt")));
     finish[second.id]();
     while (controller.active.size) await new Promise((r) => setTimeout(r, 5));
+    await Promise.all(controller.tidying.values());
   } finally {
     store.close();
     f.done();

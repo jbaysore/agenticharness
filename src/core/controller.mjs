@@ -43,6 +43,7 @@ import {
   landWorktree,
   restoreWorktree,
   syncWorktree,
+  tidyWorktree,
 } from "./worktrees.mjs";
 
 // Who answers permission requests: a native or separate reviewer (auto),
@@ -75,8 +76,10 @@ export class Controller extends EventEmitter {
     this.browser = browser;
     this.bridgeBrowser = new Map();
     this.bridgeLand = new Map();
-    // Where chats that start beside a busy chat get their own worktree.
+    // Where every new chat gets its own worktree.
     this.worktreeRoot = worktreeRoot;
+    // Worktree removals in progress, by chat, so a new turn waits for them.
+    this.tidying = new Map();
     this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
     this.workerTimeoutMs = 5 * 60 * 1000;
@@ -265,6 +268,7 @@ export class Controller extends EventEmitter {
   // chat began before worktrees were given to every chat. A chat keeps that
   // folder for good, because native sessions are tied to it.
   async chatFolder(chat, home, run) {
+    await this.tidying.get(chat.id);
     let worktree = chat.worktree;
     if (!worktree && this.worktreeRoot && !Object.keys(chat.sessions).length)
       try {
@@ -307,6 +311,24 @@ export class Controller extends EventEmitter {
         },
       });
     return { ...home, path: worktree.path, home: home.path, worktree };
+  }
+  // Between turns, a worktree whose work has all landed is removed, so a
+  // project left idle is back to its one folder.
+  tidy(chatId) {
+    const chat = this.store.conversation(chatId),
+      home = chat && this.store.project(chat.project_id);
+    if (!chat?.worktree || !home || this.active.has(chatId)) return;
+    const done = (this.tidying.get(chatId) ?? Promise.resolve())
+      .then(() => tidyWorktree(home.path, chat.worktree))
+      .catch(() => false)
+      .finally(() => {
+        if (this.tidying.get(chatId) === done) this.tidying.delete(chatId);
+      });
+    this.tidying.set(chatId, done);
+    return done;
+  }
+  tidyAll() {
+    return Promise.all(this.store.conversations().map((c) => this.tidy(c.id)));
   }
   async execute(run, text, effort, abort, continuing = false) {
     const chat = this.store.conversation(run.conversation_id),
@@ -746,6 +768,7 @@ export class Controller extends EventEmitter {
       provider: run.provider,
       model: run.model,
     });
+    if (project.worktree) this.tidy(chat.id);
   }
   waitApproval(run, request, signal) {
     if (signal.aborted) return Promise.resolve({ allow: false });
