@@ -35,6 +35,11 @@ export async function openCodex(cwd) {
       'forced_login_method="chatgpt"',
       "-c",
       'service_tier="default"',
+      // The desktop app prefers MXC on supported Windows devices. Standalone
+      // app-server clients must opt in; otherwise they use the legacy sandbox.
+      ...(process.platform === "win32"
+        ? ["-c", "features.prefer_mxc=true"]
+        : []),
     ],
     { cwd, env: subscriptionEnvironment() },
   );

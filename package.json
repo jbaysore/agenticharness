@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:codex-commands": "node scripts/codex-command-acceptance.mjs",
     "test:layout": "npm run build && node scripts/layout-acceptance.mjs",
     "test:scroll": "npm run build && node scripts/scroll-acceptance.mjs",
     "test:models": "npm run build && node scripts/model-picker-acceptance.mjs",

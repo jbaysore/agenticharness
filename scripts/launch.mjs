@@ -1,6 +1,7 @@
 import { readFile, mkdir, open, appendFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,6 +71,34 @@ async function startupError(path, offset) {
     await file.close();
   }
 }
+async function launchInUserSession() {
+  const script = join(root, "scripts", "run-in-user-session.ps1");
+  if (process.platform !== "win32" || !existsSync(script)) return false;
+  const { stdout } = await promisify(execFile)(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-WindowStyle",
+      "Hidden",
+      "-File",
+      script,
+      "-NodePath",
+      process.execPath,
+      "-ScriptPath",
+      fileURLToPath(import.meta.url),
+      "-WorkingDirectory",
+      root,
+      "-DataDir",
+      dataDir,
+    ],
+    { env: process.env, windowsHide: true, timeout: 40000 },
+  );
+  const result = JSON.parse(stdout.trim());
+  if (!result.ok)
+    throw new Error(result.error ?? "Windows desktop launch failed");
+  return result.handedOff;
+}
 try {
   let runtime = await running();
   if (
@@ -97,6 +126,14 @@ try {
   if (process.argv.includes("--stop")) {
     console.log("Harness host stopped.");
     process.exit(0);
+  }
+  // Hosts started by a service inherit session 0. Codex's sandbox children
+  // cannot initialize USER32 there (the legacy runner reports a pipe timeout).
+  // Start the host as this same user in their signed-in session instead.
+  if (!runtime && (await launchInUserSession())) {
+    runtime = await running();
+    if (!runtime)
+      throw new Error("The Windows desktop host did not pass its health check");
   }
   if (!runtime) {
     let config = {};

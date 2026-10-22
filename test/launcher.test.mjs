@@ -66,6 +66,11 @@ test("launcher starts an isolated host and reuses its saved runtime", async () =
     const first = JSON.parse(
       await readFile(join(app.data, "runtime.json"), "utf8"),
     );
+    // A healthy host must be reused even if a fresh desktop handoff would fail.
+    await writeFile(
+      join(app.root, "scripts", "run-in-user-session.ps1"),
+      `@{ ok = $false; error = 'fixture session unavailable' } | ConvertTo-Json -Compress`,
+    );
     assert.match((await app.launch()).stdout, /Harness host ready/);
     const second = JSON.parse(
       await readFile(join(app.data, "runtime.json"), "utf8"),
@@ -77,6 +82,24 @@ test("launcher starts an isolated host and reuses its saved runtime", async () =
     await app.close();
   }
 });
+
+test(
+  "a failed Windows desktop handoff is reported without starting a service-session host",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const app = await fixture();
+    try {
+      await writeFile(
+        join(app.root, "scripts", "run-in-user-session.ps1"),
+        `@{ ok = $false; error = 'fixture session unavailable' } | ConvertTo-Json -Compress`,
+      );
+      await assert.rejects(app.launch(), /fixture session unavailable/);
+      await assert.rejects(readFile(join(app.data, "runtime.json"), "utf8"));
+    } finally {
+      await app.close();
+    }
+  },
+);
 
 test("supervise keeps the launcher alive until the host stops", async () => {
   const app = await fixture();
