@@ -9,10 +9,12 @@ import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
 import { ChatRow } from "./chat-row.jsx";
 import {
+  ShellMenu,
   TerminalRow,
   TerminalSession,
   TerminalView,
 } from "./terminal-session.jsx";
+import { terminalGroups } from "./terminal-groups.mjs";
 import { RulesModal } from "./rules-modal.jsx";
 import { SkillsModal } from "./skills-modal.jsx";
 import { UsageGlance } from "./usage-glance.jsx";
@@ -299,7 +301,9 @@ function App() {
                   layout.focused + unsent.length,
                   (item) =>
                     item.terminalId
-                      ? next.terminals?.some((t) => t.id === item.terminalId)
+                      ? next.terminals?.some(
+                          (t) => t.groupId === item.terminalId,
+                        )
                       : found.some((c) => c.id === item.chatId),
                 )
               : null;
@@ -578,7 +582,9 @@ function App() {
   }, [attention]);
   const occupied = (p) => !!(p.chatId || p.terminalId),
     sessions = state.terminals ?? [],
-    currentSession = sessions.find((s) => s.id === current.terminalId);
+    groups = terminalGroups(sessions),
+    groupOf = (p) => groups.find((g) => g.id === p.terminalId),
+    currentGroup = groupOf(current);
   const emptyPane = (projectId) =>
     setView((v) => openInFocused(v, null, projectId));
   async function archiveChat(c, archived) {
@@ -614,27 +620,50 @@ function App() {
       onArchive={(archived) => action(() => archiveChat(c, archived))()}
     />
   );
-  async function newTerminal(beside = false) {
+  async function newTerminal(beside = false, shell = "powershell") {
     const target = state.projects.find((p) => p.id === selectedProject);
     if (!target) {
       setModal("project");
       return;
     }
-    const session = await api("/api/terminals", { projectId: target.id });
+    const session = await api("/api/terminals", {
+      projectId: target.id,
+      shell,
+    });
     await refresh();
-    openShell(session, beside);
+    openShell({ id: session.groupId, projectId: session.projectId }, beside);
   }
-  function openShell(session, beside = false) {
+  function openShell(group, beside = false) {
     setView((v) =>
-      openTerminal(v, session.id, session.projectId, beside, limit.current),
+      openTerminal(v, group.id, group.projectId, beside, limit.current),
     );
-    setSelectedProject(session.projectId);
+    setSelectedProject(group.projectId);
     setSidebar(false);
   }
-  async function endTerminal(id) {
-    await api(`/api/terminals/${id}/close`, {});
+  // A new tab joins the terminal it was opened from, in the same folder.
+  async function addTab(group, shell) {
+    if (!group) return null;
+    const session = await api("/api/terminals", {
+      projectId: group.projectId,
+      groupId: group.id,
+      shell,
+    });
+    await refresh();
+    return session;
+  }
+  async function closeTab(group, tab) {
+    if (!group) return;
+    if (group.tabs.length === 1) return endTerminal(group);
+    await api(`/api/terminals/${tab.id}/close`, {});
+    await refresh();
+  }
+  async function endTerminal(group) {
+    if (!group) return;
+    await Promise.all(
+      group.tabs.map((t) => api(`/api/terminals/${t.id}/close`, {})),
+    );
     setView((v) => {
-      const open = v.panes.find((p) => p.terminalId === id);
+      const open = v.panes.find((p) => p.terminalId === group.id);
       return open ? closePane(v, open.key, selectedProject) : v;
     });
     await refresh();
@@ -815,26 +844,37 @@ function App() {
           <Icon name="plus" />
           New conversation
         </button>
-        <button
-          className="sidebar-action"
-          title="Open a PowerShell terminal in this project. Ctrl-click to open it beside this one."
-          onClick={(e) => action(() => newTerminal(e.ctrlKey || e.metaKey))()}
-        >
-          <Icon name="terminal" />
-          New terminal
-        </button>
+        <div className="new-terminal">
+          <button
+            className="sidebar-action"
+            title="Open a PowerShell terminal in this project. Ctrl-click to open it beside this one."
+            onClick={(e) => action(() => newTerminal(e.ctrlKey || e.metaKey))()}
+          >
+            <Icon name="terminal" />
+            New terminal
+          </button>
+          <ShellMenu
+            label="Choose a shell for a new terminal"
+            className="icon-button"
+            onPick={(shell, e) =>
+              action(() => newTerminal(e.ctrlKey || e.metaKey, shell))()
+            }
+          >
+            <Icon name="chevron" size={13} />
+          </ShellMenu>
+        </div>
         <button className="sidebar-action" onClick={() => setModal("search")}>
           <Icon name="search" />
           Search conversations
         </button>
-        {sessions.length > 0 && (
+        {groups.length > 0 && (
           <>
             <div className="section-label">Terminals</div>
             <div className="active-list" role="group" aria-label="Terminals">
-              {sessions.map((t) => (
+              {groups.map((t) => (
                 <TerminalRow
                   key={t.id}
-                  session={t}
+                  group={t}
                   project={state.projects.find((p) => p.id === t.projectId)}
                   placement={
                     t.id === current.terminalId
@@ -844,7 +884,7 @@ function App() {
                         : ""
                   }
                   onOpen={(beside) => openShell(t, beside)}
-                  onEnd={() => action(() => endTerminal(t.id))()}
+                  onEnd={() => action(() => endTerminal(t))()}
                 />
               ))}
             </div>
@@ -1029,7 +1069,7 @@ function App() {
             <b>/</b>
             <strong>
               {current.terminalId
-                ? (currentSession?.title ?? "Terminal")
+                ? (currentGroup?.title ?? "Terminal")
                 : (chat?.title ?? "New conversation")}
             </strong>
           </div>
@@ -1087,7 +1127,7 @@ function App() {
                   if (handle) paneRefs.current[p.key] = handle;
                   else delete paneRefs.current[p.key];
                 }}
-                session={sessions.find((s) => s.id === p.terminalId)}
+                group={groupOf(p)}
                 project={paneProject(p)}
                 focused={p.key === current.key}
                 headerDrag={
@@ -1098,7 +1138,9 @@ function App() {
                 onClose={() =>
                   setView((v) => closePane(v, p.key, selectedProject))
                 }
-                onEnd={() => action(() => endTerminal(p.terminalId))()}
+                onEnd={() => action(() => endTerminal(groupOf(p)))()}
+                onAddTab={(shell) => addTab(groupOf(p), shell)}
+                onCloseTab={(tab) => action(() => closeTab(groupOf(p), tab))()}
                 report={report}
               />
             ) : (
@@ -2135,7 +2177,7 @@ function TerminalPane({ project, chat, report }) {
           {sessions.length ? (
             sessions.map((s, i) => (
               <option key={s.id} value={s.id}>
-                PowerShell {i + 1}
+                {s.title}
               </option>
             ))
           ) : (

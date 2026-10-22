@@ -340,7 +340,7 @@ export async function createHarness({
           return json(res, 200, {
             ...store.snapshot(),
             providers: controller.providers,
-            terminals: terminals.list(),
+            terminals: terminals.list({ output: false }),
             remoteOrigin: publicOrigin,
             version: APP_VERSION,
             rules: describeRules(readRules(store), controller.providers),
@@ -699,10 +699,13 @@ export async function createHarness({
           return json(
             res,
             201,
-            terminals.create({
-              ...project,
-              path: projectRoot(project.id, "primary", body.chatId),
-            }),
+            terminals.create(
+              {
+                ...project,
+                path: projectRoot(project.id, "primary", body.chatId),
+              },
+              { shell: body.shell, groupId: body.groupId },
+            ),
           );
         }
         if (

@@ -51,6 +51,57 @@ try {
     "PANE_OK",
   );
 
+  // Tabs: a Command Prompt tab joins the window, and each tab keeps its shell.
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Command Prompt" }).click();
+  await expect(page.getByRole("tab")).toHaveText([
+    "PowerShell 1",
+    "Command Prompt 1",
+  ]);
+  await expect(page.getByRole("tab", { selected: true })).toHaveText(
+    "Command Prompt 1",
+  );
+  await expect(sidebar.getByRole("group", { name: "Terminals" })).toContainText(
+    "2 tabs",
+  );
+  await page.locator(".xterm-helper-textarea").fill("echo CMD_OK");
+  await page.locator(".xterm-helper-textarea").press("Enter");
+  await expect
+    .poll(
+      () =>
+        (
+          app.terminals
+            .list()
+            .find((t) => t.shell === "cmd")
+            ?.output.match(/CMD_OK/g) ?? []
+        ).length,
+      { timeout: 15000 },
+    )
+    .toBeGreaterThanOrEqual(2);
+  await page.screenshot({ path: ".local/screenshots/terminal-tabs.png" });
+  await page.getByRole("tab", { name: "PowerShell 1" }).click();
+  await expect(page.locator(".terminal-pane .xterm-rows")).toContainText(
+    "PANE_OK",
+  );
+  await page.getByLabel("Close Command Prompt 1").click();
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  expect(app.terminals.list()).toHaveLength(1);
+  // The sidebar menu starts a Command Prompt window of its own.
+  await page.getByLabel("Choose a shell for a new terminal").click();
+  await page.getByRole("menuitem", { name: "Command Prompt" }).click();
+  await expect(page.locator(".terminal-pane .terminal-tab")).toHaveText(
+    "Command Prompt 1",
+  );
+  expect(app.terminals.list().map((t) => t.shell)).toEqual([
+    "powershell",
+    "cmd",
+  ]);
+  await sidebar.getByLabel("End Terminal 2").click({ force: true });
+  await expect(sidebar.getByLabel("End Terminal 2")).toHaveCount(0);
+  await sidebar
+    .getByRole("button", { name: "Terminal 1", exact: true })
+    .click();
+
   // A second terminal opens beside the first, and chats still open.
   await page
     .getByRole("button", { name: "New terminal", exact: true })

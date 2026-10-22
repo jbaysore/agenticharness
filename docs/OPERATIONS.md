@@ -409,6 +409,12 @@ pane keeps the shell running, and the **End** button or the sidebar close button
 stops it. The Terminal tab in the work panel starts shells in the focused
 chat's worktree.
 
+A terminal pane has tabs. **+** in the tab bar adds a PowerShell or Command
+Prompt tab to that terminal, in the same folder. The arrow beside **New
+terminal** starts a new terminal window with either shell. Each tab is its own
+shell and keeps running while hidden or while the pane is closed. Ending a
+terminal stops all of its tabs. Up to sixteen tabs can be open in total.
+
 Terminal starts PowerShell in the selected primary project. It continues when
 you change panels or disconnect the browser. Close terminals when finished. A
 host restart ends terminals; reopen one afterward. Live terminal streams and work

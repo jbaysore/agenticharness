@@ -3,12 +3,14 @@ import React, {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
 } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "./api.mjs";
 import { Icon } from "./components.jsx";
+import { SHELL_CHOICES, activeTab } from "./terminal-groups.mjs";
 
 // One live shell on the host, drawn with xterm. The host keeps it running, so
 // this only attaches to it: it replays what it has already printed, then
@@ -101,10 +103,66 @@ export function TerminalView({ id, report, focus = false }) {
   return <div className="terminal-container" ref={container} />;
 }
 
-// A terminal that sits in the pane strip beside the chats.
+// A small menu for choosing which shell a new terminal or tab starts.
+export function ShellMenu({ label, className = "", children, onPick }) {
+  const [open, setOpen] = useState(false),
+    box = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event) => {
+        if (!box.current?.contains(event.target)) setOpen(false);
+      },
+      escape = (event) => {
+        if (event.key === "Escape") setOpen(false);
+      };
+    window.addEventListener("pointerdown", outside);
+    window.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("pointerdown", outside);
+      window.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  return (
+    <span className="shell-menu-anchor" ref={box}>
+      <button
+        className={className}
+        aria-label={label}
+        title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
+      >
+        {children}
+      </button>
+      {open && (
+        <div className="shell-menu" role="menu" aria-label={label}>
+          {SHELL_CHOICES.map(([id, name]) => (
+            <button
+              key={id}
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onPick(id, e);
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// A terminal window in the pane strip beside the chats. Each tab is its own
+// shell on the host; closing the pane leaves every tab running.
 export const TerminalSession = forwardRef(function TerminalSession(
   {
-    session,
+    group,
     project,
     focused,
     headerDrag,
@@ -112,17 +170,21 @@ export const TerminalSession = forwardRef(function TerminalSession(
     onFocus,
     onClose,
     onEnd,
+    onAddTab,
+    onCloseTab,
     report,
   },
   ref,
 ) {
   const view = useRef(null),
-    headerDragAllowed = useRef(false);
+    headerDragAllowed = useRef(false),
+    [chosen, setChosen] = useState(null);
   useImperativeHandle(ref, () => ({
     focus: () => view.current?.querySelector("textarea")?.focus(),
     send: () => {},
   }));
-  const title = session ? session.title : "Terminal";
+  const title = group ? group.title : "Terminal",
+    tab = activeTab(group, chosen);
   return (
     <section
       className={"chat-pane terminal-pane" + (focused ? " focused" : "")}
@@ -144,7 +206,6 @@ export const TerminalSession = forwardRef(function TerminalSession(
       >
         <Icon name="terminal" size={14} />
         <strong title={title}>{title}</strong>
-        {session?.status === "exited" && <span>Ended</span>}
         {project && <span>{project.name}</span>}
         <button
           className="icon-button"
@@ -160,7 +221,7 @@ export const TerminalSession = forwardRef(function TerminalSession(
         <button
           className="icon-button"
           aria-label={`End ${title}`}
-          title="End this terminal"
+          title="End this terminal and all its tabs"
           onClick={(e) => {
             e.stopPropagation();
             onEnd();
@@ -169,10 +230,58 @@ export const TerminalSession = forwardRef(function TerminalSession(
           <Icon name="stop" size={13} />
         </button>
       </header>
-      {session ? (
-        <div className="terminal-body" ref={view}>
-          <TerminalView id={session.id} report={report} focus={focused} />
-        </div>
+      {group ? (
+        <>
+          <div className="terminal-tabs" role="tablist" aria-label="Tabs">
+            {group.tabs.map((t) => (
+              <div
+                key={t.id}
+                className={"terminal-tab" + (t.id === tab?.id ? " active" : "")}
+              >
+                <button
+                  role="tab"
+                  aria-selected={t.id === tab?.id}
+                  onClick={() => setChosen(t.id)}
+                >
+                  {t.title}
+                  {t.status === "exited" && " (ended)"}
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={`Close ${t.title}`}
+                  title="Close this tab"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCloseTab(t);
+                  }}
+                >
+                  <Icon name="close" size={12} />
+                </button>
+              </div>
+            ))}
+            <ShellMenu
+              label="New tab"
+              className="icon-button"
+              onPick={(shell) =>
+                Promise.resolve(onAddTab(shell))
+                  .then((added) => added && setChosen(added.id))
+                  .catch(report)
+              }
+            >
+              <Icon name="plus" size={14} />
+            </ShellMenu>
+          </div>
+          <div className="terminal-body" ref={view}>
+            {tab && (
+              <TerminalView
+                key={tab.id}
+                id={tab.id}
+                report={report}
+                focus={focused}
+              />
+            )}
+          </div>
+        </>
       ) : (
         <div className="panel-empty">
           <Icon name="terminal" size={28} />
@@ -184,15 +293,9 @@ export const TerminalSession = forwardRef(function TerminalSession(
   );
 });
 
-// One terminal in the sidebar, in the same shape as a chat.
-export function TerminalRow({
-  session,
-  project,
-  placement = "",
-  onOpen,
-  onEnd,
-}) {
-  const ended = session.status === "exited";
+// One terminal window in the sidebar, in the same shape as a chat.
+export function TerminalRow({ group, project, placement = "", onOpen, onEnd }) {
+  const tabs = group.tabs.length;
   return (
     <div className={"chat-row terminal-row " + placement}>
       <button
@@ -203,16 +306,18 @@ export function TerminalRow({
         }}
       >
         <Icon name="terminal" size={13} />
-        <span>{session.title}</span>
+        <span>{group.title}</span>
       </button>
       <small className="chat-detail" aria-hidden="true">
-        {[project?.name, ended && "Ended"].filter(Boolean).join(" · ")}
+        {[project?.name, tabs > 1 && `${tabs} tabs`]
+          .filter(Boolean)
+          .join(" · ")}
       </small>
       <span className="row-actions">
         <button
           className="icon-button"
-          aria-label={`End ${session.title}`}
-          title="End this terminal"
+          aria-label={`End ${group.title}`}
+          title="End this terminal and all its tabs"
           onClick={onEnd}
         >
           <Icon name="close" size={13} />

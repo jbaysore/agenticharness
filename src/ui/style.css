@@ -2245,6 +2245,83 @@ small {
 .terminal-container .xterm {
   height: 100%;
 }
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 8px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 7px 7px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.terminal-tab:hover {
+  background: var(--hover);
+}
+.terminal-tab.active {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+.terminal-tab > button:first-child {
+  padding: 6px 4px 6px 10px;
+  color: inherit;
+  white-space: nowrap;
+}
+.terminal-tab .icon-button,
+.terminal-tabs > .shell-menu-anchor > .icon-button {
+  width: 22px;
+  height: 22px;
+}
+.shell-menu-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.shell-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px #0006;
+}
+.shell-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.shell-menu button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.new-terminal {
+  display: flex;
+  align-items: center;
+}
+.new-terminal > .sidebar-action {
+  flex: 1;
+}
+.new-terminal .icon-button svg {
+  transform: rotate(90deg);
+}
+.new-terminal .shell-menu {
+  left: auto;
+  right: 0;
+}
 .terminal-pane .terminal-body {
   flex: 1;
   min-height: 0;

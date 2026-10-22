@@ -1,30 +1,57 @@
 import * as pty from "node-pty";
 import { randomUUID } from "node:crypto";
 import { subscriptionEnvironment } from "../security/environment.mjs";
+export const SHELLS = {
+  powershell: { label: "PowerShell", command: "powershell.exe" },
+  cmd: { label: "Command Prompt", command: "cmd.exe" },
+};
+const MAX_SESSIONS = 16;
+// A group is one terminal window; its sessions are that window's tabs.
 export class Terminals {
   sessions = new Map();
+  groups = new Map();
   opened = 0;
   constructor(onEvent) {
     this.onEvent = onEvent;
   }
-  list() {
+  list({ output = true } = {}) {
     return [...this.sessions.values()].map(
-      ({ process, ...session }) => session,
+      ({ process, output: text, ...session }) =>
+        output ? { ...session, output: text } : session,
     );
   }
-  create(project) {
-    if (this.sessions.size >= 8)
+  create(project, { shell = "powershell", groupId } = {}) {
+    if (!Object.hasOwn(SHELLS, shell)) throw new Error("Unknown shell");
+    if (process.platform !== "win32" && shell !== "powershell")
+      throw new Error("Command Prompt is only available on Windows.");
+    if (this.sessions.size >= MAX_SESSIONS)
       throw new Error(
-        "Close a terminal before opening another (maximum eight).",
+        `Close a terminal tab before opening another (maximum ${MAX_SESSIONS}).`,
       );
+    let group = groupId && this.groups.get(groupId);
+    if (groupId && (!group || group.projectId !== project.id))
+      throw new Error("Terminal not found");
+    if (!group) {
+      group = {
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Terminal " + ++this.opened,
+        opened: {},
+      };
+      this.groups.set(group.id, group);
+    }
+    group.opened[shell] = (group.opened[shell] ?? 0) + 1;
     const id = randomUUID(),
-      shell =
+      title = `${SHELLS[shell].label} ${group.opened[shell]}`,
+      command =
         process.platform === "win32"
-          ? "powershell.exe"
+          ? SHELLS[shell].command
           : (process.env.SHELL ?? "/bin/sh");
     const child = pty.spawn(
-      shell,
-      process.platform === "win32" ? ["-NoLogo", "-NoProfile"] : [],
+      command,
+      process.platform === "win32" && shell === "powershell"
+        ? ["-NoLogo", "-NoProfile"]
+        : [],
       {
         cwd: project.path,
         env: subscriptionEnvironment(),
@@ -38,7 +65,10 @@ export class Terminals {
     const session = {
       id,
       projectId: project.id,
-      title: "Terminal " + ++this.opened,
+      groupId: group.id,
+      groupTitle: group.title,
+      shell,
+      title,
       output: "",
       status: "running",
       process: child,
@@ -57,7 +87,10 @@ export class Terminals {
     return {
       id,
       projectId: project.id,
-      title: session.title,
+      groupId: group.id,
+      groupTitle: group.title,
+      shell,
+      title,
       status: "running",
       output: "",
     };
@@ -84,6 +117,8 @@ export class Terminals {
     const s = this.sessions.get(id);
     if (s) {
       this.sessions.delete(id);
+      if (![...this.sessions.values()].some((o) => o.groupId === s.groupId))
+        this.groups.delete(s.groupId);
       // Use the library's full cleanup, which disposes its output worker and
       // terminates console descendants. The Windows helper may log a benign
       // AttachConsole race; its bounded fallback still completes shutdown.
