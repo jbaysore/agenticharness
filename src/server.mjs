@@ -481,6 +481,8 @@ export async function createHarness({
                 error:
                   "History scope is fixed for this conversation. Change the default for new conversations in Connections & usage.",
               });
+            if (Object.hasOwn(body, "projectId"))
+              store.setConversationProject(id, body.projectId);
             if (body.archived !== undefined) {
               if (controller.active.has(id))
                 throw new Error("Stop the turn before archiving this chat");

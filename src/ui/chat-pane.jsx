@@ -12,6 +12,7 @@ import {
 import { Attachments } from "./attachments.jsx";
 import { useChatScroll } from "./chat-scroll.jsx";
 import { ModelPicker } from "./model-picker.jsx";
+import { DirectoryPicker } from "./directory-picker.jsx";
 import { SkillSlash } from "./skills-modal.jsx";
 import {
   MODE_COMMANDS,
@@ -129,6 +130,8 @@ export function ChatPane({
   ref,
   chat,
   project,
+  projects,
+  onChangeProject,
   providers,
   focused,
   solo,
@@ -321,6 +324,45 @@ export function ChatPane({
     field?.focus();
     field?.setSelectionRange(left.cursor, left.cursor);
     if (next !== mode) changeMode(next);
+  }
+  async function changeDirectory({ project: next, path }) {
+    if (sending.current || uploadingRef.current) return;
+    sending.current = true;
+    setBusy(true);
+    try {
+      next ??= await api("/api/projects", { path });
+      if (next.id === project?.id) return;
+      // Uploads belong to a project. Copy draft attachments before switching,
+      // so the new conversation can send them and failures keep the old draft.
+      const files = [];
+      for (const file of attachments) {
+        const response = await fetch(file.url);
+        if (!response.ok) throw new Error(`Could not copy ${file.name}`);
+        files.push(
+          await api(
+            `/api/projects/${next.id}/attachments`,
+            await response.blob(),
+            "POST",
+            { "X-Harness-Filename": encodeURIComponent(file.name) },
+          ),
+        );
+      }
+      await onChangeProject(next, {
+        provider,
+        model,
+        effort,
+        permissions,
+        mode,
+      });
+      if (!chat) {
+        saveDraft(draftKey, "");
+        saveDraftAttachments(draftKey, []);
+      }
+      setAttachments(files);
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
   }
   async function attachFiles(files, pasted = false) {
     if (!project || sending.current || uploadingRef.current || !files.length)
@@ -649,6 +691,17 @@ export function ChatPane({
         ))}
       </div>
       <div className="composer-area">
+        {!chat?.messages?.length &&
+          !chat?.runs?.length &&
+          !Object.keys(chat?.sessions ?? {}).length &&
+          !chat?.worktree && (
+            <DirectoryPicker
+              project={project}
+              projects={projects}
+              disabled={busy || uploading || permissionsBusy || modeBusy}
+              onChange={changeDirectory}
+            />
+          )}
         <SkillSlash
           ref={slash}
           skills={skills}

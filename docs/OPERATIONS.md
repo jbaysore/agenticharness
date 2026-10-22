@@ -22,6 +22,9 @@ Explorer. The launcher reports an early host exit with the new host error instea
 of waiting for a generic startup timeout; earlier log entries are excluded.
 
 Pick a project in the sidebar, then choose an agent and model in the composer.
+Before sending the first message, click the folder path or **Change** above the
+composer to choose an existing project or enter another directory. Your draft,
+attachments, and model settings stay with the conversation.
 The picker comes from the connected native integrations. No model or effort is
 selected until you choose one. Supported effort choices
 change with the model. Cursor's effort control stays disabled and uses each model's

@@ -1246,6 +1246,46 @@ small {
     border-color var(--dur),
     box-shadow var(--dur);
 }
+.directory-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 4px;
+  margin-bottom: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: left;
+  border-radius: 6px;
+}
+.directory-picker:hover {
+  background: var(--surface-2);
+}
+.directory-picker svg,
+.directory-action {
+  flex-shrink: 0;
+}
+.directory-picker > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.directory-action {
+  margin-left: auto;
+  color: var(--text-3);
+}
+.directory-form select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: 7px;
+  text-overflow: ellipsis;
+}
+.directory-form [role="alert"] {
+  color: var(--danger-ink);
+  margin-top: 16px;
+}
 .composer:focus-within {
   border-color: color-mix(in srgb, var(--agent) 70%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent) 16%, transparent);

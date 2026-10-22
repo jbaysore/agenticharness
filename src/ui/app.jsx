@@ -559,7 +559,7 @@ function App() {
   // The pane that asked keeps its key, so its composer survives the chat's creation.
   async function ensureChat(p, chosen) {
     const c = await api("/api/chats", {
-      projectId: paneProject(p).id,
+      projectId: chosen.projectId ?? paneProject(p)?.id,
       ...chosen,
     });
     const next = admit(await api("/api/chats/" + c.id));
@@ -574,6 +574,25 @@ function App() {
           document.getElementById(anchor)?.scrollIntoView({ block: "start" }),
         60,
       );
+  }
+  async function changePaneProject(p, target, chosen) {
+    await refresh();
+    if (p.chatId) {
+      await api("/api/chats/" + p.chatId, { projectId: target.id }, "PATCH");
+      await reload(p.chatId);
+    } else {
+      await ensureChat(p, { ...chosen, projectId: target.id });
+    }
+    setView((v) => ({
+      ...v,
+      panes: v.panes.map((pane) =>
+        pane.key === p.key ? { ...pane, projectId: target.id } : pane,
+      ),
+    }));
+    setSelectedProject(target.id);
+    setExpandedFolders((saved) =>
+      changeFolders(saved, target.id, target.id, "expand"),
+    );
   }
   const action = (fn) => async () => {
     try {
@@ -913,6 +932,10 @@ function App() {
               }}
               chat={(p.chatId && chats[p.chatId]) || null}
               project={paneProject(p)}
+              projects={state.projects}
+              onChangeProject={(target, chosen) =>
+                changePaneProject(p, target, chosen)
+              }
               providers={state.providers}
               focused={p.key === current.key}
               solo={view.panes.length === 1}

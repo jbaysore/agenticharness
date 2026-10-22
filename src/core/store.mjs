@@ -242,6 +242,25 @@ export class Store {
       );
     return this.conversation(id);
   }
+  setConversationProject(id, projectId) {
+    const chat = this.conversation(id);
+    if (!chat) throw new Error("Conversation not found");
+    if (!this.project(projectId)) throw new Error("Project not found");
+    if (chat.project_id === projectId) return chat;
+    if (
+      this.messages(id).length ||
+      this.db
+        .prepare("SELECT 1 FROM runs WHERE conversation_id=? LIMIT 1")
+        .get(id) ||
+      Object.keys(chat.sessions).length ||
+      chat.worktree
+    )
+      throw new Error("Choose a directory before sending the first message");
+    this.db
+      .prepare("UPDATE conversations SET project_id=?,updated_at=? WHERE id=?")
+      .run(projectId, this.now(), id);
+    return this.conversation(id);
+  }
   updateConversation(id, fields) {
     if (Object.hasOwn(fields, "scope"))
       throw new Error("History scope is fixed when a conversation is created");
