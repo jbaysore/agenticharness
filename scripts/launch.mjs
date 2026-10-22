@@ -4,6 +4,13 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  acquireHostLock,
+  readRestartState,
+  validateRuntime,
+  samePath,
+  processAlive,
+} from "../src/core/restart-state.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 function ensureTaskbarShortcut() {
   const script = join(root, "scripts", "taskbar-shortcut.ps1");
@@ -99,7 +106,15 @@ async function launchInUserSession() {
     throw new Error(result.error ?? "Windows desktop launch failed");
   return result.handedOff;
 }
+let releaseControl;
 try {
+  releaseControl = await acquireHostLock(dataDir);
+  let savedRestart = await readRestartState(dataDir);
+  if (savedRestart?.handoff) {
+    const { recoverAbandonedRestart } = await import("./restart-host.mjs");
+    await recoverAbandonedRestart(dataDir);
+    savedRestart = await readRestartState(dataDir);
+  }
   let runtime = await running();
   if (
     runtime &&
@@ -124,18 +139,33 @@ try {
     runtime = null;
   }
   if (process.argv.includes("--stop")) {
+    await releaseControl();
+    releaseControl = null;
     console.log("Harness host stopped.");
     process.exit(0);
   }
   // Hosts started by a service inherit session 0. Codex's sandbox children
   // cannot initialize USER32 there (the legacy runner reports a pipe timeout).
   // Start the host as this same user in their signed-in session instead.
-  if (!runtime && (await launchInUserSession())) {
+  if (!runtime) {
+    // The desktop handoff invokes this launcher again. Let it acquire the same
+    // lock, then recheck health when control returns to this process.
+    await releaseControl();
+    releaseControl = null;
+    const handedOff = await launchInUserSession();
+    releaseControl = await acquireHostLock(dataDir);
     runtime = await running();
-    if (!runtime)
+    if (handedOff && !runtime)
       throw new Error("The Windows desktop host did not pass its health check");
   }
   if (!runtime) {
+    savedRestart = await readRestartState(dataDir);
+    const launchRoot =
+      savedRestart?.active &&
+      samePath(savedRestart.source.path, root) &&
+      !samePath(savedRestart.active.root, root)
+        ? await validateRuntime(dataDir, savedRestart.active)
+        : root;
     let config = {};
     try {
       config = JSON.parse(await readFile(join(dataDir, "config.json"), "utf8"));
@@ -147,37 +177,42 @@ try {
       err = await open(errorLog, "a"),
       errorOffset = (await err.stat()).size;
     let startupFailure;
-    const child = spawn(process.execPath, [join(root, "src", "server.mjs")], {
-      cwd: root,
-      detached: true,
-      windowsHide: true,
-      stdio: ["ignore", out.fd, err.fd],
-      env: {
-        ...process.env,
-        HARNESS_DATA_DIR: dataDir,
-        ...(config.publicOrigin
-          ? { HARNESS_PUBLIC_ORIGIN: config.publicOrigin }
-          : {}),
-        ...(config.remoteIdentityHash
-          ? { HARNESS_REMOTE_IDENTITY_HASH: config.remoteIdentityHash }
-          : {}),
-        ...(config.access
-          ? {
-              HARNESS_ACCESS_TEAM_DOMAIN: config.access.teamDomain,
-              HARNESS_ACCESS_AUDIENCE: config.access.audience,
-            }
-          : {}),
-        ...(config.tunnel
-          ? {
-              HARNESS_TUNNEL_EXE: config.tunnel.exe,
-              HARNESS_TUNNEL_CONFIG: config.tunnel.config,
-            }
-          : {}),
-        ...(config.initialProject
-          ? { HARNESS_INITIAL_PROJECT: config.initialProject }
-          : {}),
+    const child = spawn(
+      process.execPath,
+      [join(launchRoot, "src", "server.mjs")],
+      {
+        cwd: launchRoot,
+        detached: true,
+        windowsHide: true,
+        stdio: ["ignore", out.fd, err.fd],
+        env: {
+          ...process.env,
+          HARNESS_DATA_DIR: dataDir,
+          HARNESS_RESTART_REQUEST: "",
+          ...(config.publicOrigin
+            ? { HARNESS_PUBLIC_ORIGIN: config.publicOrigin }
+            : {}),
+          ...(config.remoteIdentityHash
+            ? { HARNESS_REMOTE_IDENTITY_HASH: config.remoteIdentityHash }
+            : {}),
+          ...(config.access
+            ? {
+                HARNESS_ACCESS_TEAM_DOMAIN: config.access.teamDomain,
+                HARNESS_ACCESS_AUDIENCE: config.access.audience,
+              }
+            : {}),
+          ...(config.tunnel
+            ? {
+                HARNESS_TUNNEL_EXE: config.tunnel.exe,
+                HARNESS_TUNNEL_CONFIG: config.tunnel.config,
+              }
+            : {}),
+          ...(config.initialProject
+            ? { HARNESS_INITIAL_PROJECT: config.initialProject }
+            : {}),
+        },
       },
-    });
+    );
     child.once("error", (error) => {
       startupFailure = `Harness could not start its host: ${error.message}.`;
     });
@@ -210,6 +245,8 @@ try {
       );
     }
   }
+  await releaseControl();
+  releaseControl = null;
   if (process.argv.includes("--supervise")) {
     console.log("Harness host ready at " + runtime.origin);
     // Hub treats a launcher that exits as a failed start, so stay attached while the host is healthy.
@@ -217,7 +254,16 @@ try {
     while (misses < 2) {
       await new Promise((r) => setTimeout(r, 1000));
       if (await running()) misses = 0;
-      else misses += 1;
+      else {
+        const restart = await readRestartState(dataDir);
+        if (
+          restart?.handoff &&
+          restart.handoff.deadline > Date.now() &&
+          processAlive(restart.handoff.pid)
+        )
+          misses = 0;
+        else misses += 1;
+      }
     }
     console.log("Harness host stopped.");
     process.exit(0);
@@ -265,6 +311,7 @@ try {
       });
   child.unref();
 } catch (error) {
+  await releaseControl?.();
   await appendFile(
     join(dataDir, "launcher-errors.log"),
     new Date().toISOString() + " " + error.message + "\n",

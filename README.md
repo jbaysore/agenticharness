@@ -15,6 +15,12 @@ installed and owns its credentials.
 The launcher opens an Edge app window and starts the local host if needed. Closing
 the window leaves work running. The host binds to `127.0.0.1:47831`.
 
+When running from its source checkout, Harness can deliver its own committed
+changes and restart after every chat finishes and live terminals close. Agents
+can also queue a safe restart with `restart_harness`. An update is built and
+checked separately; startup failure restores the previous version. See
+[self delivery and restart](docs/OPERATIONS.md#update-or-stop-the-host).
+
 ## Current delivery status
 
 Real editing, test execution and handoff across all three agents pass. The app

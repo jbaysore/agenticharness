@@ -395,7 +395,10 @@ function App() {
       fetch("/health", { cache: "no-store" })
         .then((r) => r.json())
         .then(
-          (h) => h.build && `${h.instanceId} ${h.build}`,
+          (h) =>
+            h.acceptingWork !== false &&
+            h.build &&
+            `${h.instanceId} ${h.build}`,
           () => null,
         );
     const first = await health();
@@ -434,6 +437,10 @@ function App() {
       lastEvent.current = e.id;
       if (e.type === "providers")
         setState((s) => ({ ...s, providers: e.payload.providers }));
+      if (e.type === "self-restart") {
+        setState((s) => ({ ...s, selfRestart: e.payload }));
+        if (e.payload?.status === "updated") checkBuild();
+      }
       if (
         [
           "projects",
@@ -1218,6 +1225,39 @@ function App() {
           <div className="reconnect-banner">
             Reconnecting… Work continues on the host. Your messages won’t be
             sent twice.
+          </div>
+        )}
+        {state.selfRestart && (
+          <div
+            className="reconnect-banner self-restart-notice"
+            role="status"
+            aria-label="Harness update status"
+          >
+            {
+              {
+                queued: "Harness update queued.",
+                preparing: "Preparing and checking a Harness update.",
+                waiting: "Harness will update when work finishes.",
+                restarting: "Harness is restarting. Your drafts are saved.",
+                recovering: "Restoring the previous Harness version.",
+                updated: "Harness update complete.",
+                failed:
+                  "Harness update could not finish. The previous version was kept or restored.",
+              }[state.selfRestart.status]
+            }
+            {!!state.selfRestart.blockers?.length && (
+              <span>
+                {" "}
+                Waiting for:{" "}
+                {state.selfRestart.blockers.join(", ").toLowerCase()}.
+              </span>
+            )}
+            {state.selfRestart.error && (
+              <details>
+                <summary>Update details</summary>
+                <pre>{state.selfRestart.error}</pre>
+              </details>
+            )}
           </div>
         )}
         <div className={"pane-strip" + (shown.length === 4 ? " quad" : "")}>

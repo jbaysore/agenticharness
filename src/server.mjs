@@ -43,6 +43,7 @@ import { openReviewer } from "./providers/workers.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
 import { APP_VERSION } from "./core/version.mjs";
+import { SelfRestart, restartTool } from "./core/self-restart.mjs";
 import { importLocalHistory } from "./core/import-history.mjs";
 import {
   delegationStats,
@@ -86,6 +87,8 @@ export async function createHarness({
       }
     : null,
   startProviders = true,
+  selfRestart: enableSelfRestart = startProviders,
+  exitOnRestart = false,
   seedProject = process.env.HARNESS_INITIAL_PROJECT,
 } = {}) {
   if (publicOrigin) {
@@ -104,6 +107,12 @@ export async function createHarness({
       ? accessVerifier({ ...access, emailHash: remoteIdentityHash }, accessKeys)
       : null;
   await mkdir(dataDir, { recursive: true });
+  const runtimeRevision = await readFile(
+    join(root, "HARNESS-RUNTIME.json"),
+    "utf8",
+  )
+    .then((text) => JSON.parse(text).revision)
+    .catch(() => null);
   await mkdir(join(dataDir, "connection-probe"), { recursive: true });
   const store = new Store(join(dataDir, "workspace.sqlite"));
   if (seedProject)
@@ -111,7 +120,9 @@ export async function createHarness({
   const auth = new Authentication(store),
     instanceId = randomUUID(),
     controlToken = randomBytes(32).toString("base64url");
-  let localOrigin, controller, close;
+  let localOrigin, controller, close, selfRestart, selfRestartUnavailable;
+  let inflightWrites = 0,
+    ready = false;
   const clients = new Set();
   const terminals = new Terminals((type, data) =>
     controller?.event(null, null, type, data),
@@ -148,6 +159,7 @@ export async function createHarness({
     return ref.path;
   };
   const server = createServer(async (req, res) => {
+    let counted = false;
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Frame-Options", "DENY");
@@ -173,13 +185,48 @@ export async function createHarness({
       const url = new URL(req.url, localOrigin),
         path = url.pathname,
         method = req.method;
+      if (
+        !["GET", "HEAD"].includes(method) &&
+        !["/internal/restart/activate", "/internal/shutdown"].includes(path)
+      ) {
+        if (
+          selfRestart?.gated ||
+          (process.env.HARNESS_RESTART_REQUEST && !selfRestart)
+        )
+          return json(
+            res,
+            503,
+            {
+              error:
+                "Harness is restarting. Your message can be retried with the same action ID.",
+              restarting: true,
+            },
+            { "Retry-After": "2" },
+          );
+        inflightWrites++;
+        counted = true;
+      }
       if (path === "/health" && method === "GET")
         return json(res, 200, {
           app: "Agentic Harness",
           version: APP_VERSION,
           instanceId,
           build: await clientBuild(),
+          revision: selfRestart?.revision ?? runtimeRevision,
+          ready,
+          acceptingWork: ready && !selfRestart?.gated,
         });
+      if (path === "/internal/restart/activate" && method === "POST") {
+        if (
+          !onHost(req, localOrigin) ||
+          req.headers.authorization !== "Bearer " + controlToken
+        )
+          return json(res, 401, { error: "Invalid restart capability" });
+        if (!selfRestart)
+          return json(res, 409, { error: "Self restart is unavailable" });
+        await selfRestart.activate((await readJson(req)).requestId);
+        return json(res, 200, { activated: true });
+      }
       if (path === "/internal/launch" && method === "POST") {
         if (req.headers.authorization !== "Bearer " + controlToken)
           return json(res, 401, { error: "Invalid local launch capability" });
@@ -207,6 +254,12 @@ export async function createHarness({
             ...(controller.bridgeModes.has(token) ? [modeSuggestionTool] : []),
             ...(controller.bridgeQuestions.has(token) ? [askUserTool] : []),
             ...(controller.bridgeLand.has(token) ? [landTool] : []),
+            ...((await selfRestart?.eligible(
+              store.project(chat?.project_id)?.path,
+              chat?.mode,
+            ))
+              ? [restartTool]
+              : []),
             ...(controller.bridgeBrowser.get(token)?.tools ?? []),
           ],
         });
@@ -245,6 +298,8 @@ export async function createHarness({
           });
         if (body.name === "land_changes" && controller.bridgeLand.has(token))
           return json(res, 200, await controller.bridgeLand.get(token)());
+        if (body.name === "restart_harness")
+          return json(res, 200, await controller.requestSelfRestart(chatId));
         const result = historyCall(
           store,
           chatId,
@@ -354,6 +409,8 @@ export async function createHarness({
             rules: describeRules(readRules(store), controller.providers),
             delegation: delegationStats(store),
             skills: listSkills(store),
+            selfRestart: selfRestart?.status() ?? null,
+            selfRestartUnavailable,
           });
         if (path === "/api/rules" && method === "PUT") {
           const rules = saveRules(
@@ -859,6 +916,8 @@ export async function createHarness({
     } catch (error) {
       if (!res.headersSent) json(res, 400, { error: error.message });
       else res.end();
+    } finally {
+      if (counted) inflightWrites--;
     }
   });
   // cloudflared reuses idle connections for 90 seconds. If Node closes one
@@ -899,7 +958,6 @@ export async function createHarness({
   await writeFile(join(dataDir, "runtime.json"), JSON.stringify(runtime), {
     mode: 0o600,
   });
-  if (startProviders) controller.refreshProviders().catch(() => {});
   let closing, tunnelProcess, tunnelRetry;
   // The tunnel only exists while this host does; requests are still checked above.
   const runTunnel = () => {
@@ -918,6 +976,8 @@ export async function createHarness({
   if (tunnel && publicOrigin && ownerSignedIn) runTunnel();
   close = () =>
     (closing ??= (async () => {
+      ready = false;
+      await selfRestart?.close();
       clearTimeout(tunnelRetry);
       tunnelProcess?.kill();
       await controller.close();
@@ -927,6 +987,44 @@ export async function createHarness({
       await new Promise((resolve) => server.close(resolve));
       store.close();
     })());
+  if (enableSelfRestart) {
+    const candidate = new SelfRestart({
+      root,
+      dataDir,
+      store,
+      controller,
+      terminals,
+      runtime,
+      jobs: () => inflightWrites,
+      shutdown: async () => {
+        await close();
+        if (exitOnRestart) process.exit(0);
+      },
+    });
+    candidate.environment = {
+      HARNESS_PORT: String(actualPort),
+      HARNESS_PUBLIC_ORIGIN: publicOrigin ?? "",
+      HARNESS_REMOTE_IDENTITY_HASH: remoteIdentityHash ?? "",
+      HARNESS_ACCESS_TEAM_DOMAIN: access?.teamDomain ?? "",
+      HARNESS_ACCESS_AUDIENCE: access?.audience ?? "",
+      HARNESS_TUNNEL_EXE: tunnel?.exe ?? "",
+      HARNESS_TUNNEL_CONFIG: tunnel?.config ?? "",
+    };
+    try {
+      selfRestart = await candidate.init();
+      controller.selfRestart = selfRestart;
+    } catch (error) {
+      await candidate.close().catch(() => {});
+      selfRestartUnavailable = error.message;
+      if (process.env.HARNESS_RESTART_REQUEST) {
+        await close();
+        throw error;
+      }
+      console.error("Self delivery unavailable: " + error.message);
+    }
+  }
+  ready = true;
+  if (startProviders) controller.refreshProviders().catch(() => {});
   return {
     server,
     store,
@@ -936,6 +1034,7 @@ export async function createHarness({
     runtime,
     dataDir,
     close,
+    selfRestart,
   };
 }
 
@@ -943,7 +1042,7 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
-  const app = await createHarness();
+  const app = await createHarness({ exitOnRestart: true });
   console.log(`Agentic Harness is running at ${app.runtime.origin}`);
   let closing = false;
   const close = async () => {

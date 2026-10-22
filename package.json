@@ -17,6 +17,7 @@
     "test:scroll": "npm run build && node scripts/scroll-acceptance.mjs",
     "test:models": "npm run build && node scripts/model-picker-acceptance.mjs",
     "test:history": "npm run build && node scripts/history-settings-acceptance.mjs",
+    "test:self-restart": "npm run build && node scripts/self-restart-acceptance.mjs",
     "test:permissions": "npm run build && node scripts/permissions-acceptance.mjs",
     "test:questions": "npm run build && node scripts/questions-acceptance.mjs",
     "test:interface": "npm run build && node scripts/interface-acceptance.mjs",

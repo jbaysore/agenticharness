@@ -1798,6 +1798,16 @@ small {
   border-right: 0;
   text-align: center;
 }
+.self-restart-notice {
+  flex: 0 0 auto;
+}
+.self-restart-notice pre {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
 .work-panel {
   position: relative;
   grid-column: 3;

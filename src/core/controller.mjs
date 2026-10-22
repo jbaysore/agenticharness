@@ -66,6 +66,7 @@ import {
 } from "./attachments.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
+import { restartTool } from "./self-restart.mjs";
 import {
   createWorktree,
   landTool,
@@ -186,6 +187,7 @@ export class Controller extends EventEmitter {
   send(chatId, input, releasing = false) {
     const prepared = this.prepareSend(chatId, input);
     if (prepared.duplicate) return prepared.duplicate;
+    this.selfRestart?.assertAdmission();
     const active = this.active.get(chatId);
     // A running turn keeps the message until it finishes, unless /steer
     // redirects that turn. A stopped turn still drains its queue afterward.
@@ -282,6 +284,7 @@ export class Controller extends EventEmitter {
     };
   }
   startTurn(prepared) {
+    this.selfRestart?.assertAdmission();
     const { chat, chatId } = prepared;
     if (this.active.has(chatId))
       throw new Error("This chat already has active work");
@@ -418,6 +421,7 @@ export class Controller extends EventEmitter {
     if (entry) entry.pendingSteers = [];
   }
   releaseQueue(chatId) {
+    if (this.selfRestart?.gated) return;
     if (this.active.has(chatId)) return;
     const next = this.store.claimNextQueued(chatId);
     if (!next) return;
@@ -573,6 +577,15 @@ export class Controller extends EventEmitter {
       instruction:
         "Harness will move the chat after this turn ends. Stop task work now and tell the user the move is queued, not complete. Harness will report whether it completed; future turns will start in the destination directory.",
     };
+  }
+  async requestSelfRestart(chatId) {
+    const chat = this.store.conversation(chatId);
+    if (!this.selfRestart || !chat)
+      throw new Error("Self restart is unavailable");
+    return this.selfRestart.request(
+      this.store.project(chat.project_id)?.path,
+      chat.mode,
+    );
   }
   async finishChatMove(chatId, pendingMove) {
     const chat = this.store.conversation(chatId),
@@ -1004,6 +1017,31 @@ export class Controller extends EventEmitter {
         run: this.runCommand,
         signal: abort.signal,
       });
+      if (
+        result.landed &&
+        this.selfRestart &&
+        (await this.selfRestart.eligible(
+          home.path,
+          this.store.conversation(chat.id)?.mode,
+        ))
+      ) {
+        try {
+          result.selfRestart = await this.selfRestart.request(
+            home.path,
+            this.store.conversation(chat.id).mode,
+            { automatic: true, commit: result.commit },
+          );
+        } catch (failure) {
+          result.selfRestart = { status: "failed", error: failure.message };
+          emit("work", {
+            kind: "self-restart",
+            item: {
+              title: "Self restart was not queued",
+              description: failure.message,
+            },
+          });
+        }
+      }
       emit("work", {
         kind: "land-result",
         item: result.landed
@@ -1215,6 +1253,9 @@ export class Controller extends EventEmitter {
           askUserTool,
           ...(chat.mode === "goal" ? [] : [modeSuggestionTool]),
           ...(project.worktree ? [landTool] : []),
+          ...((await this.selfRestart?.eligible(home.path, chat.mode))
+            ? [restartTool]
+            : []),
           ...plan.tools,
         ]),
         ...browserTools,
@@ -1239,6 +1280,7 @@ export class Controller extends EventEmitter {
           return { error: ASK_DENY };
         if (name === "suggest_mode") return suggestMode(input);
         if (name === "ask_user") return askUser(input);
+        if (name === "restart_harness") return this.requestSelfRestart(chat.id);
         if (name === "land_changes")
           return project.worktree
             ? land()

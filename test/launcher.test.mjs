@@ -21,6 +21,11 @@ async function fixture(port = 0) {
   const data = join(root, "data");
   await mkdir(join(root, "scripts"));
   await mkdir(join(root, "src"));
+  await mkdir(join(root, "src", "core"));
+  await copyFile(
+    new URL("../src/core/restart-state.mjs", import.meta.url),
+    join(root, "src", "core", "restart-state.mjs"),
+  );
   await mkdir(data);
   await copyFile(
     new URL("../scripts/launch.mjs", import.meta.url),

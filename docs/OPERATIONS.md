@@ -503,6 +503,34 @@ conversation and consult the restored history.
 
 ## Update or stop the host
 
+When Harness runs from a clean Git checkout, changes delivered to its own source
+through `land_changes` automatically queue a self restart. An agent working on
+that source in Default or Goal mode can also call `restart_harness`. The tool
+returns a queued status immediately; finish the turn normally. The update banner
+shows preparation, blockers, completion and failures.
+
+Harness exports the committed revision into a separate runtime, installs its
+locked dependencies, builds it and runs the tests without inference. It waits
+for all chats, queued messages, approvals, live terminals and host jobs to finish,
+then checks five seconds of idle time before switching. Close terminal tabs to
+allow an update; waiting never stops work for you. Uncommitted source changes or
+a changed source branch also postpone the switch.
+
+A hidden helper keeps the same Windows session, port and configuration, takes a
+private SQLite recovery copy and starts the replacement. Startup must pass its
+readiness and revision checks before new work is admitted. A failed startup
+restores the previous runtime and database, including browser pairings. Failed
+revisions do not retry automatically; an agent can explicitly request another
+attempt after fixing the problem. Prepared runtimes, recovery copies and the
+helper log are under the data folder (`self-runtimes`, `self-restart-*.sqlite`,
+and `self-restart.log`). Keep them private. The launcher preserves the selected
+runtime across later starts and waits for an active restart helper.
+
+Self delivery is enabled on the next clean host launch after this feature is
+installed. It does not interrupt existing chats to activate itself. Portable and
+installed release updates without a source checkout still follow the release
+installation procedure below.
+
 Release zips contain a complete runtime and dependencies. Back up first, stop
 active work, close terminals and double-click **Stop Harness.vbs**. Extract the
 new release and run **Install Harness.vbs**. Data stays in its separate folder.
@@ -512,5 +540,5 @@ official distribution; refresh connections afterward.
 Advanced commands are optional: `node scripts/launch.mjs --stop` and
 `node scripts/launch.mjs --restart` provide graceful host control. Startup errors
 are under the data folder in `host-errors.log` and `launcher-errors.log`.
-The app does not include an automatic updater, startup service, offline executor,
+The app does not fetch release updates or include a startup service, offline executor,
 or cross-machine copy of provider credentials.

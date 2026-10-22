@@ -386,7 +386,7 @@ export async function runClaude(
         ),
       // Offered only to a chat working in its own worktree.
       ...(ctx.tools ?? [])
-        .filter((t) => t.name === "land_changes")
+        .filter((t) => ["land_changes", "restart_harness"].includes(t.name))
         .map((t) =>
           tool(t.name, t.description, {}, async () => ({
             content: [
