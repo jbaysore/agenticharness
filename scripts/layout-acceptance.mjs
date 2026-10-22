@@ -73,6 +73,30 @@ try {
     expect(main.x + main.width).toBeLessThanOrEqual(
       (await target.viewportSize()).width + 1,
     );
+    expect(main.y).toBeGreaterThanOrEqual(0);
+    expect(main.y + main.height).toBeLessThanOrEqual(
+      (await target.viewportSize()).height + 1,
+    );
+    expect(
+      await target.locator(".workspace").evaluate((element) => ({
+        overflow: element.scrollHeight - element.clientHeight,
+        top: element.scrollTop,
+        pageTop: window.scrollY,
+      })),
+    ).toEqual({ overflow: 0, top: 0, pageTop: 0 });
+    for (const box of await target
+      .locator(".topbar, .composer-area")
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const { top, bottom } = element.getBoundingClientRect();
+          return { top, bottom };
+        }),
+      )) {
+      expect(box.top).toBeGreaterThanOrEqual(0);
+      expect(box.bottom).toBeLessThanOrEqual(
+        (await target.viewportSize()).height + 1,
+      );
+    }
   }
   await drag(leftHandle, 80);
   await expect.poll(() => width(left)).toBe(326);
@@ -144,6 +168,9 @@ try {
   const focused = page.locator(".chat-pane.focused");
   const sidebarChat = (name) => left.getByRole("button", { name, exact: true });
   await page.setViewportSize({ width: 1920, height: 1000 });
+  await page.evaluate(() => localStorage.removeItem("harness.panes.v1"));
+  await page.goto(app.runtime.origin);
+  await expect(page.locator(".welcome")).toBeVisible();
   await expect(panes).toHaveCount(1);
   await expect(page.getByLabel("Close pane")).toHaveCount(0);
   // An empty pane is filled rather than split, whichever way the chat is opened.
@@ -238,6 +265,60 @@ try {
     fullPage: true,
   });
 
+  // A populated sidebar must scroll inside its column. An implicit auto grid
+  // row used to grow to the list's content height, clipping the composer;
+  // focusing a chat or following a message link then scrolled the whole grid.
+  for (let i = 0; i < 48; i++)
+    app.store.createConversation({
+      projectId: project.id,
+      title: `Sidebar overflow fixture ${i + 1}`,
+    });
+  for (let i = 0; i < 16; i++)
+    app.store.addMessage({
+      conversationId: chat.id,
+      role: "assistant",
+      provider: "codex",
+      content:
+        `Reply ${i + 1}\n\n` + "A paragraph in the conversation.\n\n".repeat(5),
+    });
+  await page.reload();
+  await expect(page.locator(".message.assistant")).toHaveCount(16);
+  const projectList = page.locator(".project-list");
+  const transcript = page.locator(".messages");
+  // Browser chrome and Windows display scaling leave less than 1080 CSS px.
+  for (const viewport of [
+    { width: 1920, height: 940 },
+    { width: 1536, height: 730 },
+    { width: 1280, height: 600 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await noOverflow();
+    expect(
+      await projectList.evaluate(
+        (element) => element.scrollHeight > element.clientHeight,
+      ),
+    ).toBe(true);
+    await page.getByLabel("Message your coding agent").focus();
+    await noOverflow();
+    await transcript.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await page.getByTitle("Link to this message").last().click();
+    // Link navigation schedules scrollIntoView after admitting the chat.
+    await page.waitForTimeout(150);
+    await noOverflow();
+    await sidebarChat("Layout check").click();
+    await noOverflow();
+    await page.getByLabel("Collapse Sidebar fixture", { exact: true }).click();
+    await noOverflow();
+    await page.getByLabel("Expand Sidebar fixture", { exact: true }).click();
+    await noOverflow();
+  }
+  await page.screenshot({
+    path: ".local/screenshots/viewport-populated-sidebar.png",
+  });
+  await page.setViewportSize({ width: 1512, height: 982 });
+
   // Broken or disabled storage must not prevent the app from opening.
   await page.evaluate(() =>
     localStorage.setItem("harness.sidebar-layout.v1", "broken json"),
@@ -268,7 +349,7 @@ try {
   await expect.poll(() => width(left)).toBe(256);
   expect(errors).toEqual([]);
   console.log(
-    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, responsive layouts, storage recovery, and no page errors.",
+    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
   );
 } finally {
   await browser?.close();

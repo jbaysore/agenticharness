@@ -250,6 +250,8 @@ small {
   --right-column: 0px;
   display: grid;
   grid-template-columns: var(--left-column) minmax(0, 1fr) var(--right-column);
+  /* Keep a long sidebar inside the viewport instead of enlarging the shared row. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
 }
@@ -268,6 +270,7 @@ small {
   background: var(--bg-sunken);
   border-right: 1px solid var(--line);
   min-width: 0;
+  min-height: 0;
   padding: 23px 13px 12px;
 }
 .sidebar[hidden] {
