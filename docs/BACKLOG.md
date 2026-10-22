@@ -51,14 +51,15 @@
     per-provider limit in `Controller.send` with a clear message. Both checks use
     included subscription usage. Everything verified so far used a simulated
     provider.
-14. Give a chat its own Git worktree when it starts while another chat is working
-    in the same repository. A chat's folder must be fixed at its first turn,
-    because each provider ties its native session to the working directory.
-    Review, Files, Terminal and the providers then resolve the folder through the
-    chat. Open questions: files a fresh worktree lacks (`node_modules`, `.env`,
-    local databases) and how "commit and push to main" maps onto a branch.
-15. Until then the shared-workspace notice is advisory and cannot attribute edits
-    made while turns overlap. Harness sends its tool list again when it resumes a
+14. Worktree follow-ups. Worktrees are never removed: a chat keeps its folder
+    for good, so removal needs a rule tied to archiving or deleting chats. A new
+    worktree links `node_modules` from the project folder but gets no `.env` or
+    local databases, and an `npm install` in it changes the shared
+    `node_modules`. Codex's workspace-write sandbox covers the worktree but not
+    the project's `.git` folder that its commits write to, so committing may ask
+    for approval. None of this has run with real agents yet.
+15. A chat that started alone stays in the shared folder, where the notice is
+    advisory and cannot attribute edits made while turns overlap. Harness sends its tool list again when it resumes a
     Codex thread, which Codex documents as replacing the stored list; that a
     thread from before this release then gains `workspace_activity` is unverified.
     The per-turn notice reaches it either way.

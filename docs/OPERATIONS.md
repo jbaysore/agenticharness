@@ -68,17 +68,34 @@ waiting on you. A chat shown in a visible window counts as looked at. Hover a
 row to rename or archive it; archived chats sit behind **Show archived** in
 their project and return when you unarchive them or send them a message.
 
-Chats in one project share one working folder. When a turn starts while another
-chat is already working in that folder, or in a folder nested inside it, the
-agent is told who else is working, what they were asked, and which files already
-had uncommitted changes. It is instructed to commit only its own files by path
-and not to stash, reset, rebase or switch branches. Every agent can also call
-`workspace_activity` to check again before committing. The composer and Review
-panel show how many other chats are working in the project. This is guidance to
-the agents, not enforcement: Harness cannot tell which chat made an edit while
-turns overlap, and parallel chats still see each other's unfinished files when
-they run tests. Give parallel chats separate areas of the code, and review the
-diff before trusting a commit made while another chat was working.
+When a chat's first turn starts while another chat is working on the same
+project, and the project folder is the top of a Git repository on a branch, the
+chat gets its own Git worktree under `%LOCALAPPDATA%\AgenticHarness\worktrees`
+on a branch named `harness/<id>`. It keeps that worktree for good. Its agent,
+Review, Files and Terminal all work there, so no other chat's unfinished edits
+reach its builds, tests or commits. `node_modules` is linked from the project
+folder; `.env` files and local databases are not copied.
+
+A chat in a worktree commits to its own branch and delivers the work by calling
+`land_changes`. Harness then lands one branch at a time per project: it rebases
+the branch onto the project's branch, runs the project's check command on the
+result, fast-forwards the project's branch in the project folder and pushes it
+to its upstream. Conflicts, a failing check or uncommitted work go back to the
+agent to fix and land again. Set the check command under **Check before
+landing** in the Files panel; with none set, a clean rebase is enough. Landing
+fails if the project folder has uncommitted changes in the same files, or is on
+another branch. Before each turn, a worktree with no commits of its own catches
+up with the project's branch.
+
+A chat that started while nobody else was working stays in the shared project
+folder. When a turn starts while another chat is working in that folder, or in a
+folder nested inside it, the agent is told who else is working, what they were
+asked, and which files already had uncommitted changes. It is instructed to
+commit only its own files by path and not to stash, reset, rebase or switch
+branches. Every agent can also call `workspace_activity` to check again before
+committing. The composer and Review panel show how many other chats are working
+in the same folder. This is guidance to the agents, not enforcement: Harness
+cannot tell which chat made an edit while turns overlap.
 
 ## Skills
 

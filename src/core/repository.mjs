@@ -13,11 +13,11 @@ import { resolve, relative, isAbsolute, sep, join } from "node:path";
 import { createHash } from "node:crypto";
 
 const exec = promisify(execFile);
-export async function git(root, args) {
+export async function git(root, args, { timeout = 20000 } = {}) {
   const result = await exec("git", ["-C", root, "--no-pager", ...args], {
     windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
-    timeout: 20000,
+    timeout,
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
   });
   return result.stdout;

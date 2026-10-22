@@ -268,6 +268,19 @@ export async function runClaude(
             }),
           ),
         ),
+      // Offered only to a chat working in its own worktree.
+      ...(ctx.tools ?? [])
+        .filter((t) => t.name === "land_changes")
+        .map((t) =>
+          tool(t.name, t.description, {}, async () => ({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(await ctx.history(t.name, {})),
+              },
+            ],
+          })),
+        ),
       // Harness asks the user before any browser action that can change a page.
       ...(ctx.tools ?? [])
         .filter((t) => isBrowserTool(t.name))

@@ -31,6 +31,7 @@ function summarize({ last_status, last_ended_at, pending_approvals, ...c }) {
   return {
     ...c,
     sessions: JSON.parse(c.sessions),
+    worktree: c.worktree ? JSON.parse(c.worktree) : null,
     ...chatStatus({ ...c, last_status, last_ended_at, pending_approvals }),
   };
 }
@@ -84,6 +85,12 @@ export class Store {
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN read_at TEXT; UPDATE conversations SET read_at=updated_at",
       );
+    // The chat's own Git worktree, when it started beside another busy chat.
+    if (!conversation.includes("worktree"))
+      this.db.exec("ALTER TABLE conversations ADD COLUMN worktree TEXT");
+    // Run on a chat's rebased branch before it lands on the project's branch.
+    if (!columns("projects").includes("check_command"))
+      this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
     if (this.setting("default-history-scope") === null)
       this.setting("default-history-scope", "all");
   }
@@ -138,6 +145,17 @@ export class Store {
       .prepare("INSERT INTO projects(id,name,path,created_at) VALUES(?,?,?,?)")
       .run(id, name, path, this.now());
     return this.project(id);
+  }
+  setCheckCommand(projectId, command) {
+    if (!this.project(projectId)) throw new Error("Project not found");
+    const value =
+      String(command ?? "")
+        .trim()
+        .slice(0, 2000) || null;
+    this.db
+      .prepare("UPDATE projects SET check_command=? WHERE id=?")
+      .run(value, projectId);
+    return this.project(projectId);
   }
   addReference(projectId, reference) {
     const project = this.project(projectId);
@@ -218,6 +236,7 @@ export class Store {
       "permissions",
       "mode",
       "sessions",
+      "worktree",
     ]);
     const entries = Object.entries(fields).filter(([key]) => allowed.has(key));
     if (entries.length)
@@ -227,7 +246,9 @@ export class Store {
         )
         .run(
           ...entries.map(([key, value]) =>
-            key === "sessions" ? JSON.stringify(value) : value,
+            key === "sessions" || (key === "worktree" && value)
+              ? JSON.stringify(value)
+              : value,
           ),
           this.now(),
           id,

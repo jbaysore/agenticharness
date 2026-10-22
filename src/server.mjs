@@ -25,6 +25,7 @@ import {
   readRepositoryFile,
 } from "./core/repository.mjs";
 import { historyCall, historyTools } from "./core/history.mjs";
+import { landTool } from "./core/worktrees.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
@@ -112,7 +113,8 @@ export async function createHarness({
     });
     res.end(JSON.stringify(value));
   };
-  const projectRoot = (projectId, index) => {
+  // A chat in its own worktree sees that worktree as its primary repository.
+  const projectRoot = (projectId, index, chatId) => {
     const project = store.project(projectId);
     if (!project) throw new Error("Project not found");
     if (
@@ -120,8 +122,12 @@ export async function createHarness({
       index === undefined ||
       index === "" ||
       index === "primary"
-    )
-      return project.path;
+    ) {
+      const chat = chatId && store.conversation(chatId);
+      return chat?.project_id === project.id && chat.worktree
+        ? chat.worktree.path
+        : project.path;
+    }
     const ref = project.repositories[Number(index)];
     if (!ref) throw new Error("Repository not found");
     return ref.path;
@@ -181,6 +187,7 @@ export async function createHarness({
         return json(res, 200, {
           tools: [
             ...historyTools,
+            ...(controller.bridgeLand.has(token) ? [landTool] : []),
             ...(controller.bridgeBrowser.get(token)?.tools ?? []),
           ],
         });
@@ -196,6 +203,8 @@ export async function createHarness({
           return json(res, 200, {
             mcp: await browser.call(body.name, body.arguments ?? {}),
           });
+        if (body.name === "land_changes" && controller.bridgeLand.has(token))
+          return json(res, 200, await controller.bridgeLand.get(token)());
         const result = historyCall(
           store,
           chatId,
@@ -390,6 +399,17 @@ export async function createHarness({
         )
           return json(res, 200, { run: store.runForAction(match[1]) ?? null });
         if (
+          (match = path.match(/^\/api\/projects\/([^/]+)\/check$/)) &&
+          method === "PUT"
+        ) {
+          const body = await readJson(req);
+          return json(
+            res,
+            200,
+            store.setCheckCommand(match[1], body.checkCommand),
+          );
+        }
+        if (
           (match = path.match(/^\/api\/projects\/([^/]+)\/references$/)) &&
           method === "POST"
         ) {
@@ -501,6 +521,7 @@ export async function createHarness({
               projectRoot(
                 url.searchParams.get("projectId"),
                 url.searchParams.get("repo"),
+                url.searchParams.get("chatId"),
               ),
             ),
           );
@@ -512,6 +533,7 @@ export async function createHarness({
               projectRoot(
                 url.searchParams.get("projectId"),
                 url.searchParams.get("repo"),
+                url.searchParams.get("chatId"),
               ),
               url.searchParams.get("file"),
             ),
@@ -524,6 +546,7 @@ export async function createHarness({
               projectRoot(
                 url.searchParams.get("projectId"),
                 url.searchParams.get("repo"),
+                url.searchParams.get("chatId"),
               ),
               url.searchParams.get("file"),
             ),
@@ -532,7 +555,7 @@ export async function createHarness({
           const body = await readJson(req),
             chat = store.conversation(body.conversationId);
           if (!chat) throw new Error("Conversation not found");
-          const root = projectRoot(chat.project_id, body.repo),
+          const root = projectRoot(chat.project_id, body.repo, chat.id),
             diff = await repositoryDiff(root, body.file);
           if (diff.revision !== body.revision)
             return json(res, 409, {
@@ -554,7 +577,7 @@ export async function createHarness({
           const body = await readJson(req),
             chat = store.conversation(body.conversationId);
           if (!chat) throw new Error("Choose a conversation first");
-          const root = projectRoot(chat.project_id, body.repo);
+          const root = projectRoot(chat.project_id, body.repo, chat.id);
           await readRepositoryFile(root, body.file);
           const id = randomUUID();
           store.db
@@ -596,7 +619,14 @@ export async function createHarness({
           const body = await readJson(req),
             project = store.project(body.projectId);
           if (!project) throw new Error("Project not found");
-          return json(res, 201, terminals.create(project));
+          return json(
+            res,
+            201,
+            terminals.create({
+              ...project,
+              path: projectRoot(project.id, "primary", body.chatId),
+            }),
+          );
         }
         if (
           (match = path.match(
@@ -746,6 +776,7 @@ export async function createHarness({
     probePath: join(dataDir, "connection-probe"),
     bridgeUrl: localOrigin,
     browser: startProviders ? new Browser(dataDir) : null,
+    worktreeRoot: join(dataDir, "worktrees"),
   });
   controller.on("event", (event) => {
     const data = `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;

@@ -93,11 +93,19 @@ const sharedWorkspaceRules =
   "change only the files your task needs; stage and commit by explicit path, never with git add -A, git add . or git commit -a; do not stash, reset, restore, clean, rebase, or check out or switch branches; leave changes you did not make exactly as they are and say that you saw them; call workspace_activity and check git status again immediately before committing. These rules take priority over any project instruction to commit everything.";
 
 // Other chats with a turn in progress in the same folder, or one nested in it.
+// A chat in its own worktree shares a folder with nobody; `byProject` instead
+// lists every busy chat on the same project folder, wherever it works.
 // A chat that keeps its history to itself is named without its request.
-export function workspacePeers(store, conversationId) {
+export function workspacePeers(
+  store,
+  conversationId,
+  { byProject = false } = {},
+) {
   const chat = store.conversation(conversationId),
     project = chat && store.project(chat.project_id);
   if (!project) return [];
+  const folder = (c, home) =>
+    byProject ? home.path : (c.worktree?.path ?? home.path);
   return store
     .activeRuns()
     .filter((run) => run.conversation_id !== conversationId)
@@ -106,11 +114,12 @@ export function workspacePeers(store, conversationId) {
         home = peer && store.project(peer.project_id);
       return (
         !!home &&
-        pathsOverlap(project.path, home.path) && {
+        pathsOverlap(folder(chat, project), folder(peer, home)) && {
           conversationId: peer.id,
           title: peer.title,
           provider: run.provider,
           repository: home.path,
+          ownWorktree: !!peer.worktree,
           startedAt: run.created_at,
           waitingForApproval: run.status === "waiting",
           request:
@@ -151,7 +160,9 @@ export function historyCall(store, conversationId, name, args) {
   const chat = store.conversation(conversationId);
   if (!chat) throw new Error("Conversation not found");
   if (name === "workspace_activity")
-    return workspacePeers(store, conversationId);
+    return workspacePeers(store, conversationId, {
+      byProject: !!chat.worktree,
+    });
   if (name === "rename_chat") return renameChat(store, chat, args.title);
   if (name === "project_notes")
     return store
@@ -227,6 +238,15 @@ export function handoffContext(store, chat, provider) {
     .slice(0, 48000);
 }
 
+// For a chat in its own worktree, `project.path` is the worktree and
+// `project.home` the shared project folder.
+function workspaceInstructions(project) {
+  const worktree = project.worktree;
+  if (!worktree)
+    return `Shared workspace: other Harness chats may be working in this same folder at the same time. A turn begins with a workspace notice when one already is, and one can start later, so always call workspace_activity before you commit. Whenever a notice or workspace_activity reports another chat: ${sharedWorkspaceRules}`;
+  return `Own worktree: this chat started while another was working on the project, so it works in its own Git worktree at ${project.path} on branch ${worktree.branch}. No other chat edits files here. Do not edit the shared project folder ${project.home}, and do not switch this worktree's branch. Commit your work to ${worktree.branch}, then call land_changes to deliver it: Harness rebases the branch onto ${worktree.base}, runs the project's check command, fast-forwards ${worktree.base} in the project folder and pushes it. That replaces committing or pushing to ${worktree.base} yourself, including where project instructions ask you to, so report the commit land_changes returns. If it reports conflicts or a failing check, fix them here, commit, and call it again. workspace_activity lists the other chats working on this project.`;
+}
+
 export function agentInstructions(project, chat) {
-  return `This is the user's personal Agentic Harness workspace. Use only the current subscription integration for all AI work, including summaries and subagents. Never use inference API keys, paid overages, credit purchases, or other paid inference routes. Stop on subscription limits.\nApp conversation: harness://conversation/${chat.id}. Shared history scope: ${chat.scope}. Search and read history on demand; don't load the entire archive. Preserve source links. Native sessions from other providers are not interchangeable.\nPrimary writable repository: ${project.path}.\nUpstream references (read-only, one-way; never modify unless the user explicitly changes scope): ${project.repositories.map((r) => `${r.name}: ${r.path}`).join("; ") || "none"}. Consult project instructions. Keep each repository's Git state distinct. Report verification results accurately.\nShared workspace: other Harness chats may be working in this same folder at the same time. A turn begins with a workspace notice when one already is, and one can start later, so always call workspace_activity before you commit. Whenever a notice or workspace_activity reports another chat: ${sharedWorkspaceRules}`;
+  return `This is the user's personal Agentic Harness workspace. Use only the current subscription integration for all AI work, including summaries and subagents. Never use inference API keys, paid overages, credit purchases, or other paid inference routes. Stop on subscription limits.\nApp conversation: harness://conversation/${chat.id}. Shared history scope: ${chat.scope}. Search and read history on demand; don't load the entire archive. Preserve source links. Native sessions from other providers are not interchangeable.\nPrimary writable repository: ${project.path}.\nUpstream references (read-only, one-way; never modify unless the user explicitly changes scope): ${project.repositories.map((r) => `${r.name}: ${r.path}`).join("; ") || "none"}. Consult project instructions. Keep each repository's Git state distinct. Report verification results accurately.\n${workspaceInstructions(project)}`;
 }

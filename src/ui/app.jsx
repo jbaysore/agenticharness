@@ -1335,8 +1335,15 @@ function WorkspacePanel({
   const [notes, setNotes] = useState([]),
     [note, setNote] = useState(""),
     [reference, setReference] = useState(""),
-    [showReference, setShowReference] = useState(false);
-  const query = "projectId=" + project.id + "&repo=" + encodeURIComponent(repo);
+    [showReference, setShowReference] = useState(false),
+    [checkCommand, setCheckCommand] = useState(project.check_command ?? "");
+  // A chat in its own worktree shows that worktree as its repository.
+  const query =
+    "projectId=" +
+    project.id +
+    "&repo=" +
+    encodeURIComponent(repo) +
+    (chat?.worktree ? "&chatId=" + chat.id : "");
   // The panel follows the focused chat, so an answer for the repository it
   // just left must not overwrite the one it is showing now.
   const wanted = useRef(query);
@@ -1400,7 +1407,7 @@ function WorkspacePanel({
     }
   };
   if (panel === "terminal")
-    return <TerminalPane project={project} report={report} />;
+    return <TerminalPane project={project} chat={chat} report={report} />;
   if (panel === "activity")
     return (
       <div className="activity-panel">
@@ -1810,6 +1817,33 @@ function WorkspacePanel({
                 <button className="secondary">Add reference</button>
               </form>
             )}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                act(async () => {
+                  const saved = await api(
+                    "/api/projects/" + project.id + "/check",
+                    { checkCommand },
+                    "PUT",
+                  );
+                  setCheckCommand(saved.check_command ?? "");
+                })();
+              }}
+            >
+              <label>
+                Check before landing
+                <input
+                  value={checkCommand}
+                  onChange={(e) => setCheckCommand(e.target.value)}
+                  placeholder="npm test"
+                />
+              </label>
+              <p className="muted small">
+                Runs on a chat's rebased branch before land_changes moves it
+                onto the project's branch. Leave empty to land without a check.
+              </p>
+              <button className="secondary">Save check</button>
+            </form>
           </section>
         </>
       )}
@@ -1817,7 +1851,7 @@ function WorkspacePanel({
   );
 }
 
-function TerminalPane({ project, report }) {
+function TerminalPane({ project, chat, report }) {
   const container = useRef(null),
     terminal = useRef(null),
     active = useRef(null),
@@ -1931,7 +1965,7 @@ function TerminalPane({ project, report }) {
           className="icon-button"
           aria-label="New terminal"
           onClick={() =>
-            api("/api/terminals", { projectId: project.id })
+            api("/api/terminals", { projectId: project.id, chatId: chat?.id })
               .then((s) => {
                 setSessions([...sessions, s]);
                 setId(s.id);
@@ -1971,7 +2005,7 @@ function TerminalPane({ project, report }) {
           <button
             className="secondary"
             onClick={() =>
-              api("/api/terminals", { projectId: project.id })
+              api("/api/terminals", { projectId: project.id, chatId: chat?.id })
                 .then((s) => {
                   setSessions([...sessions, s]);
                   setId(s.id);

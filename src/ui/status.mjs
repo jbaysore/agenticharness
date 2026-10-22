@@ -45,12 +45,15 @@ export function activeChats(conversations) {
         b.updated_at.localeCompare(a.updated_at),
     );
 }
-// Other chats with a turn in progress in the same project as this one.
+// Other chats with a turn in progress in the same project folder as this one.
+// A chat in its own worktree shares its folder with nobody.
 export function workspacePeers(conversations, projectId, chatId) {
+  if (conversations.find((c) => c.id === chatId)?.worktree) return [];
   return conversations.filter(
     (c) =>
       c.project_id === projectId &&
       c.id !== chatId &&
+      !c.worktree &&
       ["running", "needs-approval"].includes(c.status),
   );
 }

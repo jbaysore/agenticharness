@@ -27,6 +27,13 @@ import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { browserTitle } from "./browser.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { CursorReviewer } from "./reviewer.mjs";
+import {
+  createWorktree,
+  landTool,
+  landWorktree,
+  restoreWorktree,
+  syncWorktree,
+} from "./worktrees.mjs";
 
 // Who answers permission requests: a native or separate reviewer (auto),
 // the user (manual), or nobody, because everything is allowed (override).
@@ -42,7 +49,10 @@ export function checkMode(mode, provider) {
 }
 
 export class Controller extends EventEmitter {
-  constructor(store, { probePath, bridgeUrl, browser = null }) {
+  constructor(
+    store,
+    { probePath, bridgeUrl, browser = null, worktreeRoot = null },
+  ) {
     super();
     this.store = store;
     this.probePath = probePath;
@@ -53,6 +63,9 @@ export class Controller extends EventEmitter {
     this.bridgeTokens = new Map();
     this.browser = browser;
     this.bridgeBrowser = new Map();
+    this.bridgeLand = new Map();
+    // Where chats that start beside a busy chat get their own worktree.
+    this.worktreeRoot = worktreeRoot;
     this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
     this.workerTimeoutMs = 5 * 60 * 1000;
@@ -190,10 +203,74 @@ export class Controller extends EventEmitter {
     checkMode(mode, chat.provider);
     return this.store.updateConversation(chatId, { mode });
   }
+  // The folder a chat works in: its own worktree when it started while
+  // another chat was busy on the same project, otherwise the project folder.
+  // A chat keeps that folder for good, because native sessions are tied to it.
+  async chatFolder(chat, home, run) {
+    let worktree = chat.worktree;
+    if (
+      !worktree &&
+      this.worktreeRoot &&
+      !Object.keys(chat.sessions).length &&
+      workspacePeers(this.store, chat.id, { byProject: true }).length
+    )
+      try {
+        worktree = await createWorktree({
+          projectPath: home.path,
+          root: this.worktreeRoot,
+          chatId: chat.id,
+        });
+        this.store.updateConversation(chat.id, { worktree });
+        this.event(chat.id, null, "chat", this.store.conversation(chat.id));
+        this.event(chat.id, run.id, "work", {
+          kind: "worktree",
+          item: {
+            title: `Working in its own copy on ${worktree.branch}`,
+            description: `Another chat was already working on this project, so this chat has its own Git worktree at ${worktree.path}. Its commits reach ${worktree.base} through land_changes.`,
+          },
+        });
+      } catch (failure) {
+        this.event(chat.id, run.id, "work", {
+          kind: "worktree-unavailable",
+          item: {
+            title: "Working in the shared project folder",
+            description: `Another chat is working here, but this chat could not get its own worktree: ${failure.message}`,
+          },
+        });
+        return home;
+      }
+    if (!worktree) return home;
+    await restoreWorktree(home.path, worktree);
+    const sync = await syncWorktree(worktree).catch(() => null);
+    if (sync?.updated)
+      this.event(chat.id, run.id, "work", {
+        kind: "worktree-sync",
+        item: {
+          title: `Brought ${worktree.branch} up to date with ${worktree.base}`,
+          description: `${sync.behind} new ${sync.behind === 1 ? "commit" : "commits"} from other chats.`,
+        },
+      });
+    return { ...home, path: worktree.path, home: home.path, worktree };
+  }
   async execute(run, text, effort, abort, continuing = false) {
     const chat = this.store.conversation(run.conversation_id),
-      project = this.store.project(chat.project_id),
+      home = this.store.project(chat.project_id),
       messageMap = new Map();
+    let project;
+    try {
+      project = await this.chatFolder(chat, home, run);
+    } catch (failure) {
+      const error = `This chat's worktree could not be prepared: ${failure.message}`;
+      this.store.setRun(run.id, "failed", null, error);
+      this.active.delete(chat.id);
+      this.event(chat.id, run.id, "run", {
+        status: "failed",
+        error,
+        provider: run.provider,
+        model: run.model,
+      });
+      return;
+    }
     let actualModel =
       this.providers
         .find((p) => p.id === run.provider)
@@ -398,6 +475,37 @@ export class Controller extends EventEmitter {
     };
     if (browserTools.length)
       this.bridgeBrowser.set(token, { tools: browserTools, call: browser });
+    // A chat in its own worktree delivers its commits through land_changes.
+    const land = async () => {
+      const { worktree } = project;
+      emit("work", {
+        kind: "landing",
+        item: { title: `Landing ${worktree.branch} on ${worktree.base}` },
+      });
+      const result = await landWorktree({
+        projectPath: home.path,
+        worktree,
+        check: home.check_command,
+        run: this.runCommand,
+        signal: abort.signal,
+      });
+      emit("work", {
+        kind: "land-result",
+        item: result.landed
+          ? {
+              title: `Landed on ${result.branch} · ${result.commit.slice(0, 7)}`,
+              description: [
+                `${result.commits} ${result.commits === 1 ? "commit" : "commits"}${result.checked ? `, checked with ${result.checked}` : ", no check command set"}.`,
+                result.pushed
+                  ? `Pushed to ${result.pushedTo}.`
+                  : result.pushNote,
+              ].join(" "),
+            }
+          : { title: "Not landed", description: result.reason },
+      });
+      return result;
+    };
+    if (project.worktree) this.bridgeLand.set(token, land);
     const skills = invokedSkills(listSkills(this.store), text);
     if (skills.length)
       this.event(chat.id, run.id, "work", {
@@ -440,7 +548,12 @@ export class Controller extends EventEmitter {
         rulesInstructions(rules, plan, this.providers, COMMAND_SHELL) +
         skillInstructions(skills),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
-      tools: [...historyTools, ...plan.tools, ...browserTools],
+      tools: [
+        ...historyTools,
+        ...(project.worktree ? [landTool] : []),
+        ...plan.tools,
+        ...browserTools,
+      ],
       browser,
       signal: abort.signal,
       emit,
@@ -455,6 +568,10 @@ export class Controller extends EventEmitter {
       history: async (name, args) => {
         const input =
           typeof args === "string" ? JSON.parse(args) : (args ?? {});
+        if (name === "land_changes")
+          return project.worktree
+            ? land()
+            : { error: "This chat works in the shared project folder." };
         if (isDelegationTool(name))
           return delegator
             ? delegator.handle(name, input)
@@ -513,6 +630,7 @@ export class Controller extends EventEmitter {
       this.store.expireApprovals(run.id);
       this.bridgeTokens.delete(token);
       this.bridgeBrowser.delete(token);
+      this.bridgeLand.delete(token);
       for (const [id, waiter] of this.approvalWaiters)
         if (waiter.runId === run.id) {
           waiter.resolve({ allow: false });
