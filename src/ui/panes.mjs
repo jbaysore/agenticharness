@@ -200,3 +200,61 @@ export function savePanes(state, storage = window.localStorage) {
     return false;
   }
 }
+// The full arrangement, terminals included, so a reload puts every pane back
+// in the same order. Chats alone are also kept in savePanes for addresses.
+const layoutKey = "harness.layout.v1";
+export function saveLayout(state, storage = window.localStorage) {
+  try {
+    const open = state.panes.filter(occupied);
+    storage.setItem(
+      layoutKey,
+      JSON.stringify({
+        items: open.map((p) =>
+          p.terminalId
+            ? { terminalId: p.terminalId, projectId: p.projectId }
+            : { chatId: p.chatId },
+        ),
+        focused: Math.max(0, open.indexOf(focusedPane(state))),
+      }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+export function readLayout(storage = window.localStorage) {
+  try {
+    const saved = JSON.parse(storage.getItem(layoutKey) ?? "null"),
+      items = (Array.isArray(saved?.items) ? saved.items : []).filter(
+        (item) =>
+          typeof item?.chatId === "string" ||
+          typeof item?.terminalId === "string",
+      );
+    return {
+      items: items.slice(0, MAX_PANES),
+      focused: Number.isInteger(saved?.focused) ? saved.focused : 0,
+    };
+  } catch {
+    return { items: [], focused: 0 };
+  }
+}
+// Rebuild panes from saved items, dropping chats and terminals that are gone.
+export function restoreLayout(items, focused, exists) {
+  const seen = new Set(),
+    kept = [];
+  items.forEach((item, index) => {
+    const id = item.chatId ?? item.terminalId;
+    if (seen.has(id) || !exists(item)) return;
+    seen.add(id);
+    kept.push({ item, focus: index === focused });
+  });
+  if (!kept.length) return null;
+  kept.splice(MAX_PANES);
+  const panes = kept.map(({ item }) =>
+    item.terminalId
+      ? pane(null, item.projectId ?? "", item.terminalId)
+      : pane(item.chatId),
+  );
+  const at = kept.findIndex((k) => k.focus);
+  return { panes, focused: panes[Math.max(0, at)].key };
+}

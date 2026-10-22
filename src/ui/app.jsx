@@ -47,7 +47,10 @@ import {
   openInFocused,
   openTerminal,
   parseSearch,
+  readLayout,
   readPanes,
+  restoreLayout,
+  saveLayout,
   savePanes,
   setPaneChat,
   showHome,
@@ -223,7 +226,8 @@ function App() {
     },
     [admit],
   );
-  const openIds = view.panes.map((p) => p.chatId).filter(Boolean);
+  const openIds = view.panes.map((p) => p.chatId).filter(Boolean),
+    terminalIds = view.panes.map((p) => p.terminalId).filter(Boolean);
   const previousOpen = useRef([]);
   useEffect(() => {
     const open = new Set(openIds),
@@ -249,7 +253,8 @@ function App() {
       });
     history.replaceState({}, "", toSearch(view));
     savePanes(view);
-  }, [openIds.join(","), view.focused, ready]);
+    saveLayout(view);
+  }, [openIds.join(","), terminalIds.join(","), view.focused, ready]);
   useEffect(() => {
     let ignore = false,
       retry;
@@ -279,7 +284,34 @@ function App() {
           )
         ).filter(Boolean);
         if (ignore) return;
-        if (found.length) {
+        // Terminals are not in the address, so the saved arrangement brings them
+        // back, unless the address names a different set of chats.
+        const layout = readLayout(),
+          unsent = Object.keys(readAllPending()).filter(
+            (id) => !layout.items.some((item) => item.chatId === id),
+          ),
+          layoutChats = layout.items.map((item) => item.chatId).filter(Boolean),
+          rebuilt =
+            (!linked.length || linked.join() === layoutChats.join()) &&
+            layout.items.some((item) => item.terminalId)
+              ? restoreLayout(
+                  [...unsent.map((chatId) => ({ chatId })), ...layout.items],
+                  layout.focused + unsent.length,
+                  (item) =>
+                    item.terminalId
+                      ? next.terminals?.some((t) => t.id === item.terminalId)
+                      : found.some((c) => c.id === item.chatId),
+                )
+              : null;
+        if (rebuilt) {
+          found.forEach(admit);
+          setView(rebuilt);
+          const focus = focusedPane(rebuilt);
+          setSelectedProject(
+            found.find((c) => c.id === focus.chatId)?.project_id ??
+              (focus.projectId || next.projects[0]?.id || ""),
+          );
+        } else if (found.length) {
           found.forEach(admit);
           // A reload returns to the pane that had focus; a link to other chats does not.
           const remembered =

@@ -30,13 +30,11 @@ try {
   ).newPage();
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(app.runtime.origin + "/#pair=" + app.auth.pairing());
-  await page
-    .getByRole("button", { name: "New terminal", exact: true })
-    .click();
+  await page.getByRole("button", { name: "New terminal", exact: true }).click();
   const sidebar = page.locator(".sidebar");
-  await expect(
-    sidebar.getByRole("group", { name: "Terminals" }),
-  ).toContainText("Terminal 1");
+  await expect(sidebar.getByRole("group", { name: "Terminals" })).toContainText(
+    "Terminal 1",
+  );
   await expect(page.locator(".terminal-pane")).toHaveCount(1);
   await expect(page.locator(".topbar .breadcrumbs strong")).toHaveText(
     "Terminal 1",
@@ -45,8 +43,7 @@ try {
   await page.locator(".xterm-helper-textarea").press("Enter");
   await expect
     .poll(
-      () =>
-        (app.terminals.list()[0]?.output.match(/PANE_OK/g) ?? []).length,
+      () => (app.terminals.list()[0]?.output.match(/PANE_OK/g) ?? []).length,
       { timeout: 15000 },
     )
     .toBeGreaterThanOrEqual(2);
@@ -59,9 +56,7 @@ try {
     .getByRole("button", { name: "New terminal", exact: true })
     .click({ modifiers: ["Control"] });
   await expect(page.locator(".terminal-pane")).toHaveCount(2);
-  await page
-    .getByRole("button", { name: "New conversation", exact: true })
-    .click({ modifiers: ["Control"] });
+  await page.locator(".new-chat").click({ modifiers: ["Control"] });
   await expect(page.locator(".chat-pane")).toHaveCount(3);
   await page.screenshot({ path: ".local/screenshots/terminal-panes.png" });
 
@@ -70,16 +65,39 @@ try {
   await expect(page.locator(".terminal-pane")).toHaveCount(1);
   await expect(page.locator(".chat-pane")).toHaveCount(2);
   expect(app.terminals.list()).toHaveLength(2);
-  await sidebar.getByRole("button", { name: "Terminal 1", exact: true }).click();
+  await sidebar
+    .getByRole("button", { name: "Terminal 1", exact: true })
+    .click();
+  await expect(page.locator(".terminal-pane .xterm-rows")).toContainText(
+    "PANE_OK",
+  );
+
+  // Two chats and a terminal share the width equally, and a reload keeps them.
+  await page.getByLabel("Add a pane beside").click();
+  await page.locator(".new-chat").click({ modifiers: ["Control"] });
+  const panes = page.locator(".pane-strip > section");
+  await expect(panes).toHaveCount(3);
+  const widths = await panes.evaluateAll((all) =>
+    all.map((p) => Math.round(p.getBoundingClientRect().width)),
+  );
+  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
+  const order = () =>
+    panes.evaluateAll((all) =>
+      all.map((p) => (p.classList.contains("terminal-pane") ? "t" : "c")),
+    );
+  const before = await order();
+  await page.reload();
+  await expect(panes).toHaveCount(3);
+  expect(await order()).toEqual(before);
   await expect(page.locator(".terminal-pane .xterm-rows")).toContainText(
     "PANE_OK",
   );
 
   // Ending one stops it and removes it everywhere.
   await sidebar.getByLabel("End Terminal 1").click({ force: true });
-  await expect(sidebar.getByRole("button", { name: "Terminal 1", exact: true })).toHaveCount(
-    0,
-  );
+  await expect(
+    sidebar.getByRole("button", { name: "Terminal 1", exact: true }),
+  ).toHaveCount(0);
   expect(app.terminals.list()).toHaveLength(1);
   expect(errors).toEqual([]);
   console.log(

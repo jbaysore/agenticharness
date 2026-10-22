@@ -14,7 +14,10 @@ import {
   openInFocused,
   openTerminal,
   parseSearch,
+  readLayout,
   readPanes,
+  restoreLayout,
+  saveLayout,
   savePanes,
   setPaneChat,
   showHome,
@@ -219,4 +222,40 @@ test("a pane holding a terminal is not treated as empty", () => {
   assert.equal(openBeside(state, "a").panes.length, 2);
   assert.equal(showHome(state, "project").panes[0].terminalId, null);
   assert.equal(toSearch(state), "/");
+});
+test("a layout with terminals comes back in order and drops what is gone", () => {
+  const storage = new Map(),
+    shim = {
+      getItem: (k) => storage.get(k) ?? null,
+      setItem: (k, v) => storage.set(k, v),
+    };
+  let state = openInFocused(initialPanes(), "a");
+  state = openTerminal(state, "t1", "p", true);
+  state = openBeside(state, "b");
+  assert.equal(saveLayout(state, shim), true);
+  const saved = readLayout(shim);
+  assert.deepEqual(saved.items, [
+    { chatId: "a" },
+    { terminalId: "t1", projectId: "p" },
+    { chatId: "b" },
+  ]);
+  assert.equal(saved.focused, 2);
+  const restored = restoreLayout(
+    saved.items,
+    saved.focused,
+    (i) => i.chatId !== "a",
+  );
+  assert.deepEqual(
+    restored.panes.map((p) => p.terminalId ?? p.chatId),
+    ["t1", "b"],
+  );
+  assert.equal(focusedPane(restored).chatId, "b");
+  assert.equal(
+    restoreLayout([], 0, () => true),
+    null,
+  );
+  assert.deepEqual(readLayout({ getItem: () => "{broken" }), {
+    items: [],
+    focused: 0,
+  });
 });
