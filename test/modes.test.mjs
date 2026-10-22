@@ -15,7 +15,11 @@ import {
   codexCollaboration,
   codexExecutionPolicy,
 } from "../src/providers/codex.mjs";
-import { cursorAskRejection, cursorModeId } from "../src/providers/cursor.mjs";
+import {
+  cursorAskRejection,
+  cursorModeId,
+  runCursor,
+} from "../src/providers/cursor.mjs";
 
 const auth = async () => ({
   loggedIn: true,
@@ -436,4 +440,150 @@ test("Cursor ask mode uses the native ask id and declines other permissions", ()
     ),
     null,
   );
+});
+
+// A stand-in Cursor session. The first prompt raises create_plan and waits
+// until Harness answers it, then later prompts run to completion.
+function fakeCursor(onPlan) {
+  const calls = [],
+    responses = [],
+    handlers = [];
+  let release = null;
+  const rpc = {
+    closed: false,
+    promptCapabilities: {},
+    on(event, fn) {
+      if (event === "request") handlers.push(fn);
+    },
+    notify() {},
+    close() {
+      this.closed = true;
+    },
+    reject(id, message) {
+      responses.push({ id, error: message });
+      release?.();
+      release = null;
+    },
+    respond(id, result) {
+      responses.push({ id, result });
+      release?.();
+      release = null;
+    },
+    async call(method, params) {
+      calls.push({ method, params });
+      if (method === "session/new")
+        return {
+          sessionId: "session-1",
+          models: { availableModels: [{ modelId: "m", name: "Fixture" }] },
+          configOptions: [{ id: "model", currentValue: "m" }],
+        };
+      const promptCount = calls.filter(
+        (call) => call.method === "session/prompt",
+      ).length;
+      if (method === "session/prompt" && promptCount === 1) {
+        queueMicrotask(() => {
+          for (const fn of handlers) fn(onPlan());
+        });
+        await new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+      return method === "session/prompt" ? { stopReason: "end_turn" } : {};
+    },
+  };
+  return { rpc, calls, responses };
+}
+
+async function runCursorPlan(mode, allow) {
+  const { rpc, calls, responses } = fakeCursor(() => ({
+    id: "plan-1",
+    method: "cursor/create_plan",
+    params: { name: "Cache", plan: "1. Add a cache", overview: "Cache it" },
+  }));
+  const requests = [];
+  let approved = 0;
+  const result = await runCursor(
+    {
+      project: { path: process.cwd() },
+      signal: new AbortController().signal,
+      emit() {},
+      saveSession() {},
+      text: "Plan the parser",
+      model: "m",
+      mode,
+      billingConfirmation: { fingerprint: "fixture", disabled: true },
+      approve: async (request) => {
+        requests.push(request);
+        return { allow };
+      },
+      planApproved: () => approved++,
+    },
+    {
+      cursorAuth: async () => ({ connected: true, fingerprint: "fixture" }),
+      openCursor: async () => rpc,
+    },
+  );
+  return { result, calls, responses, requests, approved };
+}
+
+function promptTexts(calls) {
+  return calls
+    .filter((call) => call.method === "session/prompt")
+    .map((call) => call.params.prompt.map((block) => block.text).join("\n"));
+}
+
+test("confirming a Cursor plan leaves plan mode and builds once", async () => {
+  const { result, calls, responses, requests, approved } = await runCursorPlan(
+    "plan",
+    true,
+  );
+  assert.equal(result.status, "completed");
+  assert.equal(requests[0].kind, "plan");
+  assert.equal(requests[0].plan, "1. Add a cache");
+  assert.equal(approved, 1);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.method === "session/set_mode")
+      .map((call) => call.params.modeId),
+    ["plan", "agent"],
+  );
+  const prompts = promptTexts(calls);
+  assert.equal(prompts.length, 2);
+  assert.equal(prompts[1], "Implement the plan.");
+  assert.equal(responses[0].result.outcome.outcome, "accepted");
+});
+
+test("declining a Cursor plan stays in plan mode and does not build", async () => {
+  const { result, calls, responses, requests, approved } = await runCursorPlan(
+    "plan",
+    false,
+  );
+  assert.equal(result.status, "completed");
+  assert.equal(requests[0].kind, "plan");
+  assert.equal(approved, 0);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.method === "session/set_mode")
+      .map((call) => call.params.modeId),
+    ["plan"],
+  );
+  assert.equal(promptTexts(calls).length, 1);
+  assert.equal(responses[0].result.outcome.outcome, "rejected");
+});
+
+test("a Cursor plan outside plan mode stays a permission and does not build", async () => {
+  const { calls, responses, requests, approved } = await runCursorPlan(
+    "default",
+    true,
+  );
+  assert.equal(requests[0].kind, "permission");
+  assert.equal(approved, 0);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.method === "session/set_mode")
+      .map((call) => call.params.modeId),
+    ["agent"],
+  );
+  assert.equal(promptTexts(calls).length, 1);
+  assert.equal(responses[0].result.outcome.outcome, "accepted");
 });

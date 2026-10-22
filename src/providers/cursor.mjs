@@ -331,12 +331,14 @@ export function cursorQuestionOutcome(questions, answer) {
   };
 }
 
-export async function runCursor(ctx) {
+export async function runCursor(ctx, deps = {}) {
   // Starting Cursor while its status is checked saves a second; nothing is
   // sent to a session until the account is confirmed.
+  const authenticate = deps.cursorAuth ?? cursorAuth;
+  const connect = deps.openCursor ?? openCursor;
   const [status, opened] = await Promise.allSettled([
-    cursorAuth(),
-    openCursor(ctx.project.path),
+    authenticate(),
+    connect(ctx.project.path),
   ]);
   const reason =
     status.status === "fulfilled" &&
@@ -358,6 +360,9 @@ export async function runCursor(ctx) {
     killTimer;
   const pending = [];
   const nativeTasks = new Set();
+  // Plan mode asks once. Accepting builds after this prompt; a later plan in
+  // the same run is the build continuing, not a second confirmation.
+  let planConfirmed = false;
   const cancel = () => {
     if (sessionId && !rpc.closed) {
       rpc.notify("session/cancel", { sessionId });
@@ -433,14 +438,26 @@ export async function runCursor(ctx) {
             });
           return;
         }
-        // In plan mode the plan is the user's to accept, as it is in Cursor.
+        // In plan mode this is the one confirmation. Accepting leaves plan
+        // mode and builds on this session after the plan prompt returns.
+        const planning = ctx.mode === "plan";
+        if (planning && planConfirmed) {
+          if (!rpc.closed)
+            rpc.respond(m.id, { outcome: { outcome: "accepted" } });
+          return;
+        }
         const answer = await ctx.approve({
-          kind: ctx.mode === "plan" ? "plan" : "permission",
+          kind: planning ? "plan" : "permission",
           method: m.method,
           title: m.params.name ?? "Review Cursor plan",
           plan: m.params.plan ?? m.params.overview,
           details: m.params,
         });
+        if (answer.allow && planning) {
+          planConfirmed = true;
+          ctx.planApproved?.();
+          pending.push({ text: "Implement the plan.", mode: "default" });
+        }
         if (!rpc.closed)
           rpc.respond(m.id, {
             outcome: answer.allow

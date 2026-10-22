@@ -3002,16 +3002,6 @@ small {
   border-radius: 8px;
   padding: 4px 16px;
 }
-.plan-ready {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  max-width: 760px;
-  margin: 12px 0;
-  font-size: 13px;
-  color: var(--text-2);
-}
 .toast {
   position: fixed;
   bottom: 24px;

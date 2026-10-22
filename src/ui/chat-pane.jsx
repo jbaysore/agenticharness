@@ -152,7 +152,7 @@ const chatModes = [
   [
     "plan",
     "Plan",
-    "The agent researches and proposes a plan without changing anything. Approve the plan to have it built.",
+    "The agent researches and proposes a plan without changing anything. Confirm and build to have it built.",
   ],
   [
     "goal",
@@ -208,6 +208,7 @@ export function ChatPane({
     [permissionsBusy, setPermissionsBusy] = useState(false),
     [mode, setMode] = useState(chat?.mode ?? "default"),
     [modeBusy, setModeBusy] = useState(false),
+    [keptPlans, setKeptPlans] = useState(() => new Set()),
     [caret, setCaret] = useState(0);
   const messages = useChatScroll(chat),
     input = useRef(null),
@@ -275,6 +276,9 @@ export function ChatPane({
   useEffect(() => {
     if (provider === "cursor" && mode === "goal") setMode("default");
   }, [provider, mode]);
+  useEffect(() => {
+    setKeptPlans(new Set());
+  }, [chat?.id]);
   useEffect(() => {
     if (!connected?.models?.length) return;
     const available = connected.models.some(
@@ -553,6 +557,16 @@ export function ChatPane({
   };
   const title = chat?.title ?? "New conversation",
     marker = chatMarker(chat);
+  const finishedPlan = chat?.runs?.[0];
+  const planReady =
+    chat &&
+    !chat.activeRun &&
+    mode === "plan" &&
+    finishedPlan?.status === "completed" &&
+    !keptPlans.has(finishedPlan.id) &&
+    !chat.approvals?.some((a) => a.request?.kind === "plan")
+      ? finishedPlan
+      : null;
   return (
     <section
       className={"chat-pane " + provider + (focused ? " focused" : "")}
@@ -704,31 +718,35 @@ export function ChatPane({
             Send a message to continue after resolving the issue.
           </div>
         )}
-        {/* After a plan turn, building it leaves plan mode, as accepting a
-            plan does in Codex and Cursor. */}
-        {chat &&
-          !chat.activeRun &&
-          mode === "plan" &&
-          chat.runs?.[0]?.status === "completed" && (
-            <div className="plan-ready">
-              <span>Happy with the plan?</span>
-              <button
-                className="primary"
-                disabled={busy || modeBusy}
-                onClick={act(async () => {
-                  await changeMode("default");
-                  await send("Implement the plan.", "default");
-                })}
-              >
-                Build this plan
-              </button>
-            </div>
-          )}
+        {/* A finished plan that was not confirmed in the turn uses the same
+            card. Confirming leaves plan mode and builds. Keep planning hides
+            it for that run, including after Cursor declines its plan. */}
+        {planReady && (
+          <Approval
+            approval={{
+              provider: planReady.provider ?? provider,
+              request: { kind: "plan", title: "Happy with the plan?" },
+            }}
+            onAnswer={async (answer) => {
+              if (!answer.allow) {
+                setKeptPlans((ids) => new Set(ids).add(planReady.id));
+                return;
+              }
+              await changeMode("default");
+              await send("Implement the plan.", "default");
+            }}
+          />
+        )}
         {chat?.approvals?.map((a) => (
           <Approval
             key={a.id}
             approval={a}
-            onAnswer={(answer) => api("/api/approvals/" + a.id, answer)}
+            onAnswer={async (answer) => {
+              const saved = await api("/api/approvals/" + a.id, answer);
+              if (a.request?.kind === "plan" && !answer.allow)
+                setKeptPlans((ids) => new Set(ids).add(a.run_id));
+              return saved;
+            }}
           />
         ))}
       </div>

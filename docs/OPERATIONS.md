@@ -36,8 +36,8 @@ message as usual. **Ask** is read-only: the agent answers questions and explains
 how the project works, and it cannot change files, land commits, or change a
 page. Cursor uses its own Ask mode. Codex stays in a read-only sandbox, including
 when permissions are Override. Claude Code is limited to read and search tools.
-**Plan** researches and proposes a plan; approving it returns the chat to Default
-so the plan can be built. **Goal** keeps Codex or Claude Code working until the
+**Plan** researches and proposes a plan. One **Confirm and build** button accepts
+it and returns the chat to Default so the plan can be built. **Goal** keeps Codex or Claude Code working until the
 message's condition is met. Cursor has no goal mode. `/ask`, `/plan`, `/goal`,
 and `/default` at the start of a message switch modes the same way.
 
@@ -297,8 +297,8 @@ the note explains that choice in plain language. If automatic review cannot run,
 the action comes to you with that reason; decline it if you are not sure.
 In Goal, a review that asks you or cannot run is declined and the agent continues.
 **Manual** shows each request for **Allow once**. **Override** allows actions
-without asking. Plans still come to you, except in Goal, where a plan is carried
-out and the chat stays in Goal. Agents are told to ask only a managerial question,
+without asking. A plan still comes to you as one **Confirm and build** button,
+except in Goal, where a plan is carried out and the chat stays in Goal. Agents are told to ask only a managerial question,
 and to explain why they cannot decide it. In Goal that question waits 60 seconds
 and then the agent chooses.
 

@@ -177,10 +177,12 @@ export function Approval({ approval, onAnswer }) {
       {r.reviewReason && (
         <p className="muted small">Auto-review: {r.reviewReason}</p>
       )}
-      {r.kind === "plan" && r.plan ? (
-        <div className="plan-body">
-          <Markdown text={r.plan} />
-        </div>
+      {r.kind === "plan" ? (
+        r.plan ? (
+          <div className="plan-body">
+            <Markdown text={r.plan} />
+          </div>
+        ) : null
       ) : r.kind === "mode-change" ? (
         <>
           <p>{r.reason}</p>
@@ -246,7 +248,7 @@ export function Approval({ approval, onAnswer }) {
           {r.kind === "question"
             ? "Send answer"
             : r.kind === "plan"
-              ? "Approve plan"
+              ? "Confirm and build"
               : r.kind === "mode-change"
                 ? "Approve mode change"
                 : "Allow once"}
