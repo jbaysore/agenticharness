@@ -123,14 +123,20 @@ export function usageWindows(provider) {
         minutes: minutes ?? null,
         scoped: Boolean(scopeName),
         remaining: Math.max(0, Math.min(100, Math.round(100 - w.usedPercent))),
-        resetsAt:
-          w.resetsAt == null
-            ? null
-            : typeof w.resetsAt === "number"
-              ? w.resetsAt * 1000
-              : Date.parse(w.resetsAt) || null,
+        resetsAt: resetTimestamp(w.resetsAt),
       };
     });
+}
+// Providers use Unix seconds or ISO strings. Accept millisecond epochs too,
+// and discard malformed timestamps before they reach a visible countdown.
+export function resetTimestamp(value) {
+  if (value == null || value === "") return null;
+  const numeric = typeof value === "number" ||
+    (typeof value === "string" && /^[+-]?\d+(\.\d+)?$/.test(value.trim()));
+  const at = numeric
+    ? Number(value) * (Number(value) < 1e12 ? 1000 : 1)
+    : typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(at) && at > 0 && at <= 8.64e15 ? at : null;
 }
 function usageLevel(remaining) {
   return remaining === null
@@ -177,7 +183,7 @@ export function usageGlance(provider) {
 // Compact time until a reset for the top bar: "45m", "3h 40m", "4d 6h".
 // Rounds up, so the meter is never back later than the header says.
 export function resetCountdown(at, now = Date.now()) {
-  if (!at) return "";
+  if (!Number.isFinite(at) || at <= 0) return "";
   const minutes = Math.max(0, Math.ceil((at - now) / 60000));
   if (minutes < 60) return minutes + "m";
   if (minutes < 1440)
@@ -186,8 +192,8 @@ export function resetCountdown(at, now = Date.now()) {
   return `${Math.floor(hours / 24)}d` + (hours % 24 ? ` ${hours % 24}h` : "");
 }
 export function resetLabel(at, now = Date.now()) {
-  if (!at) return "";
-  const minutes = Math.max(0, Math.round((at - now) / 60000));
+  if (!Number.isFinite(at) || at <= 0) return "";
+  const minutes = Math.max(0, Math.ceil((at - now) / 60000));
   if (minutes < 60) return `Resets in ${minutes}m`;
   if (minutes < 1440)
     return `Resets in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;

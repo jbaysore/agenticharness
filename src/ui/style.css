@@ -2356,7 +2356,7 @@ small {
 .usage-glance-trigger {
   display: inline-flex;
   align-items: center;
-  height: 44px;
+  height: 54px;
   padding: 0 14px;
   border-radius: 8px;
   color: var(--text-2);
@@ -2368,8 +2368,9 @@ small {
 }
 .usage-chip {
   display: inline-flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
   text-align: left;
   font-size: 12px;
   line-height: 15px;
@@ -2381,9 +2382,10 @@ small {
   border-left: 1px solid var(--line);
 }
 .usage-chip-name {
-  display: none;
+  display: block;
   color: var(--agent);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 12px;
   font-weight: 550;
   white-space: nowrap;
 }
@@ -2391,7 +2393,7 @@ small {
    header doesn't shift as the numbers change. */
 .usage-chip-rows {
   display: grid;
-  grid-template-columns: 2.2em 48px 4ch 6.2em;
+  grid-template-columns: 2.2em 48px 4.5ch 6.4em;
   align-items: center;
   row-gap: 3px;
 }
@@ -2429,55 +2431,43 @@ small {
 .usage-chip-reset svg {
   flex-shrink: 0;
 }
-/* The meters take whatever room the top bar has: names and longer bars when
-   it's wide, no bars when it's narrow, and on the smallest only the chat title
-   and the numbers. */
+/* Use the space available to the header, including when sidebars are open. */
 @container topbar (min-width: 940px) {
+  .usage-chip {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+  }
   .usage-chip-name {
-    display: inline;
+    font-size: 12px;
   }
   .usage-chip-rows {
-    grid-template-columns: 2.2em 64px 4ch 6.2em;
+    grid-template-columns: 2.2em 64px 4.5ch 6.4em;
   }
 }
 @container topbar (max-width: 600px) {
   .usage-glance-trigger {
-    height: 40px;
     padding: 0 6px;
   }
   .usage-chip + .usage-chip {
     margin-left: 8px;
     padding-left: 8px;
   }
-  .usage-chip {
-    gap: 6px;
-  }
-  .usage-chip::before {
-    content: "";
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--agent);
-  }
   .usage-chip-bar {
     display: none;
   }
   .usage-chip-rows {
-    grid-template-columns: 1.7em 4ch 5.6em;
+    grid-template-columns: 1.7em 4.5ch 6.4em;
   }
   .usage-chip-reset {
     gap: 3px;
     padding-left: 6px;
   }
 }
-@container topbar (max-width: 420px) {
+@container topbar (max-width: 800px) {
   .breadcrumbs > span,
-  .breadcrumbs b,
-  .usage-chip-span {
+  .breadcrumbs b {
     display: none;
-  }
-  .usage-chip-rows {
-    grid-template-columns: 4ch 5.6em;
   }
 }
 .usage-chip-row.unknown .usage-chip-bar {
@@ -3055,8 +3045,34 @@ small {
     flex: 1;
   }
   .topbar {
-    padding: 0 14px;
-    height: 54px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding: 8px 14px;
+    height: auto;
+    gap: 4px 10px;
+  }
+  .usage-glance {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .usage-glance-trigger {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0;
+  }
+  .usage-chip {
+    flex: 1;
+  }
+  .usage-chip + .usage-chip {
+    margin-left: 12px;
+    padding-left: 12px;
+  }
+  .usage-chip-rows {
+    grid-template-columns: 1.7em 4.5ch 6.4em;
+  }
+  .usage-chip-bar {
+    display: none;
   }
   .breadcrumbs {
     gap: 7px;

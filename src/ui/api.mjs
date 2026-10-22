@@ -1,3 +1,5 @@
+import { serverClock } from "./clock.mjs";
+
 export async function api(path, body, method, headers = {}) {
   const file = body instanceof Blob;
   const response = await fetch(path, {
@@ -15,6 +17,7 @@ export async function api(path, body, method, headers = {}) {
     },
     body: body === undefined ? undefined : file ? body : JSON.stringify(body),
   });
+  if (response.ok) serverClock.observe(response.headers.get("Date"));
   // While the host restarts, Cloudflare answers with its own HTML error page.
   const data = await response.json().catch(() => {
     const error = new Error(

@@ -29,7 +29,7 @@ try {
     subscriptionType: "pro",
   });
   // Reset times sit mid-unit so the countdown text stays stable during the run.
-  const resetIn = (minutes) => Math.floor(Date.now() / 1000) + minutes * 60;
+  const resetIn = (minutes) => Math.floor(Date.now() / 1000) + minutes * 60 - 30;
   const reading = (percent) => ({
     rate_limits_available: true,
     rate_limits: {
@@ -82,15 +82,18 @@ try {
     });
   };
   browser = await chromium.launch({ channel: "msedge", headless: true });
-  for (const mobile of [false, true]) {
-    const context = await browser.newContext(
-      mobile
-        ? devices["iPhone 13"]
-        : {
-            viewport: { width: 1440, height: 1000 },
-          },
-    );
+  for (const [label, options] of [
+    ["wide-desktop", { viewport: { width: 1920, height: 1000 } }],
+    ["desktop", { viewport: { width: 1440, height: 1000 } }],
+    ["compact-desktop", { viewport: { width: 1280, height: 900 } }],
+    ["narrow-desktop", { viewport: { width: 900, height: 900 } }],
+    ["mobile", devices["iPhone 13"]],
+    ["small-mobile", { ...devices["iPhone 13"], viewport: { width: 320, height: 740 } }],
+  ]) {
+    const context = await browser.newContext(options);
     const page = await context.newPage();
+    // The viewing device is ten days ahead; quota timers must use host time.
+    await page.clock.setFixedTime(Date.now() + 10 * 86400000);
     page.on("pageerror", (error) => errors.push(error.message));
     publish(reading(26));
     await page.goto(`${app.runtime.origin}/#pair=${app.auth.pairing()}`);
@@ -99,6 +102,8 @@ try {
       /74%/,
     );
     await expect(page.locator(".usage-chip")).toHaveCount(2);
+    await expect(page.locator(".usage-chip.claude .usage-chip-name")).toBeVisible();
+    await expect(page.locator(".usage-chip.codex .usage-chip-name")).toBeVisible();
     await expect(page.locator(".usage-chip.cursor")).toHaveCount(0);
     await expect(page.locator(".usage-chip.claude .usage-chip-value")).toHaveText([
       "74%", "73%",
@@ -106,6 +111,8 @@ try {
     await expect(page.locator(".usage-chip.claude .usage-chip-span")).toHaveText([
       "5h", "wk",
     ]);
+    await expect(page.locator(".usage-chip.claude .usage-chip-span").first()).toBeVisible();
+    await expect(page.locator(".usage-chip.claude .usage-chip-span").last()).toBeVisible();
     await expect(page.locator(".usage-chip.claude .usage-chip-reset")).toHaveText([
       "3h 20m", "4d 6h",
     ]);
@@ -115,9 +122,45 @@ try {
     await expect(page.locator(".usage-chip.codex .usage-chip-reset")).toHaveText([
       /^(29|30)m$/, "",
     ]);
+    await expect(page.locator(".usage-chip.claude .usage-chip-reset svg")).toHaveCount(2);
+    const headerFits = async () => {
+      expect(await page.evaluate(() => {
+        const header = document.querySelector(".topbar").getBoundingClientRect();
+        const usage = document.querySelector(".usage-glance").getBoundingClientRect();
+        const crumbs = document.querySelector(".breadcrumbs").getBoundingClientRect();
+        return document.documentElement.scrollWidth <= innerWidth &&
+          usage.left >= header.left && usage.right <= header.right &&
+          (crumbs.bottom <= usage.top || crumbs.right <= usage.left);
+      })).toBe(true);
+      for (const reset of await page.locator(".usage-chip-reset").all()) {
+        expect(await reset.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      }
+    };
+    await headerFits();
     await page.screenshot({
-      path: `.local/screenshots/usage-header-${mobile ? "mobile" : "desktop"}.png`,
+      path: `.local/screenshots/usage-header-${label}.png`,
     });
+    const before = await page.locator(".usage-glance").boundingBox();
+    const initialCodex = app.controller.providers[1].usage;
+    const changedCodex = { ...initialCodex, windows: [
+      // Millisecond telemetry must yield the same countdown as Unix seconds.
+      { bucket: "codex", windowMinutes: 300, usedPercent: 0, resetsAt: resetIn(1439) * 1000 },
+      { bucket: "codex", windowMinutes: 10080, usedPercent: 100, resetsAt: resetIn(60) },
+    ] };
+    app.controller.providers[1].usage = changedCodex;
+    app.controller.event(chat.id, null, "usage", { provider: "codex", ...changedCodex });
+    await expect(page.locator(".usage-chip.codex .usage-chip-reset")).toHaveText(["23h 59m", "1h"]);
+    await expect(page.locator(".usage-chip.codex .usage-chip-value")).toHaveText(["100%", "0%"]);
+    await headerFits();
+    const after = await page.locator(".usage-glance").boundingBox();
+    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+    expect(Math.abs(after.width - before.width)).toBeLessThan(1);
+    // Changing the device clock again and resuming the tab must not move time.
+    await page.clock.setFixedTime(Date.now() - 10 * 86400000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.locator(".usage-chip.claude .usage-chip-reset")).toHaveText(["3h 20m", "4d 6h"]);
+    app.controller.providers[1].usage = initialCodex;
+    app.controller.event(chat.id, null, "usage", { provider: "codex", ...initialCodex });
     publish({ rate_limits_available: true, rate_limits: {} });
     await expect(page.locator(".usage-chip.claude")).toHaveAttribute(
       "aria-label",
@@ -144,7 +187,7 @@ try {
       ),
     ).toBe(true);
     await page.screenshot({
-      path: `.local/screenshots/claude-usage-${mobile ? "mobile" : "desktop"}.png`,
+      path: `.local/screenshots/claude-usage-${label}.png`,
     });
     await page.reload();
     await expect(page.locator(".usage-chip.claude")).toHaveAttribute(
@@ -205,7 +248,7 @@ try {
   );
   expect(errors).toEqual([]);
   console.log(
-    "Claude usage UI passed: desktop/mobile session and weekly bars, Cursor excluded from header, unknown timestamps, retained values, reload, recovery and visible stop reason.",
+    "Claude usage UI passed: six header widths, visible provider/window labels, stable countdown columns, seconds/milliseconds, wrong and changed device clocks, Cursor excluded, unknown timestamps, retained values, reload, recovery and visible stop reason.",
   );
 } finally {
   await browser?.close();

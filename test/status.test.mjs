@@ -9,6 +9,7 @@ import {
   providerStatusLabel,
   resetCountdown,
   resetLabel,
+  resetTimestamp,
   sidebarOrder,
   usageGlance,
   usageWindows,
@@ -206,7 +207,8 @@ test("the header shows the tightest usage window for each provider", () => {
     }).map((w) => w.name),
     ["5-hour limit", "Opus · Weekly limit", "Sonnet · Weekly limit"],
   );
-  assert.equal(resetLabel(Date.now() + 135 * 60000 + 1000), "Resets in 2h 15m");
+  const now = 1_800_000_000_000;
+  assert.equal(resetLabel(now + 135 * 60000 + 1000, now), "Resets in 2h 16m");
 });
 
 test("reset countdowns stay compact and round up", () => {
@@ -216,8 +218,24 @@ test("reset countdowns stay compact and round up", () => {
   assert.equal(resetCountdown(now + 30000, now), "1m");
   assert.equal(resetCountdown(now + 44 * 60000 + 1000, now), "45m");
   assert.equal(resetCountdown(now + 60 * 60000, now), "1h");
+  assert.equal(resetCountdown(now + 60 * 60000 + 1, now), "1h 1m");
   assert.equal(resetCountdown(now + 219 * 60000 + 1000, now), "3h 40m");
   assert.equal(resetCountdown(now + 1439 * 60000 + 1000, now), "1d");
   assert.equal(resetCountdown(now + (4 * 24 + 5) * 3600000 + 60000, now), "4d 6h");
   assert.equal(resetCountdown(now + (2 * 24 + 23) * 3600000 + 60000, now), "3d");
+  for (const at of [NaN, Infinity, "invalid"])
+    assert.equal(resetCountdown(at, now), "");
+});
+
+test("reset timestamps accept seconds, milliseconds and ISO dates without inventing invalid resets", () => {
+  const at = 1_800_000_000_000;
+  for (const value of [at / 1000, at, String(at / 1000), String(at), new Date(at).toISOString()]) {
+    assert.equal(resetTimestamp(value), at);
+    const provider = { id: "codex", usage: { authoritative: true, windows: [
+      { bucket: "codex", usedPercent: 10, resetsAt: value },
+    ] } };
+    assert.equal(usageWindows(provider)[0].resetsAt, at);
+  }
+  for (const value of [null, undefined, "", "invalid", 0, -1, "-1", NaN, Infinity, 9e15, false, {}])
+    assert.equal(resetTimestamp(value), null);
 });

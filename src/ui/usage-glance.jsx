@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "./components.jsx";
+import { serverClock } from "./clock.mjs";
 import {
   providerStatusLabel,
   resetCountdown,
@@ -13,13 +14,21 @@ import {
 // opens every limit window with its reset time.
 export function UsageGlance({ providers, onOpenConnections }) {
   const [open, setOpen] = useState(false),
-    [now, setNow] = useState(Date.now),
+    [now, setNow] = useState(() => serverClock.now()),
     root = useRef(null);
   // Keep the reset countdowns current between provider updates.
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30000);
-    return () => clearInterval(timer);
+    const tick = () => setNow(serverClock.now());
+    const timer = setInterval(tick, 30000);
+    document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+      window.removeEventListener("focus", tick);
+    };
   }, []);
+  useEffect(() => setNow(serverClock.now()), [providers]);
   useEffect(() => {
     if (!open) return;
     const outside = (event) => {
@@ -64,7 +73,9 @@ export function UsageGlance({ providers, onOpenConnections }) {
               )
               .join(", ")}`}
           >
-            <span className="usage-chip-name">{p.name}</span>
+            <span className="usage-chip-name">
+              {p.id === "claude" ? "Claude" : p.name}
+            </span>
             <span className="usage-chip-rows">
               {g.bars.map((b, i) => (
                 <span className={"usage-chip-row " + b.level} key={i}>
@@ -79,7 +90,10 @@ export function UsageGlance({ providers, onOpenConnections }) {
                         : "–"
                       : b.remaining + "%"}
                   </span>
-                  <span className="usage-chip-reset">
+                  <span
+                    className="usage-chip-reset"
+                    title={b.resetsAt ? resetLabel(b.resetsAt, now) : undefined}
+                  >
                     {b.resetsAt && (
                       <>
                         <Icon name="refresh" size={10} />
