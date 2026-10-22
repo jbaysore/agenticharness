@@ -110,6 +110,29 @@ export async function inspectCodex(cwd) {
 // Harness's permission modes in Codex's terms: its auto-review subagent decides
 // sandbox escapes in auto, and anything it passes on is reviewed by Harness.
 // Override drops both the prompts and the sandbox.
+// Ask mode ignores the chat's permission mode, including Override: the
+// read-only sandbox cannot write, and a request to leave it is declined.
+export function codexExecutionPolicy(mode, permissions = "auto") {
+  if (mode === "ask")
+    return {
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandbox: "read-only",
+    };
+  return permissionModes[permissions] ?? permissionModes.auto;
+}
+// Plan is Codex's collaboration mode. Ask stays on the default collaboration
+// mode and is read-only through the sandbox above.
+export function codexCollaboration(mode) {
+  return mode === "plan" ? "plan" : "default";
+}
+export function codexAskBlocksApproval(mode, method) {
+  return (
+    mode === "ask" &&
+    (method === "item/fileChange/requestApproval" ||
+      method === "item/commandExecution/requestApproval")
+  );
+}
 const permissionModes = {
   manual: {
     approvalPolicy: "untrusted",
@@ -201,6 +224,10 @@ export async function runCodex(ctx) {
           contentItems: [{ type: "inputText", text: JSON.stringify(result) }],
           success: true,
         });
+        return;
+      }
+      if (codexAskBlocksApproval(ctx.mode, message.method)) {
+        if (!rpc.closed) rpc.respond(message.id, { decision: "decline" });
         return;
       }
       if (
@@ -355,7 +382,7 @@ export async function runCodex(ctx) {
       model: ctx.model,
       modelProvider: "openai",
       serviceTier: "default",
-      ...permissionModes[ctx.permissions ?? "auto"],
+      ...codexExecutionPolicy(ctx.mode, ctx.permissions),
       developerInstructions: ctx.instructions,
       config: {
         model_provider: "openai",
@@ -402,7 +429,7 @@ export async function runCodex(ctx) {
         effort: ctx.effort || undefined,
         serviceTierForTurn: "default",
         collaborationMode: {
-          mode: ctx.mode === "plan" ? "plan" : "default",
+          mode: codexCollaboration(ctx.mode),
           settings: {
             model: ctx.model,
             reasoning_effort: ctx.effort || null,

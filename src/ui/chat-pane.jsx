@@ -129,10 +129,16 @@ const permissionModes = [
     "Everything is allowed without asking, including commands outside the sandbox. Questions from the agent still come to you.",
   ],
 ];
-// Each mode is the agent's own: Claude Code's plan mode and /goal, Codex's
-// Plan collaboration mode and thread goals, Cursor's Plan mode.
+// Each mode is the agent's own. Ask is read-only on every agent: Cursor's
+// native Ask mode, Codex's read-only sandbox, and Claude Code limited to
+// read and search tools. Plan and goal stay separate from it.
 const chatModes = [
   ["default", "Default", "The agent works on your message as usual."],
+  [
+    "ask",
+    "Ask",
+    "Read-only. The agent answers questions and explains how things work. It cannot change files, land commits, or change a page.",
+  ],
   [
     "plan",
     "Plan",
@@ -321,7 +327,7 @@ export function ChatPane({
     field?.focus();
     field?.setSelectionRange(next.cursor, next.cursor);
   }
-  // /plan, /goal and /default switch the chat's mode, as the mode menu does.
+  // /ask, /plan, /goal and /default switch the chat's mode, as the mode menu does.
   const modeCommands = chat?.activeRun
     ? []
     : MODE_COMMANDS.filter(

@@ -25,8 +25,15 @@ import {
   rulesInstructions,
   workerName,
 } from "./rules.mjs";
+import {
+  ASK_DENY,
+  ASK_INSTRUCTIONS,
+  askHostAllowed,
+  checkMode,
+  hostToolsForMode,
+} from "./modes.mjs";
 import { invokedSkills, listSkills, skillInstructions } from "./skills.mjs";
-import { isDelegationTool } from "./delegation.mjs";
+import { isDelegationTool, offeredTools } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { browserTitle } from "./browser.mjs";
@@ -46,18 +53,11 @@ import {
   tidyWorktree,
 } from "./worktrees.mjs";
 
+export { CHAT_MODES, checkMode } from "./modes.mjs";
+
 // Who answers permission requests: a native or separate reviewer (auto),
 // the user (manual), or nobody, because everything is allowed (override).
 export const PERMISSION_MODES = ["auto", "manual", "override"];
-// How a turn runs, in each agent's own terms: plan proposes before changing
-// anything; goal keeps working until the message's condition is met.
-export const CHAT_MODES = ["default", "plan", "goal"];
-export function checkMode(mode, provider) {
-  if (!CHAT_MODES.includes(mode))
-    throw new Error("Choose the default, plan or goal mode");
-  if (mode === "goal" && provider === "cursor")
-    throw new Error("Cursor has no goal mode. Choose Codex or Claude Code.");
-}
 
 export class Controller extends EventEmitter {
   constructor(
@@ -487,17 +487,23 @@ export class Controller extends EventEmitter {
       });
     // The user's standing rules. What cannot be handed off this turn is left
     // out, and the turn says why rather than offering a tool that would fail.
-    const rules = readRules(this.store),
-      plan = planDelegation(rules, this.providers, run, this.store),
-      delegator =
-        plan.tools.length &&
-        new Delegator({
-          controller: this,
-          run,
-          project,
-          plan,
-          signal: abort.signal,
-        });
+    const rules = readRules(this.store);
+    // Ask mode may hand off a read or a search. An edit, a command, or a
+    // draft would change the project or prepare a commit, so they are absent.
+    let plan = planDelegation(rules, this.providers, run, this.store);
+    if (chat.mode === "ask") {
+      const actions = { ...plan.actions, edit: false, run: false, draft: false };
+      plan = { ...plan, actions, tools: offeredTools(actions) };
+    }
+    const delegator =
+      plan.tools.length &&
+      new Delegator({
+        controller: this,
+        run,
+        project,
+        plan,
+        signal: abort.signal,
+      });
     if (plan.note || plan.skipped.length)
       this.event(chat.id, run.id, "work", {
         kind: "delegation-fallback",
@@ -519,11 +525,13 @@ export class Controller extends EventEmitter {
     const browserTools = this.browser
       ? await this.browser.tools().then(
           (tools) =>
-            tools.map(({ name, description, inputSchema }) => ({
-              name,
-              description,
-              inputSchema,
-            })),
+            tools
+              .filter((tool) => chat.mode !== "ask" || tool.readOnly)
+              .map(({ name, description, inputSchema }) => ({
+                name,
+                description,
+                inputSchema,
+              })),
           (failure) => {
             this.event(chat.id, run.id, "work", {
               kind: "browser-unavailable",
@@ -541,6 +549,11 @@ export class Controller extends EventEmitter {
     const browser = async (name, args) => {
       const input = typeof args === "string" ? JSON.parse(args) : (args ?? {}),
         title = browserTitle(name, input);
+      if (chat.mode === "ask" && (await this.browser.needsApproval(name)))
+        return {
+          isError: true,
+          content: [{ type: "text", text: ASK_DENY }],
+        };
       if (await this.browser.needsApproval(name)) {
         const request = {
             kind: "permission",
@@ -598,7 +611,8 @@ export class Controller extends EventEmitter {
       });
       return result;
     };
-    if (project.worktree) this.bridgeLand.set(token, land);
+    if (project.worktree && chat.mode !== "ask")
+      this.bridgeLand.set(token, land);
     const skills = invokedSkills(listSkills(this.store), text);
     if (skills.length)
       this.event(chat.id, run.id, "work", {
@@ -640,12 +654,15 @@ export class Controller extends EventEmitter {
       instructions:
         agentInstructions(project, chat) +
         rulesInstructions(rules, plan, this.providers, COMMAND_SHELL) +
-        skillInstructions(skills),
+        skillInstructions(skills) +
+        (chat.mode === "ask" ? "\n\n" + ASK_INSTRUCTIONS : ""),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
       tools: [
-        ...historyTools,
-        ...(project.worktree ? [landTool] : []),
-        ...plan.tools,
+        ...hostToolsForMode(chat.mode, [
+          ...historyTools,
+          ...(project.worktree ? [landTool] : []),
+          ...plan.tools,
+        ]),
         ...browserTools,
       ],
       browser,
@@ -663,6 +680,8 @@ export class Controller extends EventEmitter {
       history: async (name, args) => {
         const input =
           typeof args === "string" ? JSON.parse(args) : (args ?? {});
+        if (chat.mode === "ask" && !askHostAllowed(name))
+          return { error: ASK_DENY };
         if (name === "land_changes")
           return project.worktree
             ? land()

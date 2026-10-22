@@ -14,6 +14,19 @@ const exec = promisify(execFile);
 // Claude: Harness itself asks the user before any browser action that can
 // change a page. Landing changes and other tools still ask.
 const historyNames = new Set(historyTools.map((t) => t.name));
+// Cursor's ACP mode ids. Ask and Plan are its own read-only modes; Agent edits.
+export function cursorModeId(mode) {
+  return mode === "ask" || mode === "plan" ? mode : "agent";
+}
+// In Ask mode, Harness's own read-only tools may proceed. Any other permission
+// is a change, and Ask mode declines it without asking.
+export function cursorAskRejection(mode, toolCall, tools, options = []) {
+  if (mode !== "ask" || isHarnessTool(toolCall, tools)) return null;
+  const reject = options.find((option) => option.kind === "reject_once");
+  return reject
+    ? { outcome: "selected", optionId: reject.optionId }
+    : { outcome: "cancelled" };
+}
 export function isHarnessTool(toolCall, tools = []) {
   const name = /^harness-history-(\w+): (\w+)$/.exec(toolCall?.title ?? "");
   return (
@@ -350,6 +363,16 @@ export async function runCursor(ctx) {
   rpc.on("request", async (m) => {
     try {
       if (m.method === "session/request_permission") {
+        const rejection = cursorAskRejection(
+          ctx.mode,
+          m.params.toolCall,
+          ctx.tools,
+          m.params.options,
+        );
+        if (rejection) {
+          if (!rpc.closed) rpc.respond(m.id, { outcome: rejection });
+          return;
+        }
         const allowOnce = m.params.options.find((o) => o.kind === "allow_once");
         if (allowOnce && isHarnessTool(m.params.toolCall, ctx.tools)) {
           if (!rpc.closed)
@@ -393,6 +416,18 @@ export async function runCursor(ctx) {
             outcome: cursorQuestionOutcome(questions, answer),
           });
       } else if (m.method === "cursor/create_plan") {
+        // Ask mode answers questions. It does not become plan mode.
+        if (ctx.mode === "ask") {
+          if (!rpc.closed)
+            rpc.respond(m.id, {
+              outcome: {
+                outcome: "rejected",
+                reason:
+                  "Ask mode is read-only. It answers questions and does not create a plan.",
+              },
+            });
+          return;
+        }
         // In plan mode the plan is the user's to accept, as it is in Cursor.
         const answer = await ctx.approve({
           kind: ctx.mode === "plan" ? "plan" : "permission",
@@ -482,10 +517,11 @@ export async function runCursor(ctx) {
       configured.configOptions,
       ctx.effort ?? known[ctx.model]?.defaultEffort,
     );
-    // Cursor's own read-only Plan mode; a saved session keeps its last mode.
+    // A saved session keeps its last mode until this call. Ask and Plan are
+    // Cursor's own read-only modes; Agent is the one that edits.
     await rpc.call("session/set_mode", {
       sessionId,
-      modeId: ctx.mode === "plan" ? "plan" : "agent",
+      modeId: cursorModeId(ctx.mode),
     });
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");

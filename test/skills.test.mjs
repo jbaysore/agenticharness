@@ -73,7 +73,7 @@ test("a skill is named text, kept once, and dropped from chats when deleted", ()
     () => createSkill(store, { name: "Release-notes", instructions: "Again." }),
     /slash command/,
   );
-  for (const name of ["Plan", "goal", "Default"])
+  for (const name of ["Plan", "goal", "Default", "Ask"])
     assert.throws(
       () => createSkill(store, { name, instructions: "x" }),
       /switches the chat's mode/,
@@ -258,7 +258,11 @@ test("skill routes create, edit and delete, and publish the slash command", asyn
   }
 });
 
-test("/plan, /goal and /default at the start of a message switch the mode", () => {
+test("/ask, /plan, /goal and /default at the start of a message switch the mode", () => {
+  assert.deepEqual(leadingMode("/ask How does the queue work?"), {
+    mode: "ask",
+    text: "How does the queue work?",
+  });
   assert.deepEqual(leadingMode("/plan Add a login page"), {
     mode: "plan",
     text: "Add a login page",

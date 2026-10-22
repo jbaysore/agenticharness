@@ -3,6 +3,19 @@ import assert from "node:assert/strict";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { runClaude } from "../src/providers/claude.mjs";
+import {
+  CLAUDE_ASK_TOOLS,
+  hostToolsForMode,
+} from "../src/core/modes.mjs";
+import {
+  codexAskBlocksApproval,
+  codexCollaboration,
+  codexExecutionPolicy,
+} from "../src/providers/codex.mjs";
+import {
+  cursorAskRejection,
+  cursorModeId,
+} from "../src/providers/cursor.mjs";
 
 const auth = async () => ({
   loggedIn: true,
@@ -82,7 +95,10 @@ test("a chat's mode is saved, reaches the agent, and goal is refused for Cursor"
   // Approving the plan leaves plan mode so the chat goes on to build it.
   assert.equal(store.conversation(chat.id).mode, "default");
   assert.equal(controller.setMode(chat.id, "goal").mode, "goal");
-  assert.throws(() => controller.setMode(chat.id, "ship-it"), /plan or goal/);
+  assert.throws(
+    () => controller.setMode(chat.id, "ship-it"),
+    /ask, plan or goal/,
+  );
   assert.throws(
     () =>
       controller.send(chat.id, {
@@ -138,4 +154,145 @@ test("a Claude goal is set with /goal, and its hand-off moves to the system prom
   assert.equal(seen.message, "/goal All tests in test/auth pass");
   assert.match(seen.options.systemPrompt.append, /Earlier work from Codex/);
   assert.equal(seen.options.permissionMode, "auto");
+});
+
+test("ask mode stays on after a turn and reaches Cursor", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.providers = [
+    { id: "cursor", models: [{ id: "m", efforts: [] }] },
+  ];
+  let seen;
+  controller.runners.cursor = async (ctx) => {
+    seen = ctx;
+    return { status: "completed" };
+  };
+  const chat = store.createConversation({
+    projectId: store.addProject("fixture", "C:\\fixture").id,
+    provider: "cursor",
+    mode: "ask",
+  });
+  controller.send(chat.id, {
+    actionId: "ask-reaches-cursor",
+    text: "How does the queue work?",
+    provider: "cursor",
+    model: "m",
+  });
+  await controller.active.get(chat.id).task;
+  assert.equal(seen.mode, "ask");
+  assert.match(seen.instructions, /Ask mode/);
+  assert.equal(
+    seen.tools.some((tool) => tool.name === "land_changes"),
+    false,
+  );
+  assert.equal(
+    seen.tools.some((tool) => tool.name === "history_search"),
+    true,
+  );
+  // Answering a question leaves the chat in ask mode.
+  assert.equal(store.conversation(chat.id).mode, "ask");
+  store.close();
+});
+
+test("ask mode offers read tools and withholds anything that can change the project", () => {
+  const tools = hostToolsForMode("ask", [
+    { name: "history_search" },
+    { name: "rename_chat" },
+    { name: "delegate_read" },
+    { name: "delegate_locate" },
+    { name: "delegate_edit" },
+    { name: "delegate_run" },
+    { name: "delegate_draft" },
+    { name: "land_changes" },
+  ]);
+  assert.deepEqual(
+    tools.map((tool) => tool.name),
+    ["history_search", "rename_chat", "delegate_read", "delegate_locate"],
+  );
+  assert.equal(hostToolsForMode("plan", [{ name: "land_changes" }]).length, 1);
+});
+
+test("Claude ask mode can read and cannot edit, run commands, or leave the mode", async () => {
+  const decisions = {};
+  const { run, seen } = fakeClaude(
+    {
+      text: "How does the queue work?",
+      mode: "ask",
+      permissions: "override",
+      tools: [{ name: "history_search" }, { name: "browser_snapshot" }],
+      approve: async () => ({ allow: true }),
+    },
+    async (options) => {
+      for (const name of [
+        "Read",
+        "Edit",
+        "Bash",
+        "ExitPlanMode",
+        "mcp__harness__history_search",
+        "mcp__harness__land_changes",
+        "mcp__harness__browser_snapshot",
+        "mcp__harness__browser_click",
+      ])
+        decisions[name] = await options.canUseTool(name, {});
+    },
+  );
+  assert.equal((await run).status, "completed");
+  assert.equal(seen.options.permissionMode, "bypassPermissions");
+  assert.deepEqual(seen.options.tools, CLAUDE_ASK_TOOLS);
+  assert.equal(decisions.Read.behavior, "allow");
+  assert.equal(decisions["mcp__harness__history_search"].behavior, "allow");
+  assert.equal(decisions["mcp__harness__browser_snapshot"].behavior, "allow");
+  for (const name of [
+    "Edit",
+    "Bash",
+    "ExitPlanMode",
+    "mcp__harness__land_changes",
+    "mcp__harness__browser_click",
+  ])
+    assert.equal(decisions[name].behavior, "deny", name);
+});
+
+test("Codex ask mode is a read-only sandbox and is not plan mode", () => {
+  assert.deepEqual(codexExecutionPolicy("ask", "override"), {
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    sandbox: "read-only",
+  });
+  assert.equal(codexExecutionPolicy("default", "override").sandbox, "danger-full-access");
+  assert.equal(codexCollaboration("ask"), "default");
+  assert.equal(codexCollaboration("plan"), "plan");
+  assert.equal(codexAskBlocksApproval("ask", "item/fileChange/requestApproval"), true);
+  assert.equal(
+    codexAskBlocksApproval("ask", "item/commandExecution/requestApproval"),
+    true,
+  );
+  assert.equal(codexAskBlocksApproval("plan", "item/fileChange/requestApproval"), false);
+});
+
+test("Cursor ask mode uses the native ask id and declines other permissions", () => {
+  assert.equal(cursorModeId("ask"), "ask");
+  assert.equal(cursorModeId("plan"), "plan");
+  assert.equal(cursorModeId("default"), "agent");
+  assert.equal(cursorAskRejection("plan", { kind: "edit" }, [], []), null);
+  assert.deepEqual(
+    cursorAskRejection(
+      "ask",
+      { kind: "edit", title: "Edit file" },
+      [],
+      [{ kind: "reject_once", optionId: "no" }],
+    ),
+    { outcome: "selected", optionId: "no" },
+  );
+  assert.equal(
+    cursorAskRejection(
+      "ask",
+      {
+        kind: "other",
+        title: "harness-history-history_search: history_search",
+      },
+      [{ name: "history_search" }],
+      [{ kind: "reject_once", optionId: "no" }],
+    ),
+    null,
+  );
 });

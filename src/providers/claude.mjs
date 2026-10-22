@@ -19,6 +19,11 @@ import {
   claudeUsageForAccount,
   CLAUDE_USAGE_POLL_INTERVAL_MS,
 } from "../security/claude-usage.mjs";
+import {
+  ASK_DENY,
+  CLAUDE_ASK_TOOLS,
+  claudeAskAllowed,
+} from "../core/modes.mjs";
 export { checkClaudeBilling };
 const exec = promisify(execFile);
 
@@ -311,6 +316,9 @@ export async function runClaude(
       ...baseOptions(ctx.project.path),
       ...permissionModes[ctx.permissions ?? "auto"],
       ...(ctx.mode === "plan" && { permissionMode: "plan" }),
+      // Ask mode has no native permission mode. The allowlist removes write
+      // tools, and canUseTool denies anything that is still requested.
+      ...(ctx.mode === "ask" && { tools: CLAUDE_ASK_TOOLS }),
       model: ctx.model,
       effort: ctx.effort || undefined,
       resume: ctx.session?.id,
@@ -329,6 +337,8 @@ export async function runClaude(
       },
       mcpServers: { harness: historyServer },
       canUseTool: async (name, args) => {
+        if (ctx.mode === "ask" && !claudeAskAllowed(name, ctx.tools))
+          return { behavior: "deny", message: ASK_DENY };
         if (name.startsWith("mcp__harness__"))
           return { behavior: "allow", updatedInput: args };
         // Approving a plan leaves plan mode for the chat's permission mode,

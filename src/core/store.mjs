@@ -78,7 +78,7 @@ export class Store {
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN permissions TEXT NOT NULL DEFAULT 'auto'",
       );
-    // Default, plan or goal: how the next turn runs, in the agent's own terms.
+    // default, ask, plan or goal: how the next turn runs.
     if (!conversation.includes("mode"))
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN mode TEXT NOT NULL DEFAULT 'default'",

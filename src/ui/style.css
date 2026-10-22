@@ -1636,7 +1636,8 @@ small {
   field-sizing: content;
   max-width: none;
 }
-/* Plan and goal change how the agent works, so they read like Override. */
+/* Ask, plan and goal change how the agent works, so they read like Override. */
+.mode-control.ask select,
 .mode-control.plan select,
 .mode-control.goal select {
   color: var(--text);

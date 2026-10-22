@@ -10,9 +10,10 @@ const SKILLS_KEY = "skills";
 
 // Built-in commands that switch the chat's mode instead of naming a skill.
 export const MODE_COMMANDS = [
+  { command: "default", mode: "default", name: "Default mode" },
+  { command: "ask", mode: "ask", name: "Ask mode" },
   { command: "plan", mode: "plan", name: "Plan mode" },
   { command: "goal", mode: "goal", name: "Goal mode" },
-  { command: "default", mode: "default", name: "Default mode" },
 ];
 const modeFor = (command) =>
   MODE_COMMANDS.find((entry) => entry.command === command.toLowerCase());
@@ -185,7 +186,7 @@ export function dropCommand(text, caret) {
   };
 }
 
-// A message that opens with /plan, /goal or /default switches to that mode,
+// A message that opens with /ask, /plan, /goal or /default switches to that mode,
 // and the rest of the message is sent in it.
 export function leadingMode(text) {
   const match = String(text ?? "").match(/^\s*\/([a-z]+)(?:$|\s+)/i);

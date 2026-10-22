@@ -31,6 +31,15 @@ change with the model. Cursor's effort control stays disabled and uses each mode
 provider default. Composer, Grok, and the other advertised models are selectable
 at standard speed. Auto is omitted from the picker. Assistant messages identify the route
 and model; new Claude responses resolve aliases from native initialization events.
+The mode menu beside Permissions is separate from review. **Default** takes the
+message as usual. **Ask** is read-only: the agent answers questions and explains
+how the project works, and it cannot change files, land commits, or change a
+page. Cursor uses its own Ask mode. Codex stays in a read-only sandbox, including
+when permissions are Override. Claude Code is limited to read and search tools.
+**Plan** researches and proposes a plan; approving it returns the chat to Default
+so the plan can be built. **Goal** keeps Codex or Claude Code working until the
+message's condition is met. Cursor has no goal mode. `/ask`, `/plan`, `/goal`,
+and `/default` at the start of a message switch modes the same way.
 
 Three projects are configured on the delivery PC: Agentic Harness, linescience,
 and linescience-personal. Only linescience-personal lists linescience as an
