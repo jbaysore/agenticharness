@@ -101,6 +101,10 @@ export const tokensOf = (chars) => Math.ceil(chars / 4);
 // than this share of doing the work on the chat's own model.
 export const MARGIN = 0.9;
 export const MIN_HANDOFF = 2000;
+// Parent-held input is read again on a later turn. Charge it twice: once now
+// and once for that re-read. This is a fixed factor, so the estimate stays
+// the same every time.
+export const RETAIN = 2;
 const TOKENS_PER_LINE = 12,
   // The sentence a chat writes to ask for an edit, in output tokens.
   ASKING = 40;
@@ -153,13 +157,13 @@ export function estimate(job, prices, measured = {}) {
   if (action === "locate") {
     workerOut = measured.output ?? UNMEASURED.search.output;
     review = workerOut;
-    self = cost(main, ASSUMED.locate.input, ASSUMED.locate.output);
+    self = cost(main, ASSUMED.locate.input * RETAIN, ASSUMED.locate.output);
   } else if (action === "edit") {
     const change = job.lines * TOKENS_PER_LINE;
     workerOut = change + 150;
     // Reviewing means reading the diff: removed and added lines plus context.
     review = 2 * change + 150;
-    self = cost(main, job.haveRead ? 0 : content, change);
+    self = cost(main, job.haveRead ? 0 : content * RETAIN, change);
   } else if (action === "draft") {
     workerOut = ASSUMED.draft[job.kind];
     review = workerOut;
@@ -169,10 +173,12 @@ export function estimate(job, prices, measured = {}) {
     const share = measured.share ?? ANSWER_SHARE[action];
     workerOut = Math.max(150, Math.round(content * share));
     review = workerOut;
-    self = cost(main, content, 0);
+    self = cost(main, content * RETAIN, 0);
   }
   const workerIn = (mode === "search" ? 0 : content) + extra,
-    delegated = cost(worker, workerIn, workerOut) + cost(main, review, 0);
+    // The worker's answer stays in the chat and is read again later.
+    delegated =
+      cost(worker, workerIn, workerOut) + cost(main, review * RETAIN, 0);
   return {
     self,
     delegated,

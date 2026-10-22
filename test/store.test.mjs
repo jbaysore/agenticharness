@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Store } from "../src/core/store.mjs";
 import {
+  boundHistoryContent,
   historyCall,
   handoffContext,
   historyTools,
+  promptDelivery,
   workspaceNotice,
   workspacePeers,
 } from "../src/core/history.mjs";
@@ -249,6 +251,11 @@ test("workspace peers are the other active chats in the same or a nested folder"
     workspaceNotice(peers.slice(0, 1), null),
     /uncommitted changes/,
   );
+  assert.match(notice, /While they are working/);
+  assert.doesNotMatch(
+    workspaceNotice(peers, changes, { rules: false }),
+    /While they are working/,
+  );
   db.close();
 });
 test("a chat summary follows its newest turn: running, needs approval, unread, failed", () => {
@@ -469,8 +476,18 @@ test("saved steps remember which reply they followed", async () => {
     db = new Store(join(directory, "db.sqlite"));
   const p = db.addProject("Project", "C:\example"),
     c = db.createConversation({ projectId: p.id }),
-    run = db.createRun({ conversationId: c.id, actionId: "steps-after-1", provider: "claude", model: "m", text: "Fix it" });
-  const read = (id) => ({ kind: "tool", provider: "claude", item: { type: "tool_use", id, name: "Read", input: { file_path: id } } });
+    run = db.createRun({
+      conversationId: c.id,
+      actionId: "steps-after-1",
+      provider: "claude",
+      model: "m",
+      text: "Fix it",
+    });
+  const read = (id) => ({
+    kind: "tool",
+    provider: "claude",
+    item: { type: "tool_use", id, name: "Read", input: { file_path: id } },
+  });
   db.appendEvent(c.id, run.id, "work", read("a"));
   db.appendEvent(c.id, run.id, "text", { messageId: "m1", delta: "Looking" });
   db.appendEvent(c.id, run.id, "text", { messageId: "m1", delta: " closer" });
@@ -478,8 +495,73 @@ test("saved steps remember which reply they followed", async () => {
   db.appendEvent(c.id, run.id, "text", { messageId: "m2", delta: "Done" });
   assert.deepEqual(
     db.steps(c.id)[run.id].map((s) => [s.target, s.after]),
-    [["a", null], ["b", "m1"]],
+    [
+      ["a", null],
+      ["b", "m1"],
+    ],
   );
   db.close();
   await rm(directory, { recursive: true, force: true });
+});
+
+test("history_read caps each page and can return windows around a query", () => {
+  const db = new Store(":memory:"),
+    project = db.addProject("P", "C:\\p"),
+    chat = db.createConversation({ projectId: project.id });
+  const long = "alpha " + "x".repeat(5000) + " NEEDLE " + "y".repeat(5000);
+  for (let i = 0; i < 5; i++)
+    db.addMessage({
+      conversationId: chat.id,
+      role: "assistant",
+      provider: "codex",
+      content: i === 4 ? long : `note ${i}`,
+    });
+  const page = historyCall(db, chat.id, "history_read", {
+    conversationId: chat.id,
+  });
+  assert.equal(page.messages.length, 4);
+  assert.equal(page.nextOffset, 4);
+  const around = historyCall(db, chat.id, "history_read", {
+    conversationId: chat.id,
+    offset: 4,
+    query: "NEEDLE",
+  });
+  assert.match(around.messages[0].content, /NEEDLE/);
+  assert.ok(around.messages[0].content.length <= 2000);
+  assert.equal(around.messages[0].truncated, true);
+  assert.equal(boundHistoryContent("short", "").truncated, false);
+  const handoff = handoffContext(db, chat, "claude");
+  assert.ok(handoff.length <= 16000);
+  db.close();
+});
+
+test("Cursor is given the standing prompt only when its hash changes", () => {
+  const prefix = "Standing prompt",
+    first = promptDelivery({
+      provider: "cursor",
+      session: {},
+      prefix,
+      addendum: "Notice",
+    });
+  assert.equal(first.instructions, prefix);
+  assert.equal(first.addendum, "Notice");
+  const again = promptDelivery({
+    provider: "cursor",
+    session: {
+      promptHash: first.promptHash,
+      addendumHash: first.addendumHash,
+    },
+    prefix,
+    addendum: "Notice",
+  });
+  assert.equal(again.instructions, "");
+  assert.equal(again.addendum, "");
+  const changed = promptDelivery({
+    provider: "codex",
+    session: { promptHash: first.promptHash, addendumHash: first.addendumHash },
+    prefix,
+    addendum: "Notice changed",
+  });
+  assert.equal(changed.instructions, prefix);
+  assert.equal(changed.addendum, "Notice changed");
 });

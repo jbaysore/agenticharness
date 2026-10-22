@@ -141,11 +141,14 @@ for (const [from, to] of [
     assert.equal(contexts[1].startGoal, to === "goal");
     if (to === "goal") {
       assert.equal(contexts[1].goalObjective, objective);
-      assert.equal(await claudeContent(contexts[1]), "/goal " + objective);
       assert.match(
-        contexts[1].instructions,
-        /Original request:\nImprove the parser/,
+        await claudeContent(contexts[1]),
+        new RegExp(
+          "Current request:\\n/goal " +
+            objective.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        ),
       );
+      assert.match(contexts[1].text, /Original request:\nImprove the parser/);
     }
     if (to === "ask")
       assert.equal(

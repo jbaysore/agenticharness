@@ -264,31 +264,45 @@ const PURPOSE_TEXT = {
   triage: "a set of files or lines sorted by relevance",
   summarise: "a summary for orientation",
 };
+export function standingInstructions(rules) {
+  if (!rules.instructions.trim()) return "";
+  return (
+    "Standing instructions from the user for every agent in this workspace:\n" +
+    rules.instructions.trim()
+  );
+}
+
+// The prompt states a coarse line count so small measurement changes do not
+// rewrite the cached prefix. The host still decides with the exact threshold.
+export function promptEditFrom(lines) {
+  const rounded = Math.round(Number(lines) / 10) * 10;
+  return rounded > 0 ? rounded : 10;
+}
+
+export function delegationInstructions(plan, providers, shell) {
+  if (!plan.tools.length) return "";
+  const { actions } = plan,
+    purposes = READ_PURPOSES.filter((p) => actions[p]),
+    lines = [
+      purposes.length &&
+        `- delegate_read (purpose ${purposes.join(", ")}): when you need an answer from files rather than their full text: ${purposes.map((p) => PURPOSE_TEXT[p]).join("; ")}. Small files come back as raw text.`,
+      actions.locate &&
+        "- delegate_locate: to find where something lives when you do not already know the file.",
+      actions.edit &&
+        `- delegate_edit: one mechanical change to one file that you can state exactly in a sentence and that touches about ${promptEditFrom(plan.editFrom)} or more lines. Review the diff it returns. Make smaller edits yourself.`,
+      actions.run &&
+        `- delegate_run: a command whose output may be long, such as tests, a build or a linter. It runs in ${shell}. You get the output, or its relevant lines verbatim when it is long.`,
+      actions.draft &&
+        `- delegate_draft: a commit message or changelog entry for the uncommitted diff, when that diff is under about ${plan.draftUpTo.toLocaleString("en-US")} tokens. Read the draft before using it.`,
+    ].filter(Boolean);
+  return `Cost rule set by the user. A low-cost worker (${workerName(plan.workers[0], providers)}) can take certain work off your model. On every call the host compares the measured cost of the worker, including your reading of its result, with the cost of you doing the work, and uses whichever is cheaper. Do not estimate costs yourself: use these tools for these actions instead of your own tools.\n${lines.join("\n")}\nKeep on your own model: anything that must be exhaustive or prove absence (every usage, nothing calls this), changes across several files, configuration or infrastructure, new code or tests, multi-step terminal work, planning, debugging and final review. A worker's "not found" is not proof that something does not exist. Read a file yourself before you edit it. When a tool says it declined or that no worker is available, do that task yourself. Use these tools rather than your own built-in subagents.`;
+}
+
 export function rulesInstructions(rules, plan, providers, shell) {
-  const parts = [];
-  if (rules.instructions.trim())
-    parts.push(
-      "Standing instructions from the user for every agent in this workspace:\n" +
-        rules.instructions.trim(),
-    );
-  if (plan.tools.length) {
-    const { actions } = plan,
-      purposes = READ_PURPOSES.filter((p) => actions[p]),
-      lines = [
-        purposes.length &&
-          `- delegate_read (purpose ${purposes.join(", ")}): when you need an answer from files rather than their full text: ${purposes.map((p) => PURPOSE_TEXT[p]).join("; ")}. Small files come back as raw text.`,
-        actions.locate &&
-          "- delegate_locate: to find where something lives when you do not already know the file.",
-        actions.edit &&
-          `- delegate_edit: one mechanical change to one file that you can state exactly in a sentence and that touches about ${plan.editFrom} or more lines. Review the diff it returns. Make smaller edits yourself.`,
-        actions.run &&
-          `- delegate_run: a command whose output may be long, such as tests, a build or a linter. It runs in ${shell}. You get the output, or its relevant lines verbatim when it is long.`,
-        actions.draft &&
-          `- delegate_draft: a commit message or changelog entry for the uncommitted diff, when that diff is under about ${plan.draftUpTo.toLocaleString("en-US")} tokens. Read the draft before using it.`,
-      ].filter(Boolean);
-    parts.push(
-      `Cost rule set by the user. A low-cost worker (${workerName(plan.workers[0], providers)}) can take certain work off your model. On every call the host compares the measured cost of the worker, including your reading of its result, with the cost of you doing the work, and uses whichever is cheaper. Do not estimate costs yourself: use these tools for these actions instead of your own tools.\n${lines.join("\n")}\nKeep on your own model: anything that must be exhaustive or prove absence (every usage, nothing calls this), changes across several files, configuration or infrastructure, new code or tests, multi-step terminal work, planning, debugging and final review. A worker's "not found" is not proof that something does not exist. Read a file yourself before you edit it. When a tool says it declined or that no worker is available, do that task yourself. Use these tools rather than your own built-in subagents.`,
-    );
-  }
-  return parts.length ? "\n" + parts.join("\n") : "";
+  return [
+    standingInstructions(rules),
+    delegationInstructions(plan, providers, shell),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

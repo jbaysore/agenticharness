@@ -43,23 +43,24 @@ for (const provider of ["codex", "claude", "cursor"])
       await controller.active.get(target.id).task;
     };
     await send(chat, "Please investigate the sidebar flicker on resize");
-    const instructions = contexts[0].instructions,
+    const shown = (ctx) =>
+        [ctx.instructions, ctx.addendum].filter(Boolean).join("\n"),
       tool =
         provider === "claude" ? "mcp__harness__rename_chat" : "rename_chat";
-    assert.ok(instructions.includes(`silently call ${tool} once`));
+    assert.ok(shown(contexts[0]).includes(`silently call ${tool} once`));
     assert.match(
-      instructions,
+      contexts[0].addendum,
       /Before your first user-facing response or other task work/,
     );
     assert.match(
-      instructions,
+      contexts[0].addendum,
       /Do not announce, narrate, or mention the rename/,
     );
 
     // A missed rename is requested again, even though this isn't the first turn.
     await send(chat, "Continue");
     assert.equal(contexts[1].firstTurn, false);
-    assert.ok(contexts[1].instructions.includes(renameInstructions(provider)));
+    assert.ok(contexts[1].addendum.includes(renameInstructions(provider)));
     assert.equal(store.conversation(chat.id).title, "Fix sidebar flicker");
     const events = store.events(),
       titleEvent = events.find(
@@ -76,11 +77,13 @@ for (const provider of ["codex", "claude", "cursor"])
     );
 
     await send(chat, "Continue again");
-    assert.ok(!contexts[2].instructions.includes(renameInstructions(provider)));
-    assert.match(
-      contexts[2].instructions,
-      /Never announce, narrate, or mention your own automatic chat rename/,
-    );
+    assert.ok(!shown(contexts[2]).includes(`silently call ${tool} once`));
+    if (provider === "cursor") assert.equal(contexts[2].instructions, "");
+    else
+      assert.match(
+        contexts[2].instructions,
+        /Never announce, narrate, or mention your own automatic chat rename/,
+      );
 
     // A title chosen by the user never triggers the naming instruction.
     const named = store.createConversation({
@@ -89,7 +92,7 @@ for (const provider of ["codex", "claude", "cursor"])
       provider,
     });
     await send(named, "Investigate something else");
-    assert.ok(!contexts[3].instructions.includes(renameInstructions(provider)));
+    assert.ok(!shown(contexts[3]).includes(`silently call ${tool} once`));
     const result = await contexts[3].history("rename_chat", {
       title: "Agent title",
     });

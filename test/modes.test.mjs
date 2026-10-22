@@ -190,7 +190,7 @@ test("Claude includes a Goal decline reason with the instruction not to retry", 
   assert.match(decision.message, /Do not retry this action/);
 });
 
-test("a Claude goal is set with /goal, and its hand-off moves to the system prompt", async () => {
+test("a Claude goal is set with /goal, and its hand-off stays in the user message", async () => {
   const { run, seen } = fakeClaude({
     text: "All tests in test/auth pass",
     mode: "goal",
@@ -198,8 +198,12 @@ test("a Claude goal is set with /goal, and its hand-off moves to the system prom
     approve: async () => ({ allow: true }),
   });
   await run;
-  assert.equal(seen.message, "/goal All tests in test/auth pass");
-  assert.match(seen.options.systemPrompt.append, /Earlier work from Codex/);
+  assert.match(seen.message, /Earlier work from Codex/);
+  assert.match(seen.message, /\/goal All tests in test\/auth pass/);
+  assert.doesNotMatch(
+    seen.options.systemPrompt.append,
+    /Earlier work from Codex/,
+  );
   assert.equal(seen.options.permissionMode, "auto");
 });
 
@@ -331,6 +335,17 @@ test("Claude ask mode can read and cannot edit, run commands, or leave the mode"
       tools: [
         { name: "history_search" },
         { name: "browser_snapshot" },
+        {
+          name: "browser",
+          description: "Drive the shared Chrome.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              action: { type: "string", enum: ["browser_snapshot"] },
+            },
+            required: ["action"],
+          },
+        },
         { name: "suggest_mode" },
       ],
       approve: async () => ({ allow: true }),
@@ -344,6 +359,7 @@ test("Claude ask mode can read and cannot edit, run commands, or leave the mode"
         "mcp__harness__history_search",
         "mcp__harness__suggest_mode",
         "mcp__harness__land_changes",
+        "mcp__harness__browser",
         "mcp__harness__browser_snapshot",
         "mcp__harness__browser_click",
       ])
@@ -356,6 +372,7 @@ test("Claude ask mode can read and cannot edit, run commands, or leave the mode"
   assert.equal(decisions.Read.behavior, "allow");
   assert.equal(decisions["mcp__harness__history_search"].behavior, "allow");
   assert.equal(decisions["mcp__harness__suggest_mode"].behavior, "allow");
+  assert.equal(decisions["mcp__harness__browser"].behavior, "allow");
   assert.equal(decisions["mcp__harness__browser_snapshot"].behavior, "allow");
   for (const name of [
     "Edit",

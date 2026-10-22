@@ -13,6 +13,7 @@ import {
   handoffContext,
   historyCall,
   historyTools,
+  promptDelivery,
   provisionalTitle,
   renameInstructions,
   workspaceNotice,
@@ -20,9 +21,10 @@ import {
 } from "./history.mjs";
 import { repositoryState } from "./repository.mjs";
 import {
+  delegationInstructions,
   planDelegation,
   readRules,
-  rulesInstructions,
+  standingInstructions,
   workerName,
 } from "./rules.mjs";
 import {
@@ -49,13 +51,17 @@ import {
 import { isDelegationTool, offeredTools } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
-import { browserTitle } from "./browser.mjs";
+import { browserGateway, browserTitle } from "./browser.mjs";
 import {
   attachmentContext,
   attachmentInfo,
   resolveAttachments,
 } from "./attachments.mjs";
-import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
+import {
+  openReviewer,
+  runClaudeWorker,
+  runCodexWorker,
+} from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
 import {
   createWorktree,
@@ -96,6 +102,7 @@ export class Controller extends EventEmitter {
     this.tidying = new Map();
     this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
+    this.openReviewer = openReviewer;
     this.workerTimeoutMs = 5 * 60 * 1000;
     this.reviewerTimeoutMs = 60 * 1000;
     this.goalQuestionTimeoutMs = GOAL_QUESTION_TIMEOUT_MS;
@@ -716,8 +723,10 @@ export class Controller extends EventEmitter {
         scope: chat.scope,
         source: `harness://conversation/${chat.id}`,
       });
-    // Chats sharing this folder are told about each other on every turn.
-    const peers = workspacePeers(this.store, chat.id),
+    // Chats sharing this folder are told about each other when that notice
+    // changes. The shared Git rules go out with the first notice only.
+    const savedSession = session && typeof session === "object" ? session : {},
+      peers = workspacePeers(this.store, chat.id),
       notice = workspaceNotice(
         peers,
         peers.length
@@ -726,6 +735,7 @@ export class Controller extends EventEmitter {
               () => null,
             )
           : null,
+        { rules: !savedSession.noticeRulesSent },
       );
     if (notice)
       this.event(chat.id, run.id, "work", {
@@ -782,14 +792,20 @@ export class Controller extends EventEmitter {
     // The browser is offered only when it can start; a turn goes on without it.
     const browserTools = this.browser
       ? await this.browser.tools().then(
-          (tools) =>
-            tools
-              .filter((tool) => chat.mode !== "ask" || tool.readOnly)
-              .map(({ name, description, inputSchema }) => ({
-                name,
-                description,
-                inputSchema,
-              })),
+          (tools) => {
+            const visible = tools.filter(
+              (tool) => chat.mode !== "ask" || tool.readOnly,
+            );
+            return visible.length
+              ? [browserGateway(visible)].map(
+                  ({ name, description, inputSchema }) => ({
+                    name,
+                    description,
+                    inputSchema,
+                  }),
+                )
+              : [];
+          },
           (failure) => {
             this.event(chat.id, run.id, "work", {
               kind: "browser-unavailable",
@@ -805,18 +821,42 @@ export class Controller extends EventEmitter {
     // Every action that can change a page is approved first, whichever agent
     // calls it: by the reviewer in Auto-review, otherwise by the user.
     const browser = async (name, args) => {
-      const input = typeof args === "string" ? JSON.parse(args) : (args ?? {}),
-        title = browserTitle(name, input);
-      if (chat.mode === "ask" && (await this.browser.needsApproval(name)))
+      const raw = typeof args === "string" ? JSON.parse(args) : (args ?? {}),
+        action = name === "browser" ? raw.action : name,
+        input = name === "browser" ? (raw.arguments ?? {}) : raw;
+      if (!action)
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Choose a browser action." }],
+        };
+      const title = browserTitle(action, input);
+      let needsApproval = true;
+      try {
+        needsApproval = await this.browser.needsApproval(action);
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: error.message }],
+        };
+      }
+      if (chat.mode === "ask" && needsApproval)
         return {
           isError: true,
           content: [{ type: "text", text: ASK_DENY }],
         };
-      if (await this.browser.needsApproval(name)) {
+      if (typeof this.browser.validate === "function") {
+        const failure = await this.browser.validate(action, input);
+        if (failure)
+          return {
+            isError: true,
+            content: [{ type: "text", text: failure }],
+          };
+      }
+      if (needsApproval) {
         const request = {
             kind: "permission",
             title,
-            details: { tool: name, input },
+            details: { tool: action, input },
           },
           answer = await (reviewer && !abort.signal.aborted
             ? review(request)
@@ -834,8 +874,8 @@ export class Controller extends EventEmitter {
             ],
           };
       }
-      emit("work", { kind: "browser-tool", item: { title, name } });
-      return this.browser.call(name, input);
+      emit("work", { kind: "browser-tool", item: { title, name: action } });
+      return this.browser.call(action, input);
     };
     if (browserTools.length)
       this.bridgeBrowser.set(token, { tools: browserTools, call: browser });
@@ -976,6 +1016,51 @@ export class Controller extends EventEmitter {
           description: "Invoked by a slash command in this message.",
         },
       });
+    const firstMessage = messages.find((m) => m.role === "user");
+    const needsRename =
+      firstMessage &&
+      chat.title ===
+        provisionalTitle(firstMessage.content, firstMessage.attachments);
+    const prefix = [
+      agentInstructions(project, chat),
+      standingInstructions(rules),
+      chat.mode === "goal" ? GOAL_INSTRUCTIONS : MODE_SUGGESTION_INSTRUCTIONS,
+      delegationInstructions(plan, this.providers, COMMAND_SHELL),
+      chat.mode === "ask" ? ASK_INSTRUCTIONS : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    // The rename line is repeated until the title is set. The rest of the
+    // addendum is sent only when its text changes.
+    const addendumBody = [skillInstructions(skills), notice]
+      .filter(Boolean)
+      .join("\n\n");
+    const delivery = promptDelivery({
+      provider: run.provider,
+      session: savedSession,
+      prefix,
+      addendum: addendumBody,
+    });
+    const renameLine = needsRename ? renameInstructions(run.provider) : "";
+    const noticeRulesSent = Boolean(
+      savedSession.noticeRulesSent ||
+      (notice.includes("While they are working:") && delivery.addendum),
+    );
+    const writeSession = (patch) => {
+      const current = this.store.conversation(chat.id);
+      const prev = current.sessions[run.provider];
+      const base = prev && typeof prev === "object" ? prev : {};
+      const next = { ...base, ...patch };
+      if (JSON.stringify(base) === JSON.stringify(next)) return;
+      this.store.updateConversation(chat.id, {
+        sessions: { ...current.sessions, [run.provider]: next },
+      });
+    };
+    writeSession({
+      promptHash: delivery.promptHash,
+      addendumHash: delivery.addendumHash,
+      noticeRulesSent,
+    });
     const ctx = {
       project,
       chat,
@@ -999,17 +1084,9 @@ export class Controller extends EventEmitter {
         );
       },
       session,
-      handoff: [notice, handoff].filter(Boolean).join("\n\n"),
-      instructions:
-        agentInstructions(project, chat) +
-        rulesInstructions(rules, plan, this.providers, COMMAND_SHELL) +
-        skillInstructions(skills) +
-        "\n\n" +
-        (chat.mode === "goal"
-          ? GOAL_INSTRUCTIONS
-          : MODE_SUGGESTION_INSTRUCTIONS) +
-        (startGoal ? "\n\n" + continuationText : "") +
-        (chat.mode === "ask" ? "\n\n" + ASK_INSTRUCTIONS : ""),
+      handoff,
+      instructions: delivery.instructions,
+      addendum: [delivery.addendum, renameLine].filter(Boolean).join("\n\n"),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
       tools: [
         ...hostToolsForMode(chat.mode, [
@@ -1032,13 +1109,7 @@ export class Controller extends EventEmitter {
       emit,
       billingConfirmation: this.store.setting("cursor-billing"),
       learnEfforts: (options) => this.learnCursorEfforts(options),
-      saveSession: (session) => {
-        const current = this.store.conversation(chat.id);
-        if (current.sessions[run.provider]?.id !== session.id)
-          this.store.updateConversation(chat.id, {
-            sessions: { ...current.sessions, [run.provider]: session },
-          });
-      },
+      saveSession: (incoming) => writeSession(incoming),
       history: async (name, args) => {
         const input =
           typeof args === "string" ? JSON.parse(args) : (args ?? {});
@@ -1088,16 +1159,6 @@ export class Controller extends EventEmitter {
         },
       ],
     };
-    if (reviewer) reviewer.instructions = ctx.instructions;
-    // Only the agent doing the work names the chat, not its reviewer. A missed
-    // first-turn rename is retried until the provisional title is replaced.
-    const firstMessage = messages.find((m) => m.role === "user");
-    if (
-      firstMessage &&
-      chat.title ===
-        provisionalTitle(firstMessage.content, firstMessage.attachments)
-    )
-      ctx.instructions += renameInstructions(run.provider);
     try {
       this.store.setRun(run.id, "running");
       this.event(chat.id, run.id, "run", {
@@ -1117,6 +1178,7 @@ export class Controller extends EventEmitter {
       status = abort.signal.aborted ? "cancelled" : "failed";
       error = caught.message;
     } finally {
+      await reviewer?.close();
       this.store.expireApprovals(run.id);
       this.bridgeTokens.delete(token);
       this.bridgeBrowser.delete(token);

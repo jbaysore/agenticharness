@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
-import { Browser, browserTitle } from "../src/core/browser.mjs";
+import {
+  Browser,
+  browserTitle,
+  capBrowserResult,
+  validateToolInput,
+} from "../src/core/browser.mjs";
 
 // A stand-in Playwright MCP server: three tools, one of them withheld by Harness.
 const fakeServer = `
@@ -90,7 +95,7 @@ test("a page-changing browser action asks the user; reading the page does not", 
   });
   let offered, results;
   controller.runners.codex = async (ctx) => {
-    offered = ctx.tools.filter((t) => t.name.startsWith("browser_"));
+    offered = ctx.tools.filter((t) => t.name === "browser");
     results = [
       await ctx.browser("browser_snapshot", {}),
       await ctx.browser("browser_navigate", '{"url":"https://example.com"}'),
@@ -109,11 +114,12 @@ test("a page-changing browser action asks the user; reading the page does not", 
   await controller.active.get(chat.id).task;
   assert.deepEqual(
     offered.map((t) => Object.keys(t).sort()),
-    [
-      ["description", "inputSchema", "name"],
-      ["description", "inputSchema", "name"],
-    ],
+    [["description", "inputSchema", "name"]],
   );
+  assert.deepEqual(offered[0].inputSchema.properties.action.enum, [
+    "browser_snapshot",
+    "browser_navigate",
+  ]);
   assert.equal(approvals.length, 2);
   assert.match(
     String(approvals[0]),
@@ -125,6 +131,26 @@ test("a page-changing browser action asks the user; reading the page does not", 
     ["browser_navigate", { url: "https://example.com" }],
   ]);
   store.close();
+});
+
+test("browser arguments are checked and long page text is capped", () => {
+  const schema = {
+    type: "object",
+    properties: { url: { type: "string" } },
+    required: ["url"],
+    additionalProperties: false,
+  };
+  assert.equal(validateToolInput(schema, { url: "https://example.com" }), null);
+  assert.match(validateToolInput(schema, {}), /Missing url/);
+  assert.match(
+    validateToolInput(schema, { url: "https://example.com", extra: 1 }),
+    /Unexpected extra/,
+  );
+  const capped = capBrowserResult({
+    content: [{ type: "text", text: "x".repeat(13000) }],
+  });
+  assert.ok(capped.content[0].text.length < 13000);
+  assert.match(capped.content[0].text, /page is still open/);
 });
 
 test("approval titles name the action and its target", () => {

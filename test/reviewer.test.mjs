@@ -12,7 +12,7 @@ import {
 } from "../src/providers/workers.mjs";
 import { REVIEW_SCHEMA } from "../src/core/review-policy.mjs";
 import { saveRules } from "../src/core/rules.mjs";
-import { renameInstructions } from "../src/core/history.mjs";
+import { textHash } from "../src/core/history.mjs";
 
 const waitFor = async (condition) => {
   const deadline = Date.now() + 3000;
@@ -51,6 +51,7 @@ async function fixture(t, permissions = "auto", provider = "cursor") {
     }),
     jobs = [],
     contexts = [];
+  controller.openReviewer = null;
   controller.providers = [
     {
       id: "cursor",
@@ -127,17 +128,14 @@ test("Cursor auto-review allows routine work with task/rules context and records
   assert.equal(f.jobs[0].mode, "review");
   const context = JSON.parse(f.jobs[0].task);
   assert.equal(context.currentRequest, "Run the tests");
-  assert.equal(context.standingInstructions, "Keep edits small.");
-  // Naming the chat is the working agent's job, not the reviewer's.
-  assert.equal(
-    context.turnInstructions + renameInstructions("cursor"),
-    f.ctx.instructions,
-  );
-  assert.match(context.projectRules, /Commit and push/);
+  assert.equal(context.policies.standing, "Keep edits small.");
+  assert.match(context.policies.host, /Primary writable repository/);
+  assert.doesNotMatch(f.jobs[0].task, /still needs an automatic title/);
+  assert.match(context.policies.project, /Commit and push/);
   assert.equal(context.userRefusals[0].request.title, "erase unrelated work");
   assert.equal(context.proposedAction.details.rawInput.command, "npm test");
   assert.doesNotMatch(f.jobs[0].task, /ASSISTANT_PRIVATE_CONTEXT/);
-  assert.deepEqual(f.store.conversation(f.chat.id).sessions, {});
+  assert.equal(f.store.conversation(f.chat.id).sessions.cursor?.id, undefined);
   const events = f.store
     .events()
     .filter((e) => e.payload.kind === "permission-review");
@@ -147,6 +145,25 @@ test("Cursor auto-review allows routine work with task/rules context and records
   );
   assert.equal(events[0].payload.item.id, events[1].payload.item.id);
   assert.equal(f.store.steps(f.chat.id)[f.run.id][0].status, "ok");
+});
+
+test("later reviews in one turn send the action without repeating the policies", async (t) => {
+  const f = await fixture(t),
+    asks = [];
+  f.controller.openReviewer = async () => ({
+    ask: async (task) => {
+      asks.push(JSON.parse(task));
+      return decision("allow");
+    },
+    close: async () => {},
+  });
+  await f.ctx.approve(action("npm test"));
+  await f.ctx.approve(action("npm run build"));
+  assert.equal(asks[0].policies.standing, "");
+  assert.equal(asks[1].policies, undefined);
+  assert.equal(asks[1].policyHash, textHash(JSON.stringify(asks[0].policies)));
+  assert.equal(asks[1].proposedAction.title, "npm run build");
+  assert.equal(f.jobs.length, 0);
 });
 
 test("the reviewer sees the agent's earlier actions this turn, but not its prose", async (t) => {

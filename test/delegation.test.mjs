@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
-import { saveRules } from "../src/core/rules.mjs";
+import { promptEditFrom, saveRules } from "../src/core/rules.mjs";
+import { editThreshold } from "../src/core/delegation.mjs";
 import { WorkerUnavailable } from "../src/providers/workers.mjs";
 
 const haiku = { provider: "claude", model: "haiku", effort: null },
@@ -175,7 +176,12 @@ test("a large file is read by the worker, a small one comes back as text, and th
   assert.match(ctx.instructions, /Prefer small diffs\./);
   assert.match(ctx.instructions, /low-cost worker \(Codex · Luna\)/);
   assert.match(ctx.instructions, /Do not estimate costs yourself/);
-  assert.match(ctx.instructions, /touches about 17 or more lines/);
+  assert.match(
+    ctx.instructions,
+    new RegExp(
+      `touches about ${promptEditFrom(editThreshold({ main: { input: 4, output: 20 }, worker: { input: 0.1, output: 0.5 } }))} or more lines`,
+    ),
+  );
   assert.match(ctx.instructions, /every usage, nothing calls this/);
 
   const big = await ctx.history("delegate_read", {

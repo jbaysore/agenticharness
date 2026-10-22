@@ -244,11 +244,13 @@ When a worker cannot run:
 
 Limits to keep in mind:
 
-- The comparison is an estimate. It counts each token once and does not count
-  that text read by the chat's model stays in its context for later turns, so it
-  understates the saving from handing off long reads.
+- The comparison counts parent-held input twice: once for this turn and once
+  for a later turn that re-reads it. That applies to a file the chat would read,
+  an unread file before an edit, the fixed search assumption, and the worker's
+  answer that stays in the chat. A job under about 2,000 tokens is still never
+  handed off.
 - What a search would cost the chat's own model cannot be measured beforehand,
-  so locating uses a fixed assumption of about 6,000 tokens.
+  so locating uses a fixed assumption of about 6,000 tokens, counted twice.
 - A worker's answer can be wrong or incomplete. That is why exhaustive and
   absence questions are kept on the chat's model, edits come back as a diff, and
   the agent is told that "not found" is not proof.
@@ -328,9 +330,10 @@ globally or automatically approve the workaround.
 
 ## Browser for agents
 
-Every Codex, Claude Code and Cursor chat can drive a browser through the
-`browser_*` tools (Playwright MCP). Harness runs one Chrome on the host PC and
-shares it between chats, so a page stays open between turns. It uses its own
+Every Codex, Claude Code and Cursor chat can drive a browser through one
+`browser` tool. Harness checks the action against Playwright's schemas and runs
+one Chrome on the host PC. Chats share that Chrome, so a page stays open
+between turns. It uses its own
 profile in `%LOCALAPPDATA%\AgenticHarness\browser\profile`, separate from your
 everyday Chrome: sign in to a site there once and the sign-in persists. Saved
 snapshots and screenshots go to `browser\output` beside it. The window is visible
@@ -352,8 +355,11 @@ without it and the work log says why.
 All chat text, run outcomes, tool activity, review comments, artifacts and decisions
 are recorded in SQLite. Search conversations by words, filenames or decisions.
 Search results link to the source conversation and retain provider attribution.
-Agents can call `history_search`, `history_read`, and `project_notes` on demand,
-and `workspace_activity` to see which other chats are working in the same folder.
+Agents can call `history_search`, `history_read`, `project_notes`, and
+`workspace_activity` on demand. `history_read` returns four messages at a time,
+each capped at 2,000 characters. Pass a query to get short windows around
+matches. Older text stays in the archive. `workspace_activity` lists the other
+chats working in the same folder.
 On a chat's first message the agent is asked to call `rename_chat` with a short
 summary title. It works once and never replaces a title you set yourself; you can
 still rename any chat from its menu.

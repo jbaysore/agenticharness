@@ -1,5 +1,34 @@
+import { createHash } from "node:crypto";
 import { pathsOverlap } from "./repository.mjs";
 import { attachmentContext, attachmentPath } from "./attachments.mjs";
+
+const HISTORY_PAGE = 4,
+  HISTORY_MESSAGE_CAP = 2000,
+  HANDOFF_MESSAGE_CAP = 2000,
+  HANDOFF_CAP = 16000;
+
+export function textHash(text) {
+  return createHash("sha256")
+    .update(String(text ?? ""))
+    .digest("hex");
+}
+
+// Cursor has no system channel, so the standing prefix is sent in the user
+// message only when this session has not already been given these bytes.
+// The addendum is sent for every provider only when it changed.
+export function promptDelivery({ provider, session, prefix, addendum }) {
+  const saved = session && typeof session === "object" ? session : {},
+    promptHash = textHash(prefix),
+    addendumHash = textHash(addendum),
+    sendAddendum = Boolean(addendum) && saved.addendumHash !== addendumHash;
+  return {
+    instructions:
+      provider === "cursor" && saved.promptHash === promptHash ? "" : prefix,
+    addendum: sendAddendum ? addendum : "",
+    promptHash,
+    addendumHash,
+  };
+}
 
 export const historyTools = [
   {
@@ -16,12 +45,13 @@ export const historyTools = [
   {
     name: "history_read",
     description:
-      "Read a source conversation found by history_search. Returns a bounded page, with a cursor for more.",
+      "Read a source conversation found by history_search. Returns four messages, each capped. Pass query for short windows around matches. Older text stays in the archive.",
     inputSchema: {
       type: "object",
       properties: {
         conversationId: { type: "string" },
         offset: { type: "integer", minimum: 0 },
+        query: { type: "string" },
       },
       required: ["conversationId"],
       additionalProperties: false,
@@ -144,7 +174,7 @@ export function workspacePeers(
     .filter(Boolean);
 }
 
-export function workspaceNotice(peers, changes) {
+export function workspaceNotice(peers, changes, { rules = true } = {}) {
   if (!peers.length) return "";
   const listed = changes?.slice(0, 40) ?? [];
   return [
@@ -162,9 +192,44 @@ export function workspaceNotice(peers, changes) {
             : []),
         ]
       : []),
-    `While they are working: ${sharedWorkspaceRules}`,
+    ...(rules ? [`While they are working: ${sharedWorkspaceRules}`] : []),
     "Other chats can start or finish during your turn, and the host cannot tell you who made an edit while turns overlap.",
   ].join("\n");
+}
+
+// Up to three windows around a query, otherwise the start of the message.
+export function boundHistoryContent(content, query) {
+  const text = String(content ?? "");
+  const needle = String(query ?? "").trim();
+  if (needle) {
+    const lower = text.toLowerCase(),
+      q = needle.toLowerCase(),
+      windows = [];
+    let from = 0;
+    while (windows.length < 3) {
+      const at = lower.indexOf(q, from);
+      if (at < 0) break;
+      windows.push(
+        text.slice(
+          Math.max(0, at - 400),
+          Math.min(text.length, at + q.length + 400),
+        ),
+      );
+      from = at + q.length;
+    }
+    if (windows.length) {
+      const joined = windows.join("\n…\n");
+      return {
+        content: joined.slice(0, HISTORY_MESSAGE_CAP),
+        truncated:
+          text.length > joined.length || joined.length > HISTORY_MESSAGE_CAP,
+      };
+    }
+  }
+  return {
+    content: text.slice(0, HISTORY_MESSAGE_CAP),
+    truncated: text.length > HISTORY_MESSAGE_CAP,
+  };
 }
 
 export function historyCall(store, conversationId, name, args, dataDir) {
@@ -197,19 +262,23 @@ export function historyCall(store, conversationId, name, args, dataDir) {
       throw new Error("Conversation is outside the selected history scope");
     const offset = Math.max(0, Number(args.offset) || 0);
     const all = store.messages(target.id),
-      page = all.slice(offset, offset + 12);
+      page = all.slice(offset, offset + HISTORY_PAGE);
     return {
       id: target.id,
       title: target.title,
       projectId: target.project_id,
       source: `harness://conversation/${target.id}`,
-      messages: page.map((m) => ({
-        ...m,
-        content: m.content.slice(0, 16000),
-        attachments: (m.attachments ?? []).map((f) =>
-          dataDir ? { ...f, path: attachmentPath(dataDir, f) } : f,
-        ),
-      })),
+      messages: page.map((m) => {
+        const bounded = boundHistoryContent(m.content, args.query);
+        return {
+          ...m,
+          content: bounded.content,
+          truncated: bounded.truncated,
+          attachments: (m.attachments ?? []).map((f) =>
+            dataDir ? { ...f, path: attachmentPath(dataDir, f) } : f,
+          ),
+        };
+      }),
       nextOffset:
         offset + page.length < all.length ? offset + page.length : null,
     };
@@ -236,7 +305,7 @@ export function handoffContext(store, chat, provider, dataDir) {
     "Recent readable transcript (bounded; older history remains searchable):",
     ...prior.map(
       (m) =>
-        `[${m.role}; ${m.provider ?? "user"}; ${m.model ?? ""}; source harness://conversation/${chat.id}#${m.id}]\n${m.content.slice(0, 6000)}${dataDir ? attachmentContext((m.attachments ?? []).map((f) => ({ ...f, path: attachmentPath(dataDir, f) }))) : ""}`,
+        `[${m.role}; ${m.provider ?? "user"}; ${m.model ?? ""}; source harness://conversation/${chat.id}#${m.id}]\n${m.content.slice(0, HANDOFF_MESSAGE_CAP)}${dataDir ? attachmentContext((m.attachments ?? []).map((f) => ({ ...f, path: attachmentPath(dataDir, f) }))) : ""}`,
     ),
     "Saved project decisions:",
     ...notes.map(
@@ -253,7 +322,7 @@ export function handoffContext(store, chat, provider, dataDir) {
     "Inspect current Git state and verification results before making assumptions about earlier changes.",
   ]
     .join("\n\n")
-    .slice(0, 48000);
+    .slice(0, HANDOFF_CAP);
 }
 
 // For a chat in its own worktree, `project.path` is the worktree and

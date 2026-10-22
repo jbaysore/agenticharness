@@ -4,9 +4,10 @@
 // The user authorized sharing task instructions, rules, refusals, the agent's
 // recent actions this turn and the action under review.
 import { randomUUID } from "node:crypto";
-import { agentInstructions } from "./history.mjs";
+import { agentInstructions, textHash } from "./history.mjs";
 import { readRepositoryFile } from "./repository.mjs";
 import { readRules } from "./rules.mjs";
+import { ASK_INSTRUCTIONS } from "./modes.mjs";
 import {
   cursorReviewer,
   parseReview,
@@ -23,6 +24,15 @@ export class ActionReviewer {
     Object.assign(this, { controller, run, project, chat, text, signal });
     this.queue = Promise.resolve();
     this.unavailable = new Map();
+    this.sessions = new Map();
+    this.policyCache = null;
+  }
+  async close() {
+    const sessions = [...this.sessions.values()];
+    this.sessions.clear();
+    await Promise.all(
+      sessions.map((session) => session.close().catch(() => {})),
+    );
   }
   review(request) {
     // Parallel requests still get individual decisions, in request order.
@@ -116,10 +126,9 @@ export class ActionReviewer {
       )
       .map(({ request, createdAt }) => ({ request, createdAt }));
   }
-  async context(request) {
-    const { controller, project, chat } = this;
-    if (!request.details)
-      throw new Error("The agent did not provide the exact action for review.");
+  async policies() {
+    if (this.policyCache) return this.policyCache;
+    const { project, chat } = this;
     let projectRules = "";
     try {
       projectRules = (await readRepositoryFile(project.path, "AGENTS.md"))
@@ -128,31 +137,57 @@ export class ActionReviewer {
       if (error.code !== "ENOENT")
         throw new Error("Project instructions could not be read for review.");
     }
-    const userRefusals = this.userRefusals();
-    const task = JSON.stringify({
+    const policies = {
+      host: agentInstructions(project, chat),
+      standing: readRules(this.controller.store).instructions,
+      project: projectRules,
+      mode: chat.mode === "ask" ? ASK_INSTRUCTIONS : chat.mode,
+    };
+    this.policyCache = {
+      policies,
+      policyHash: textHash(JSON.stringify(policies)),
+    };
+    return this.policyCache;
+  }
+  clipUserMessages() {
+    return this.controller.store
+      .messages(this.chat.id)
+      .filter((m) => m.role === "user")
+      .slice(-4)
+      .map((m) => {
+        const content = String(m.content ?? "");
+        return {
+          content: content.slice(0, 2000),
+          createdAt: m.created_at,
+          ...(content.length > 2000 && { truncated: true }),
+        };
+      });
+  }
+  async packet(request) {
+    if (!request.details)
+      throw new Error("The agent did not provide the exact action for review.");
+    const { policies, policyHash } = await this.policies();
+    const requestText = String(this.text ?? "");
+    const action = {
       agent: agentNames[this.run.provider] ?? this.run.provider,
-      hostPolicies: agentInstructions(project, chat),
-      standingInstructions: readRules(controller.store).instructions,
-      turnInstructions: this.instructions ?? "",
-      projectRules,
-      userMessages: controller.store
-        .messages(chat.id)
-        .filter((m) => m.role === "user")
-        .slice(-8)
-        .map((m) => ({ content: m.content, createdAt: m.created_at })),
-      currentRequest: this.text,
-      userRefusals,
+      userMessages: this.clipUserMessages(),
+      currentRequest:
+        requestText.length > 2000 ? requestText.slice(0, 2000) : requestText,
+      ...(requestText.length > 2000 && { currentRequestTruncated: true }),
+      userRefusals: this.userRefusals(),
       recentSteps: this.recentSteps(request),
       proposedAction: request,
-    });
+    };
+    const initial = JSON.stringify({ ...action, policies });
+    const followUp = JSON.stringify({ ...action, policyHash });
     // An approval must never be based on an action or instructions cut in half.
-    if (task.length > 64000)
+    if (initial.length > 64000 || followUp.length > 64000)
       throw new Error(
         "The complete action and context are too large for automatic review.",
       );
-    return task;
+    return { initial, followUp };
   }
-  async attempt(reviewer, task) {
+  async oneShot(reviewer, task) {
     const { controller, signal } = this,
       limit = new AbortController(),
       stop = () => limit.abort();
@@ -190,6 +225,41 @@ export class ActionReviewer {
       limit.abort();
     }
   }
+  async attempt(reviewer, packet) {
+    const opener = this.controller.openReviewer;
+    if (typeof opener !== "function")
+      return this.oneShot(reviewer, packet.initial);
+    const opened = this.sessions.has(reviewer.provider);
+    let session = this.sessions.get(reviewer.provider);
+    if (!session) {
+      session = await opener({
+        provider: reviewer.provider,
+        cwd: this.project.path,
+        model: reviewer.model,
+        effort: reviewer.effort,
+        signal: this.signal,
+      });
+      this.sessions.set(reviewer.provider, session);
+    }
+    const limit = new AbortController(),
+      stop = () => limit.abort();
+    this.signal.addEventListener("abort", stop, { once: true });
+    const timer = setTimeout(stop, this.controller.reviewerTimeoutMs);
+    try {
+      if (this.signal.aborted) throw new Error("The turn was stopped.");
+      return await session.ask(
+        opened ? packet.followUp : packet.initial,
+        limit.signal,
+      );
+    } catch (error) {
+      await session.close().catch(() => {});
+      this.sessions.delete(reviewer.provider);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      this.signal.removeEventListener("abort", stop);
+    }
+  }
   async decide(request) {
     const { controller, run, chat, signal } = this,
       agent = agentNames[run.provider] ?? run.provider,
@@ -215,7 +285,7 @@ export class ActionReviewer {
     try {
       const settings = readRules(controller.store).review,
         candidates = ["codex", ...(settings.claudeFallback ? ["claude"] : [])],
-        task = await this.context(request),
+        packet = await this.packet(request),
         reasons = [];
       for (const provider of candidates) {
         if (signal.aborted) throw new Error("The turn was stopped.");
@@ -233,7 +303,7 @@ export class ActionReviewer {
             `${reviewer.name}: ${request.title}`,
             { reviewer },
           );
-          const result = await this.attempt(reviewer, task);
+          const result = await this.attempt(reviewer, packet);
           if (signal.aborted) throw new Error("The turn was stopped.");
           const decision = parseReview(result.text),
             label = {

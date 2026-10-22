@@ -73,9 +73,10 @@ test("a chat starting beside another in the same folder is told about it; an unr
     apart = await start(third, "Something unrelated");
   assert.equal(alone.handoff, "");
   assert.equal(apart.handoff, "");
-  assert.match(beside.handoff, /another chat is working in this repository/);
-  assert.match(beside.handoff, /"First" \(codex.*Refactor the parser/);
-  assert.match(beside.handoff, /never with git add -A/);
+  assert.equal(beside.handoff, "");
+  assert.match(beside.addendum, /another chat is working in this repository/);
+  assert.match(beside.addendum, /"First" \(codex.*Refactor the parser/);
+  assert.match(beside.addendum, /never with git add -A/);
   assert.match(
     beside.instructions,
     /call workspace_activity before you commit/,

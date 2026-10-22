@@ -12,7 +12,98 @@ const cli = join(
 );
 // Runs arbitrary Node code on the host, outside every agent's sandbox.
 const withheld = new Set(["browser_run_code_unsafe"]);
-export const isBrowserTool = (name) => /^browser_/.test(String(name));
+const BROWSER_TEXT_CAP = 12_000;
+export const isBrowserTool = (name) =>
+  name === "browser" || /^browser_/.test(String(name));
+
+// One tool for the model. Playwright's schemas stay on the host and are used
+// to check a call before it runs.
+export function browserGateway(tools) {
+  const lines = tools.map((tool) => {
+    const sentence = String(tool.description ?? "")
+      .split(/(?<=\.)\s/)[0]
+      .replace(/\s+/g, " ")
+      .trim();
+    const short = sentence.length > 80 ? sentence.slice(0, 79) + "…" : sentence;
+    return `- ${tool.name}: ${short || "Playwright action"}`;
+  });
+  return {
+    name: "browser",
+    description: `Drive the shared Chrome. Set action to one of the names below and pass that action's arguments.\n${lines.join("\n")}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: tools.map((tool) => tool.name) },
+        arguments: { type: "object" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
+    readOnly: tools.every((tool) => tool.readOnly),
+  };
+}
+
+export function validateToolInput(schema, args) {
+  if (!schema || schema.type !== "object") return null;
+  if (args != null && (typeof args !== "object" || Array.isArray(args)))
+    return "Arguments must be an object";
+  const input = args ?? {},
+    properties = schema.properties ?? {};
+  for (const key of schema.required ?? [])
+    if (input[key] == null || input[key] === "") return `Missing ${key}`;
+  if (schema.additionalProperties === false) {
+    const allowed = new Set(Object.keys(properties));
+    for (const key of Object.keys(input))
+      if (!allowed.has(key)) return `Unexpected ${key}`;
+  }
+  for (const [key, value] of Object.entries(input)) {
+    const prop = properties[key];
+    if (!prop) continue;
+    if (prop.enum && !prop.enum.includes(value))
+      return `${key} must be one of: ${prop.enum.join(", ")}`;
+    if (prop.type === "string" && typeof value !== "string")
+      return `${key} must be a string`;
+    if (prop.type === "integer" && !Number.isInteger(value))
+      return `${key} must be an integer`;
+    if (prop.type === "number" && typeof value !== "number")
+      return `${key} must be a number`;
+    if (prop.type === "boolean" && typeof value !== "boolean")
+      return `${key} must be a boolean`;
+  }
+  return null;
+}
+
+export function capBrowserResult(result, limit = BROWSER_TEXT_CAP) {
+  if (!result?.content) return result;
+  let used = 0,
+    truncated = false;
+  const content = [];
+  for (const part of result.content) {
+    if (part.type !== "text" || typeof part.text !== "string") {
+      content.push(part);
+      continue;
+    }
+    const room = limit - used;
+    if (room <= 0) {
+      truncated = true;
+      continue;
+    }
+    if (part.text.length <= room) {
+      content.push(part);
+      used += part.text.length;
+      continue;
+    }
+    truncated = true;
+    content.push({
+      ...part,
+      text:
+        part.text.slice(0, room) +
+        "\n[Browser output truncated; the page is still open.]",
+    });
+    used = limit;
+  }
+  return truncated ? { ...result, content } : result;
+}
 // What an approval prompt says, e.g. "Browser: navigate · https://example.com".
 export const browserTitle = (name, input = {}) => {
   const target = [input.url, input.element, input.key, input.text, input.action]
@@ -89,16 +180,29 @@ export class Browser {
     if (!tool) throw new Error(`The browser has no tool named ${name}`);
     return !tool.readOnly;
   }
+  async validate(name, args) {
+    const tool = (await this.tools()).find((t) => t.name === name);
+    if (!tool) return `The browser has no tool named ${name}`;
+    return validateToolInput(tool.inputSchema, args);
+  }
   // Chats share one browser, so calls run one at a time.
   call(name, args) {
     const next = this.queue.then(async () => {
       if (withheld.has(name)) throw new Error(`${name} is not available`);
+      const failure = await this.validate(name, args);
+      if (failure)
+        return {
+          isError: true,
+          content: [{ type: "text", text: failure }],
+        };
       const result = await (
         await this.connect()
       ).call("tools/call", { name, arguments: args ?? {} }, 5 * 60 * 1000);
-      return name === "browser_take_screenshot"
-        ? screenshotLinks(result, join(this.dir, "output"))
-        : result;
+      return capBrowserResult(
+        name === "browser_take_screenshot"
+          ? screenshotLinks(result, join(this.dir, "output"))
+          : result,
+      );
     });
     this.queue = next.catch(() => {});
     return next;

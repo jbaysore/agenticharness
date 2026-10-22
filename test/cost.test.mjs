@@ -60,12 +60,12 @@ test("a model is priced by its resolved name, and an unknown one has no price", 
 test("the whole round trip is compared: the worker, and the chat reading its result", () => {
   const prices = { main: opus, worker: small },
     read = estimate({ action: "read", content: 10_000 }, prices);
-  // Self: 10,000 tokens read at $4. Delegated: the worker reads 11,200 and
-  // writes 4,000 at its price, then the chat reads those 4,000 at $4.
-  assert.equal(read.self, 0.04);
+  // Self: 10,000 tokens read twice at $4. Delegated: the worker reads 11,200
+  // and writes 4,000 at its price, then the chat reads those 4,000 twice.
+  assert.equal(read.self, 0.08);
   assert.equal(
     Number(read.delegated.toFixed(6)),
-    Number(((11_200 * 0.1 + 4000 * 0.5 + 4000 * 4) / 1e6).toFixed(6)),
+    Number(((11_200 * 0.1 + 4000 * 0.5 + 8000 * 4) / 1e6).toFixed(6)),
   );
   assert.equal(read.cheaper, true);
   // A summary comes back much shorter than the file, so it saves far more.
@@ -73,14 +73,14 @@ test("the whole round trip is compared: the worker, and the chat reading its res
     estimate({ action: "summarise", content: 10_000 }, prices).delegated <
       read.delegated / 4,
   );
-  // A worker that costs a quarter of the chat's model loses on a plain read,
-  // because the chat still has to read what comes back.
+  // Retention makes the hand-off cheaper even when the worker costs a quarter
+  // of the chat's model, because the file would otherwise be read twice.
   assert.equal(
     estimate(
       { action: "read", content: 10_000 },
       { main: opus, worker: haiku45 },
     ).cheaper,
-    false,
+    true,
   );
 });
 
@@ -130,16 +130,16 @@ test("measured worker runs replace the starting assumptions", () => {
 });
 
 test("an edit is offered only from the size at which asking for it pays", () => {
-  assert.equal(editThreshold({ main: opus, worker: small }), 17);
-  assert.equal(editThreshold({ main: sol, worker: small }), 21);
-  assert.equal(editThreshold({ main: opus, worker: haiku45 }), 95);
+  assert.equal(editThreshold({ main: opus, worker: small }), 135);
+  assert.equal(editThreshold({ main: sol, worker: small }), 238);
+  assert.equal(editThreshold({ main: opus, worker: haiku45 }), null);
   assert.equal(editThreshold({ main: sol, worker: haiku45 }), null);
   const prices = { main: opus, worker: small },
     edit = (lines, haveRead) =>
       estimate({ action: "edit", content: 2000, lines, haveRead }, prices);
   // Once the call is made its sentence is already spent, so the decision at
   // that point is a little more willing than the advertised threshold.
-  assert.equal(edit(12, true).cheaper, true);
+  assert.equal(edit(100, true).cheaper, true);
   assert.equal(edit(2, true).cheaper, false);
   // Not having read the file yet makes handing off more attractive.
   assert.ok(edit(2, false).self > edit(2, true).self);
@@ -155,7 +155,7 @@ test("drafts and searches are offered only where they can come out cheaper", () 
   );
   assert.equal(
     estimate({ action: "locate" }, { main: sol, worker: haiku45 }).cheaper,
-    false,
+    true,
   );
 });
 

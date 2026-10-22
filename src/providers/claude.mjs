@@ -12,7 +12,6 @@ import { AsyncQueue } from "../core/queue.mjs";
 import { historyTools } from "../core/history.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
-import { isBrowserTool } from "../core/browser.mjs";
 import { claudeContent } from "./attachments.mjs";
 import {
   checkClaudeBilling,
@@ -175,14 +174,6 @@ const delegationShapes = {
     staged: z.boolean().optional(),
   },
 };
-// Browser tools arrive as JSON schemas; one the SDK cannot take is left out.
-const browserShape = (schema) => {
-  try {
-    return z.fromJSONSchema(schema).shape;
-  } catch {
-    return null;
-  }
-};
 export async function runClaude(
   ctx,
   {
@@ -194,8 +185,7 @@ export async function runClaude(
     usageForAccount = claudeUsageForAccount,
   } = {},
 ) {
-  const input = new AsyncQueue(),
-    goal = ctx.mode === "goal";
+  const input = new AsyncQueue();
   let currentId = "initial";
   const historyServer = createSdkMcpServer({
     name: "harness",
@@ -321,16 +311,22 @@ export async function runClaude(
             ],
           })),
         ),
-      // Harness asks the user before any browser action that can change a page.
-      ...(ctx.tools ?? [])
-        .filter((t) => isBrowserTool(t.name))
-        .map((t) => [t, browserShape(t.inputSchema)])
-        .filter(([, shape]) => shape)
-        .map(([t, shape]) =>
-          tool(t.name, t.description, shape, (args) =>
-            ctx.browser(t.name, args),
-          ),
-        ),
+      // One browser tool. Harness checks the action against Playwright's schema
+      // and asks before any action that can change a page.
+      ...((gateway) =>
+        gateway?.inputSchema?.properties?.action?.enum?.length
+          ? [
+              tool(
+                gateway.name,
+                gateway.description,
+                {
+                  action: z.enum(gateway.inputSchema.properties.action.enum),
+                  arguments: z.record(z.string(), z.any()).optional(),
+                },
+                (args) => ctx.browser(gateway.name, args),
+              ),
+            ]
+          : [])((ctx.tools ?? []).find((t) => t.name === "browser")),
     ],
   });
   const q = queryFn({
@@ -349,12 +345,9 @@ export async function runClaude(
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        // /goal has to open the message, so a goal turn's hand-off goes here.
-        append: [
-          ctx.instructions,
-          goal && ctx.handoff,
-          await projectInstructions(ctx.project.path),
-        ]
+        // Project files sit after the stable prefix. A goal handoff stays in
+        // the user message so it does not rewrite this prefix.
+        append: [ctx.instructions, await projectInstructions(ctx.project.path)]
           .filter(Boolean)
           .join("\n\n"),
       },

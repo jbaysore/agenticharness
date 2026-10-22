@@ -235,21 +235,26 @@ test("a turn is offered only what can come out cheaper for its model and worker"
   // A worker forty times cheaper than the chat's model: everything is offered.
   assert.deepEqual(plan("new", "claude", "opus"), {
     tools: ["read", "locate", "edit", "run", "draft"],
-    editFrom: 17,
+    editFrom: 135,
     draftUpTo: 8000,
     skipped: [],
     note: null,
   });
-  // Haiku 4.5 under Opus: drafts can never pay, and only very large edits do.
+  // Haiku 4.5 under Opus: drafts and edits never pay once retained context is
+  // counted. Reads, searches and commands still do.
   assert.deepEqual(plan("old", "claude", "opus").tools, [
     "read",
     "locate",
-    "edit",
     "run",
   ]);
-  assert.equal(plan("old", "claude", "opus").editFrom, 95);
-  // Haiku 4.5 under Sol: a search, an edit and a draft all cost more than doing them.
-  assert.deepEqual(plan("old", "codex", "gpt-6.1-sol").tools, ["read", "run"]);
+  assert.equal(plan("old", "claude", "opus").editFrom, null);
+  // Haiku 4.5 under Sol: an edit and a draft cost more than doing them. A
+  // search pays because its assumed input is counted twice on the chat's model.
+  assert.deepEqual(plan("old", "codex", "gpt-6.1-sol").tools, [
+    "read",
+    "locate",
+    "run",
+  ]);
   // A worker that costs as much as the chat's model is not a saving at all.
   assert.deepEqual(plan("new", "codex", "gpt-6-luna"), {
     tools: [],

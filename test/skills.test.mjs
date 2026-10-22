@@ -176,7 +176,10 @@ test("a slash command includes the skill on that message for every agent", async
   controller.on("event", (event) => events.push(event));
   for (const provider of providers) {
     controller.runners[provider.id] = async (ctx) => {
-      seen[ctx.chat.id] = ctx.instructions;
+      seen[ctx.chat.id] = {
+        instructions: ctx.instructions,
+        addendum: ctx.addendum,
+      };
       return { status: "completed" };
     };
     const chat = store.createConversation({
@@ -195,11 +198,13 @@ test("a slash command includes the skill on that message for every agent", async
       model: "m",
     });
     await controller.active.get(chat.id).task;
-    if (provider.id === "cursor")
-      assert.doesNotMatch(seen[chat.id], /Skill: Review notes/);
-    else {
-      assert.match(seen[chat.id], /Skill: Review notes/);
-      assert.match(seen[chat.id], /Write the decision down\./);
+    if (provider.id === "cursor") {
+      assert.doesNotMatch(seen[chat.id].instructions, /Skill: Review notes/);
+      assert.doesNotMatch(seen[chat.id].addendum, /Skill: Review notes/);
+    } else {
+      assert.doesNotMatch(seen[chat.id].instructions, /Skill: Review notes/);
+      assert.match(seen[chat.id].addendum, /Skill: Review notes/);
+      assert.match(seen[chat.id].addendum, /Write the decision down\./);
     }
   }
   const logged = events.filter((event) => event.payload.kind === "skills");
@@ -217,8 +222,11 @@ test("a slash command includes the skill on that message for every agent", async
     model: "m",
   });
   await controller.active.get(again.id).task;
-  assert.match(seen[again.id], /Name the file the decision came from\./);
-  assert.doesNotMatch(seen[again.id], /Write the decision down/);
+  assert.match(
+    seen[again.id].addendum,
+    /Name the file the decision came from\./,
+  );
+  assert.doesNotMatch(seen[again.id].addendum, /Write the decision down/);
   store.close();
 });
 

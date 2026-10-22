@@ -2,8 +2,12 @@ import { readFile } from "node:fs/promises";
 
 const images = (ctx) =>
   (ctx.attachments ?? []).filter((f) => f.type.startsWith("image/"));
-const request = (ctx) =>
-  [ctx.handoff, ctx.text].filter(Boolean).join("\n\nCurrent request:\n");
+export function prefaceText(ctx, body = ctx.text ?? "") {
+  const preface = [ctx.addendum, ctx.handoff].filter(Boolean).join("\n\n");
+  if (!preface) return body;
+  return `${preface}\n\nCurrent request:\n${body}`;
+}
+const request = (ctx) => prefaceText(ctx);
 
 export function codexInput(ctx) {
   return [
@@ -13,10 +17,12 @@ export function codexInput(ctx) {
 }
 
 export async function claudeContent(ctx) {
-  const text =
+  const text = prefaceText(
+    ctx,
     ctx.mode === "goal" && (!ctx.continuing || ctx.startGoal)
       ? "/goal " + (ctx.goalObjective ?? ctx.text)
-      : request(ctx);
+      : ctx.text,
+  );
   const files = images(ctx);
   if (!files.length) return text;
   return [
@@ -38,9 +44,7 @@ export async function cursorPrompt(ctx, capabilities = {}) {
   const blocks = [
     {
       type: "text",
-      text: [ctx.instructions, ctx.handoff, ctx.text]
-        .filter(Boolean)
-        .join("\n\n"),
+      text: [ctx.instructions, prefaceText(ctx)].filter(Boolean).join("\n\n"),
     },
   ];
   if (capabilities.image)

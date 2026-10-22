@@ -560,7 +560,13 @@ export async function runCursor(ctx) {
         {
           sessionId,
           prompt: await cursorPrompt(
-            { ...ctx, text: item.text, handoff: "", instructions: "" },
+            {
+              ...ctx,
+              text: item.text,
+              handoff: "",
+              instructions: "",
+              addendum: "",
+            },
             rpc.promptCapabilities,
           ),
         },
