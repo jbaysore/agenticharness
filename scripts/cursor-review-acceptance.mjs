@@ -81,6 +81,15 @@ try {
   await expect(page.getByLabel("Permissions", { exact: true })).toHaveValue(
     "auto",
   );
+  await expect(page.locator("label.permissions-control")).toHaveAttribute(
+    "title",
+    /managerial choice/,
+  );
+  await page.getByRole("button", { name: "Agent rules" }).click();
+  await expect(
+    page.getByText("asks you only for a managerial choice it explains"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close dialog" }).click();
   await page
     .getByLabel("Message your coding agent")
     .fill("Update the fixture and test it.");

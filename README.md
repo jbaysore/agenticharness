@@ -52,10 +52,14 @@ are allowed without a review unless you have refused an action in that chat.
 Choose each model and effort in **Agent rules → Automatic reviewer**. Unpinned defaults show their current model names;
 pinned choices never silently change. Saving applies to the next review, even
 during a running turn. The reviewer evaluates each proposed action
-against your request and project rules, then allows, declines, or asks you when
-authorization is unclear. The activity log records its decisions. No worker setup
-is needed. An explicit deny or request for your input is final. If neither
-reviewer can run, the action falls back to you; paid extra usage remains blocked.
+against your request and project rules, then allows or declines it. Coding and
+command questions are its decision. It asks you only for a managerial choice the
+task did not already settle, such as spending money, publishing or sending
+something, signing in, or changing the goal, and the reason explains that choice
+in plain language. The activity log records its decisions. No worker setup
+is needed. An explicit deny, or a request for that choice, is final. If neither
+reviewer can run, the action comes to you with the reason review failed; decline
+it if you are not sure. Paid extra usage remains blocked.
 Remote access runs through a Cloudflare Tunnel behind Cloudflare Access; real
 endpoint and physical laptop/iPhone validation are pending. See [daily-use instructions](docs/OPERATIONS.md),
 [acceptance evidence](docs/ACCEPTANCE.md), [the delivery plan](docs/PLAN.md), and

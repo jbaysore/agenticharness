@@ -215,7 +215,7 @@ test("the reviewer sees the agent's earlier actions this turn, but not its prose
   assert.doesNotMatch(f.jobs[0].task, /AGENT_PROSE/);
 });
 
-test("reviewer declines actions and reviews plans, while questions and browser requests reach the user", async (t) => {
+test("the reviewer decides command permissions from every agent, while questions and plans still reach the user", async (t) => {
   const f = await fixture(t);
   let calls = 0;
   f.controller.workers.codex = async () => {
@@ -228,14 +228,26 @@ test("reviewer declines actions and reviews plans, while questions and browser r
   });
   assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
   await f.ctx.approve(action("Proposed plan", "cursor/create_plan"));
-  assert.equal(calls, 2);
+  // Codex and Claude escalations have no Cursor method; they are still reviewed.
+  assert.deepEqual(
+    await f.ctx.approve(
+      action("npm test", "item/commandExecution/requestApproval"),
+    ),
+    { allow: false, reason: "This erases unrelated work." },
+  );
+  assert.deepEqual(
+    await f.ctx.approve({
+      kind: "permission",
+      title: "Bash",
+      details: { command: "npm test" },
+    }),
+    { allow: false, reason: "This erases unrelated work." },
+  );
+  assert.equal(calls, 4);
+  assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
   for (const request of [
     { kind: "question", title: "Which file?" },
-    {
-      kind: "permission",
-      title: "Browser click",
-      details: { tool: "browser_click" },
-    },
+    { kind: "plan", title: "Review the plan", plan: "1. Keep the cache." },
   ]) {
     const result = f.ctx.approve(request);
     await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
@@ -244,7 +256,7 @@ test("reviewer declines actions and reviews plans, while questions and browser r
     });
     assert.equal((await result).allow, true);
   }
-  assert.equal(calls, 2);
+  assert.equal(calls, 4);
 });
 
 // A stand-in browser: snapshots are read-only, everything else changes a page.
@@ -580,8 +592,10 @@ test("both providers exhausted ask the user and are not retried that turn", asyn
     const response = f.ctx.approve(action());
     await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
     const approval = f.store.pendingApprovals(f.chat.id)[0];
+    assert.match(approval.request.reviewReason, /could not run/);
     assert.match(approval.request.reviewReason, /codex exhausted/);
     assert.match(approval.request.reviewReason, /claude exhausted/);
+    assert.match(approval.request.reviewReason, /Decline this unless/);
     f.controller.answer(approval.id, { allow: false });
     assert.equal((await response).allow, false);
   }

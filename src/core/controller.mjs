@@ -395,9 +395,9 @@ export class Controller extends EventEmitter {
       }
       this.event(chat.id, run.id, type, payload);
     };
-    // Override answers every permission request itself and logs it; questions
-    // for the user still reach the user. In Auto-review, the reviewer decides
-    // Cursor's permission requests and every agent's browser actions.
+    // Override answers every permission request itself and logs it. Questions
+    // and plans still reach the user. In Auto-review, the reviewer decides
+    // every permission request and asks the user only when it returns ask.
     const reviewer =
       permissions === "auto"
         ? new ActionReviewer({
@@ -422,15 +422,7 @@ export class Controller extends EventEmitter {
     };
     const approve = async (request) => {
       if (abort.signal.aborted) return Promise.resolve({ allow: false });
-      if (
-        reviewer &&
-        run.provider === "cursor" &&
-        request.kind === "permission" &&
-        ["session/request_permission", "cursor/create_plan"].includes(
-          request.method,
-        )
-      )
-        return review(request);
+      if (reviewer && request.kind === "permission") return review(request);
       if (
         permissions !== "override" ||
         ["question", "plan"].includes(request.kind)

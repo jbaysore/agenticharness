@@ -108,7 +108,8 @@ export async function inspectCodex(cwd) {
   }
 }
 // Harness's permission modes in Codex's terms: its auto-review subagent decides
-// sandbox escapes in auto, and override drops both the prompts and the sandbox.
+// sandbox escapes in auto, and anything it passes on is reviewed by Harness.
+// Override drops both the prompts and the sandbox.
 const permissionModes = {
   manual: {
     approvalPolicy: "untrusted",

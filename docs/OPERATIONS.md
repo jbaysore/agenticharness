@@ -266,10 +266,20 @@ billing boundary. No separate embedding or AI summary service runs in the app.
 
 ## Approvals and stopping
 
-Requested commands, tool actions, plans and questions appear in the conversation.
-Open the action details before **Allow once**. Approvals are limited to that
-request. **Decline** rejects it. The square stop button interrupts work and expires
-pending approvals. A repeated approval response cannot apply twice.
+In **Auto-review**, the automatic reviewer allows or declines commands, edits,
+and browser actions. It decides coding and command questions itself. It asks you
+only for a managerial choice the task did not already settle, such as spending
+money, publishing or sending something, signing in, or changing the goal, and
+the note explains that choice in plain language. If automatic review cannot run,
+the action comes to you with that reason; decline it if you are not sure.
+**Manual** shows each request for **Allow once**. **Override** allows actions
+without asking. Plans still come to you in every mode. Agents are told to ask
+only a managerial question, and to explain why they cannot decide it.
+
+Requested commands, tool actions, plans and questions appear in the conversation
+when they need you. Open the action details before **Allow once**. Approvals are
+limited to that request. **Decline** rejects it. The square stop button interrupts
+work and expires pending approvals. A repeated approval response cannot apply twice.
 
 Agent questions use selectable cards with the agent's brief explanation beneath
 each option. Choose one option, or several when the question allows it. Choose
@@ -291,7 +301,8 @@ where a provider permits it or you approve an unsandboxed command.
 
 This PC's Codex Windows sandbox sometimes fails with `apply deny-read ACLs`.
 Harness preserves that failure and the agent can request approval for a command
-outside the sandbox. Review that request; the app does not disable the sandbox
+outside the sandbox. In Auto-review the automatic reviewer decides that request
+the same way it decides any other command. The app does not disable the sandbox
 globally or automatically approve the workaround.
 
 ## Browser for agents
@@ -307,8 +318,10 @@ on the host PC; close it any time and the next browser action reopens it.
 Reading the page (snapshot, screenshot, find, console and network listings,
 waiting) needs no prompt. Anything that can change a page or leave this PC
 (navigating, clicking, typing, filling forms, running page script, uploading a
-file, managing tabs) asks for **Allow once**, titled with the action and its
-target, whichever agent asked. Playwright's tool for running arbitrary code on
+file, managing tabs) is decided by the automatic reviewer in **Auto-review**,
+which asks you only for a managerial choice such as signing in, posting, or
+paying. In **Manual**, each of those actions asks for **Allow once**, titled
+with the action and its target. Playwright's tool for running arbitrary code on
 the host is never offered. Chats share the browser, so their actions run one at
 a time; Chrome must be installed. If the browser cannot start, the turn goes on
 without it and the work log says why.

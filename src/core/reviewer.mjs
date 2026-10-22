@@ -1,5 +1,6 @@
-// In Auto-review, Cursor's ACP permission requests and every agent's browser
-// actions are reviewed in separate subscription sessions.
+// In Auto-review, every permission request — Cursor's, Claude Code's, Codex's,
+// and every agent's browser actions — is reviewed in a separate subscription
+// session. The reviewer asks the user only for a managerial choice.
 // The user authorized sharing task instructions, rules, refusals, the agent's
 // recent actions this turn and the action under review.
 import { randomUUID } from "node:crypto";
@@ -270,8 +271,9 @@ export class ActionReviewer {
         );
         return { decision: "deny", reason: "The turn was stopped." };
       }
-      note("ask", "Auto-review needs your input", error.message);
-      return { decision: "ask", reason: error.message };
+      const reason = `Automatic review could not run (${error.message}). Decline this unless you already know you want it.`;
+      note("ask", "Auto-review needs your input", reason);
+      return { decision: "ask", reason };
     }
   }
 }

@@ -173,9 +173,12 @@ function ReviewerSettings({ value, providers, onChange }) {
         <h3>Automatic reviewer</h3>
       </header>
       <p>
-        Choose the Codex model that reviews Cursor actions and every agent's
-        browser actions in Auto-review mode. If Codex cannot review, the Claude
-        model below takes over using its included subscription usage. Both
+        Choose the Codex model that reviews Auto-review actions: Cursor
+        requests, browser actions from every agent, and commands Claude Code or
+        Codex passes on. It decides coding and command questions, and asks you
+        only for a managerial choice it explains. If Codex cannot review, the
+        Claude model below takes over using its included subscription usage.
+        Both
         receive the task, recent user instructions and refusals, project rules,
         the agent's recent actions, and exact action details.
       </p>
@@ -222,9 +225,10 @@ function ReviewerSettings({ value, providers, onChange }) {
       </p>
       <p className="muted small">
         Pinned choices stay fixed until you change them. Saving applies to the
-        next review, including during an active turn. A reviewer&rsquo;s deny or
-        request for your input is final. If neither reviewer can run, you
-        approve the action yourself. API billing and paid extra usage remain
+        next review, including during an active turn. A reviewer&rsquo;s deny is
+        final, as is a request for a managerial choice. If neither reviewer can
+        run, you approve the action yourself. API billing and paid extra usage
+        remain
         disabled.
       </p>
     </section>

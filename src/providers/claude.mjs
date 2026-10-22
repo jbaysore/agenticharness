@@ -38,7 +38,7 @@ export function claudeOptions(cwd) {
   };
 }
 // Harness's permission modes in Claude Code's terms. Auto mode's classifier
-// still asks through canUseTool when it cannot decide.
+// still calls canUseTool when it cannot decide; Harness reviews that call.
 const permissionModes = {
   manual: { permissionMode: "default" },
   auto: { permissionMode: "auto" },

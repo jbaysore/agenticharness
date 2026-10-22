@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { agentInstructions } from "../src/core/history.mjs";
 import {
   cursorReviewer,
   parseReview,
   readOnlyGitCommand,
+  REVIEW_PROMPT,
   reviewConfig,
 } from "../src/core/review-policy.mjs";
 
@@ -40,6 +42,30 @@ test("Cursor reviewer uses the connected Codex catalog default, without a hard-c
     [{ ...codex, blockReason: "Quota exhausted" }],
   ])
     assert.throws(() => cursorReviewer(providers));
+});
+
+test("the reviewer decides technical actions and asks only for an explained managerial choice", () => {
+  assert.match(REVIEW_PROMPT, /cannot judge code or commands better than you/);
+  assert.match(
+    REVIEW_PROMPT,
+    /Do not ask the user to approve a command, script, or code change/,
+  );
+  assert.match(
+    REVIEW_PROMPT,
+    /Use ask only when the task leaves a managerial choice/,
+  );
+  assert.match(REVIEW_PROMPT, /why you cannot make it/);
+  assert.doesNotMatch(
+    REVIEW_PROMPT,
+    /Use ask when the exact action or its authorization is unclear/,
+  );
+  const instructions = agentInstructions(
+    { path: "C:\\repo", repositories: [] },
+    { id: "chat", scope: "all" },
+  );
+  assert.match(instructions, /do not ask the user to judge them/);
+  assert.match(instructions, /managerial choice only the user can make/);
+  assert.match(instructions, /explain why you cannot decide it/);
 });
 
 test("only a complete, strict reviewer decision can allow an action", () => {
