@@ -254,6 +254,17 @@ Open the action details before **Allow once**. Approvals are limited to that
 request. **Decline** rejects it. The square stop button interrupts work and expires
 pending approvals. A repeated approval response cannot apply twice.
 
+Agent questions use selectable cards with the agent's brief explanation beneath
+each option. Choose one option, or several when the question allows it. Choose
+**Other** to write a different response; questions without suggested options
+show a response field directly. **Send answer** stays disabled until each
+question has an answer. A failed submission keeps your answers for retry.
+
+Agents are instructed to explain each option's benefit or tradeoff. Cursor's
+current ACP bridge accepts option IDs but drops free text, so Harness forwards
+Other answers through its supported question feedback reason, including any
+other selections from the same form.
+
 Native provider permission models differ. Some workspace reads/edits need no
 prompt under a provider's own policy. Harness does not claim that every operation
 is independently sandboxed. Read-only references are directional context and have

@@ -16,6 +16,7 @@
     "test:models": "npm run build && node scripts/model-picker-acceptance.mjs",
     "test:history": "npm run build && node scripts/history-settings-acceptance.mjs",
     "test:permissions": "npm run build && node scripts/permissions-acceptance.mjs",
+    "test:questions": "npm run build && node scripts/questions-acceptance.mjs",
     "test:reviewer": "npm run build && node scripts/cursor-review-acceptance.mjs",
     "test:reviewer-settings": "npm run build && node scripts/reviewer-settings-acceptance.mjs",
     "preview:design": "npm run build && node scripts/design-preview.mjs",

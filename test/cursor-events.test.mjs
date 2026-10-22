@@ -4,9 +4,68 @@ import {
   configureCursorModel,
   cursorConfigDrift,
   cursorModels,
+  cursorQuestionOutcome,
   cursorSpeedFollowUp,
   cursorWorkKind,
 } from "../src/providers/cursor.mjs";
+
+test("Cursor question answers preserve selected IDs, custom responses, and cancellation", () => {
+  const questions = [
+    {
+      id: "approach",
+      prompt: "Which approach?",
+      options: [
+        { id: "a", label: "Focused update" },
+        { id: "b", label: "Redesign" },
+      ],
+    },
+    {
+      id: "checks",
+      prompt: "Which checks?",
+      options: [{ id: "unit", label: "Unit checks" }],
+    },
+  ];
+  assert.deepEqual(
+    cursorQuestionOutcome(questions, {
+      allow: true,
+      answers: { approach: ["a", "b"], checks: "Unit checks" },
+    }),
+    {
+      outcome: "answered",
+      answers: [
+        { questionId: "approach", selectedOptionIds: ["a", "b"] },
+        { questionId: "checks", selectedOptionIds: ["unit"] },
+      ],
+    },
+  );
+  const custom = cursorQuestionOutcome(questions, {
+    allow: true,
+    answers: {
+      approach: "An accessibility pass",
+      checks: ["unit", "Mobile review"],
+    },
+  });
+  assert.equal(custom.outcome, "skipped");
+  assert.match(custom.reason, /Which approach\?: An accessibility pass/);
+  assert.match(custom.reason, /Which checks\?: Unit checks, Mobile review/);
+  assert.deepEqual(
+    cursorQuestionOutcome(questions, {
+      allow: false,
+      answers: { approach: "a", checks: "unit" },
+    }),
+    { outcome: "cancelled" },
+  );
+  assert.deepEqual(
+    cursorQuestionOutcome(questions, {
+      allow: true,
+      answers: { approach: "a" },
+    }),
+    { outcome: "cancelled" },
+  );
+  assert.deepEqual(cursorQuestionOutcome([], { allow: true }), {
+    outcome: "cancelled",
+  });
+});
 test("Cursor task lifecycle stays labeled as native delegation when updates omit its name", () => {
   const ids = new Set();
   assert.equal(

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { providerName } from "./voice.mjs";
+import { QuestionField, questionId, questionAnswer } from "./question-form.jsx";
 
 const paths = {
   attach: "m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9m-2 14 7-7",
@@ -126,12 +127,19 @@ export function Modal({ title, children, onClose, wide = false }) {
 }
 
 export function Approval({ approval, onAnswer }) {
-  const [answers, setAnswers] = useState({}),
+  const [responses, setResponses] = useState({}),
     [submitting, setSubmitting] = useState(false),
     r = approval.request;
-  const questionId = (q) => q.id ?? q.question ?? q.header;
+  const answers = Object.fromEntries(
+    (r.questions ?? []).map((q) => [
+      questionId(q),
+      questionAnswer(q, responses[questionId(q)]),
+    ]),
+  );
   const [problem, setProblem] = useState("");
   const respond = async (answer) => {
+    if (submitting) return;
+    setProblem("");
     setSubmitting(true);
     try {
       await onAnswer(answer);
@@ -159,45 +167,15 @@ export function Approval({ approval, onAnswer }) {
         </div>
       ) : r.kind === "question" ? (
         r.questions?.map((q) => (
-          <label key={questionId(q)}>
-            {q.question ?? q.header}
-            {q.selectionOnly ? (
-              <select
-                multiple={q.multiple}
-                value={answers[questionId(q)] ?? (q.multiple ? [] : "")}
-                onChange={(e) =>
-                  setAnswers({
-                    ...answers,
-                    [questionId(q)]: q.multiple
-                      ? [...e.target.selectedOptions].map((o) => o.value)
-                      : e.target.value,
-                  })
-                }
-              >
-                <option value="" disabled>
-                  Choose an option
-                </option>
-                {q.options.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                list={"options-" + questionId(q)}
-                value={answers[questionId(q)] ?? ""}
-                onChange={(e) =>
-                  setAnswers({ ...answers, [questionId(q)]: e.target.value })
-                }
-              />
-            )}
-            <datalist id={"options-" + questionId(q)}>
-              {q.options?.map((o) => (
-                <option key={o.label ?? o} value={o.label ?? o} />
-              ))}
-            </datalist>
-          </label>
+          <QuestionField
+            key={questionId(q)}
+            question={q}
+            value={responses[questionId(q)]}
+            disabled={submitting}
+            onChange={(value) =>
+              setResponses((prior) => ({ ...prior, [questionId(q)]: value }))
+            }
+          />
         ))
       ) : (
         <details>
@@ -219,11 +197,7 @@ export function Approval({ approval, onAnswer }) {
           disabled={
             submitting ||
             (r.kind === "question" &&
-              r.questions?.some((q) =>
-                Array.isArray(answers[questionId(q)])
-                  ? !answers[questionId(q)].length
-                  : !answers[questionId(q)]?.trim(),
-              ))
+              r.questions?.some((q) => answers[questionId(q)] === undefined))
           }
           onClick={() => respond({ allow: true, answers })}
         >

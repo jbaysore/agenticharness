@@ -185,6 +185,46 @@ export async function inspectCursor(cwd, confirmation) {
     rpc.close();
   }
 }
+// Cursor's ACP bridge forwards selected IDs but drops freeformText. Its skipped
+// reason does reach the native tool, so carry custom answers there verbatim.
+export function cursorQuestionOutcome(questions, answer) {
+  if (!answer.allow) return { outcome: "cancelled" };
+  let custom = false;
+  const answers = questions.map((q) => {
+    const raw = answer.answers?.[q.id],
+      values = (Array.isArray(raw) ? raw : [raw]).filter(
+        (value) => typeof value === "string" && value.trim(),
+      ),
+      options = q.options ?? [],
+      selectedOptionIds = [],
+      text = values.map((value) => {
+        const option = options.find((o) => o.id === value || o.label === value);
+        if (option) {
+          selectedOptionIds.push(option.id);
+          return option.label;
+        }
+        custom = true;
+        return value;
+      });
+    return { questionId: q.id, selectedOptionIds, text };
+  });
+  if (!answers.length || answers.some((a) => !a.text.length))
+    return { outcome: "cancelled" };
+  if (custom)
+    return {
+      outcome: "skipped",
+      reason:
+        "The user supplied these answers, including an Other response. Use them to continue:\n" +
+        questions
+          .map((q, i) => `${q.prompt ?? q.id}: ${answers[i].text.join(", ")}`)
+          .join("\n"),
+    };
+  return {
+    outcome: "answered",
+    answers: answers.map(({ text, ...selection }) => selection),
+  };
+}
+
 export async function runCursor(ctx) {
   const auth = await cursorAuth(),
     reason = checkAccountConfirmation(
@@ -239,22 +279,9 @@ export async function runCursor(ctx) {
           })),
           details: m.params,
         });
-        const answers = questions.map((q) => {
-          const raw = answer.answers?.[q.id],
-            values = Array.isArray(raw) ? raw : [raw];
-          return {
-            questionId: q.id,
-            selectedOptionIds: q.options
-              .filter((o) => values.includes(o.id) || values.includes(o.label))
-              .map((o) => o.id),
-          };
-        });
         if (!rpc.closed)
           rpc.respond(m.id, {
-            outcome:
-              answer.allow && answers.every((a) => a.selectedOptionIds.length)
-                ? { outcome: "answered", answers }
-                : { outcome: "cancelled" },
+            outcome: cursorQuestionOutcome(questions, answer),
           });
       } else if (m.method === "cursor/create_plan") {
         // In plan mode the plan is the user's to accept, as it is in Cursor.

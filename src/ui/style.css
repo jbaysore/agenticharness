@@ -2569,8 +2569,131 @@ small {
   background: var(--signal);
   color: #2b2400;
 }
-.approval label {
-  margin: 12px 0;
+.agent-question {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 20px 0 0;
+}
+.agent-question legend {
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.question-hint {
+  margin: 5px 0 10px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.question-options {
+  display: grid;
+  gap: 8px;
+}
+.question-option {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast),
+    background var(--dur-fast);
+}
+.question-option + .question-option {
+  margin-top: 0;
+}
+.question-option:hover {
+  background: var(--surface-2);
+  border-color: var(--line-stronger);
+}
+.question-option.selected {
+  border-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 7%, var(--surface));
+}
+.question-option:has(input:focus-visible) {
+  outline: 2px solid var(--signal);
+  outline-offset: 3px;
+}
+.question-option input {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+}
+.question-option-mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 1px solid var(--line-stronger);
+  border-radius: 50%;
+  background: var(--bg);
+}
+.question-option input[type="checkbox"] + .question-option-mark {
+  border-radius: 4px;
+}
+.question-option input:checked + .question-option-mark {
+  border-color: var(--signal);
+  background: var(--signal);
+}
+.question-option input:checked + .question-option-mark::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2b2400;
+}
+.question-option input[type="checkbox"]:checked + .question-option-mark::after {
+  width: 5px;
+  height: 9px;
+  border: solid #2b2400;
+  border-width: 0 2px 2px 0;
+  border-radius: 0;
+  background: none;
+  transform: translateY(-1px) rotate(45deg);
+}
+.question-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.question-option-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.question-option-description {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.agent-question:disabled .question-option {
+  cursor: default;
+  opacity: 0.6;
+}
+.question-custom {
+  margin-top: 12px;
+}
+.question-custom textarea {
+  min-height: 84px;
+  line-height: 1.5;
+}
+.question-custom textarea:focus-visible {
+  border-color: var(--signal);
 }
 .approval .plan-body {
   max-height: 420px;
