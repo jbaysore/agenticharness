@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { buildSteps, settle } from "./steps.mjs";
 import { provisionalTitle } from "./history.mjs";
+import { blockingGoals, goalStatus, sessionGoals } from "./goals.mjs";
 
 const historyScopes = ["none", "project", "all"];
 
@@ -117,6 +118,7 @@ export class Store {
       this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
     if (this.setting("default-history-scope") === null)
       this.setting("default-history-scope", "all");
+    this.protectLegacyGoals();
   }
 
   close() {
@@ -202,6 +204,64 @@ export class Store {
       )
       .all()
       .map(summarize);
+  }
+  protectLegacyGoals(id) {
+    const rows = id
+      ? this.db
+          .prepare("SELECT id,mode,sessions FROM conversations WHERE id=?")
+          .all(id)
+      : this.db
+          .prepare(
+            "SELECT id,mode,sessions FROM conversations WHERE mode='goal'",
+          )
+          .all();
+    for (const row of rows) {
+      const chat = { ...row, sessions: JSON.parse(row.sessions) };
+      let changed = false;
+      for (const { provider, status } of sessionGoals(chat)) {
+        const session = chat.sessions[provider];
+        if (session?.goal) continue;
+        chat.sessions[provider] = {
+          ...(typeof session === "string" ? { id: session } : session),
+          goal: { status },
+        };
+        changed = true;
+      }
+      // Migration must not reorder saved conversations.
+      if (changed)
+        this.db
+          .prepare("UPDATE conversations SET sessions=? WHERE id=?")
+          .run(JSON.stringify(chat.sessions), row.id);
+    }
+  }
+  restartBlockingGoals() {
+    return this.db
+      .prepare("SELECT id,mode,sessions FROM conversations")
+      .all()
+      .flatMap((row) =>
+        blockingGoals({ ...row, sessions: JSON.parse(row.sessions) }).map(
+          (goal) => ({ ...goal, conversationId: row.id }),
+        ),
+      );
+  }
+  setGoalState(id, provider, runId, status) {
+    const chat = this.conversation(id);
+    if (!chat) return;
+    const previous = chat.sessions[provider];
+    const session = typeof previous === "string" ? { id: previous } : previous;
+    return this.updateConversation(id, {
+      sessions: {
+        ...chat.sessions,
+        [provider]: { ...session, goal: { runId, status: goalStatus(status) } },
+      },
+    });
+  }
+  stopGoals(id) {
+    const chat = this.conversation(id);
+    const goals = blockingGoals(chat);
+    for (const goal of goals)
+      this.setGoalState(id, goal.provider, goal.runId, "paused");
+    return goals.length;
   }
   conversation(id) {
     const c = this.db.prepare(`${summary} WHERE c.id=?`).get(id);
@@ -306,6 +366,8 @@ export class Store {
   updateConversation(id, fields) {
     if (Object.hasOwn(fields, "scope"))
       throw new Error("History scope is fixed when a conversation is created");
+    // Freeze legacy protection before a mode/provider change can hide it.
+    this.protectLegacyGoals(id);
     const allowed = new Set([
       "title",
       "provider",
@@ -331,6 +393,7 @@ export class Store {
           this.now(),
           id,
         );
+    this.protectLegacyGoals(id);
     return this.conversation(id);
   }
   messages(id) {

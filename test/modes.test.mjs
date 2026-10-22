@@ -64,6 +64,7 @@ function fakeClaude(ctx, during = async () => {}) {
             const first = await prompt[Symbol.asyncIterator]().next();
             seen.message = first.value.message.content;
             await during(options);
+            if (ctx.mode === "goal") yield { type: "active_goal", value: null };
             yield { type: "result", is_error: false };
           },
         };

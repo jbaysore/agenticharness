@@ -59,7 +59,14 @@ async function fixture(port = 0) {
     async close() {
       await launch("--stop");
       assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep));
-      await rm(root, { recursive: true, force: true });
+      // Windows can briefly retain the fixture host's working-directory handle
+      // after shutdown has acknowledged and its launcher has exited.
+      await rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 100,
+      });
     },
   };
 }

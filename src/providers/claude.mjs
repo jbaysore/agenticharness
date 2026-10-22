@@ -12,6 +12,7 @@ import { AsyncQueue } from "../core/queue.mjs";
 import { historyTools } from "../core/history.mjs";
 import { claudeQuestionAnswers } from "../core/questions.mjs";
 import { proposalText } from "../core/plans.mjs";
+import { goalStopped } from "../core/goals.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { claudeContent } from "./attachments.mjs";
@@ -515,7 +516,10 @@ export async function runClaude(
     polling = false,
     finished = false,
     accepting = false,
-    stopped = null;
+    stopped = null,
+    goalStatus =
+      ctx.mode === "goal" ? "unknown" : (ctx.session?.goal?.status ?? null),
+    pendingResult = null;
   const cancel = () => {
     q.interrupt().catch(() => q.close());
     killTimer ??= setTimeout(() => q.close(), 8000);
@@ -568,7 +572,11 @@ export async function runClaude(
     }, pollIntervalMs);
     for await (const event of q) {
       if (event.session_id) ctx.saveSession({ id: event.session_id });
-      if (event.type === "active_goal")
+      if (["assistant", "stream_event", "user"].includes(event.type))
+        pendingResult = null;
+      if (event.type === "active_goal") {
+        goalStatus = event.value ? "active" : "complete";
+        ctx.goalState?.(goalStatus);
         ctx.emit("work", {
           kind: "goal",
           provider: "claude",
@@ -584,6 +592,8 @@ export async function runClaude(
               }
             : { title: "Goal met" },
         });
+        if (goalStopped(goalStatus) && pendingResult) return pendingResult;
+      }
       if (event.type === "system" && event.subtype === "init" && event.model)
         ctx.emit("nativeModel", { model: event.model, requested: ctx.model });
       if (event.type === "stream_event" && !event.parent_tool_use_id) {
@@ -688,7 +698,7 @@ export async function runClaude(
           estimatedCostUsd: event.total_cost_usd,
           label: "Provider token/cost estimate; not a charge or quota meter",
         });
-        return {
+        const result = {
           status: ctx.signal.aborted
             ? "cancelled"
             : stopped || event.is_error
@@ -696,6 +706,15 @@ export async function runClaude(
               : "completed",
           error: stopped || event.errors?.join("\n"),
         };
+        if (
+          result.status === "completed" &&
+          (ctx.mode === "goal" || goalStatus === "active") &&
+          !goalStopped(goalStatus)
+        ) {
+          pendingResult = result;
+          continue;
+        }
+        return result;
       }
     }
     throw new Error(stopped || "Claude ended without a final result");
@@ -710,5 +729,6 @@ export async function runClaude(
     ctx.signal.removeEventListener("abort", cancel);
     input.end();
     q.close();
+    if (stopped) ctx.goalState?.("usageLimited");
   }
 }

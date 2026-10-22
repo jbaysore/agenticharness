@@ -67,6 +67,7 @@ import {
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
 import { restartTool } from "./self-restart.mjs";
+import { blockingGoals, goalStopped } from "./goals.mjs";
 import {
   createWorktree,
   landTool,
@@ -670,6 +671,11 @@ export class Controller extends EventEmitter {
       this.releaseQueue(chat.id);
       return;
     }
+    if (
+      chat.mode === "goal" ||
+      blockingGoals(chat).some((g) => g.provider === run.provider)
+    )
+      this.store.setGoalState(chat.id, run.provider, run.id, "starting");
     let actualModel =
       this.providers
         .find((p) => p.id === run.provider)
@@ -1273,6 +1279,18 @@ export class Controller extends EventEmitter {
       billingConfirmation: this.store.setting("cursor-billing"),
       learnEfforts: (options) => this.learnCursorEfforts(options),
       saveSession: (incoming) => writeSession(incoming),
+      goalState: (status) => {
+        // A stopped/replaced runner cannot release a newer session's hold.
+        if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id)
+          return;
+        const updated = this.store.setGoalState(
+          chat.id,
+          run.provider,
+          run.id,
+          status,
+        );
+        this.event(chat.id, run.id, "chat", updated);
+      },
       history: async (name, args) => {
         const input =
           typeof args === "string" ? JSON.parse(args) : (args ?? {});
@@ -1375,6 +1393,13 @@ export class Controller extends EventEmitter {
         nextModeChange,
       );
     }
+    if (active?.goalStopRequested) this.store.stopGoals(chat.id);
+    else {
+      const goal = this.store.conversation(chat.id)?.sessions[run.provider]
+        ?.goal;
+      if (goal?.runId === run.id && !goalStopped(goal.status))
+        this.store.setGoalState(chat.id, run.provider, run.id, "unknown");
+    }
     this.store.setRun(run.id, status, null, error ?? null);
     this.requeuePending(active);
     this.event(chat.id, run.id, "run", {
@@ -1396,6 +1421,7 @@ export class Controller extends EventEmitter {
         },
       );
     this.active.delete(chat.id);
+    this.event(chat.id, null, "chat", this.store.conversation(chat.id));
     if (!active?.pendingMove && project?.worktree) this.tidy(chat.id);
     this.releaseQueue(chat.id);
   }
@@ -1538,11 +1564,19 @@ export class Controller extends EventEmitter {
     const active = this.active.get(chatId);
     if (active) {
       active.cancelled = true;
+      active.goalStopRequested = true;
       active.abort.abort();
       this.event(chatId, active.run.id, "work", {
         kind: "cancellation",
         text: "Stop requested. Waiting for the agent to acknowledge.",
       });
+    } else if (this.store.stopGoals(chatId)) {
+      this.event(chatId, null, "chat", this.store.conversation(chatId));
+      this.event(chatId, null, "work", {
+        kind: "cancellation",
+        text: "Goal stopped at your request.",
+      });
+      return { requested: true };
     }
     return { requested: !!active };
   }

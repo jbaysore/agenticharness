@@ -16,6 +16,9 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { setImmediate as nextTick } from "node:timers/promises";
+import { runCodex } from "../src/providers/codex.mjs";
 import { backup } from "node:sqlite";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
@@ -272,6 +275,234 @@ test("delivered steer receipts do not block a later safe restart", async () => {
     assert.equal(f.stopped, true);
   } finally {
     await f.close();
+  }
+});
+
+test("Goals block automatic updates without an active run, across projects and mode changes", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  const f = await fixture({ idleMs: 5000 });
+  try {
+    const other = f.store.addProject("Other project", f.root);
+    const chat = f.store.createConversation({
+      projectId: other.id,
+      mode: "goal",
+    });
+    const unused = f.store.createConversation({
+      projectId: other.id,
+      mode: "goal",
+    });
+    assert.equal(f.store.restartBlockingGoals().length, 0);
+    f.store.setGoalState(chat.id, "codex", "goal-run", "active");
+    f.store.updateConversation(chat.id, { mode: "plan", provider: "claude" });
+    f.store.setArchived(chat.id, true);
+    const commit = await f.bump();
+    await f.coordinator.request(f.source, "default", {
+      automatic: true,
+      commit,
+    });
+    await f.coordinator.tick();
+    t.mock.timers.tick(15000);
+    await f.coordinator.tick();
+    assert.equal(f.controller.active.size, 0);
+    assert.equal(f.store.activeRuns().length, 0);
+    assert.equal(f.handoffs.length, 0);
+    assert.equal(f.stopped, false);
+    assert.deepEqual(f.coordinator.status().blockers, [
+      "Unfinished or unconfirmed Goal sessions",
+    ]);
+    assert.equal(f.store.conversation(unused.id).mode, "goal");
+    f.store.setGoalState(chat.id, "codex", "goal-run", "unknown");
+    await f.coordinator.tick();
+    assert.equal(f.coordinator.idleSince, null);
+    f.store.setGoalState(chat.id, "codex", "goal-run", "complete");
+    await f.coordinator.tick();
+    assert.equal(f.handoffs.length, 0);
+    t.mock.timers.tick(4999);
+    await f.coordinator.tick();
+    assert.equal(f.handoffs.length, 0);
+    t.mock.timers.tick(1);
+    await f.coordinator.tick();
+    assert.equal(f.stopped, true);
+  } finally {
+    await f.close();
+  }
+});
+
+test("every Goal must stop and native work must settle before switching", async () => {
+  const f = await fixture();
+  try {
+    const second = f.store.createConversation({
+      projectId: f.project.id,
+      mode: "goal",
+    });
+    const run = f.store.createRun({
+      conversationId: f.chat.id,
+      actionId: randomUUID(),
+      provider: "codex",
+      model: "fixture",
+      text: "Goal",
+    });
+    f.store.setGoalState(f.chat.id, "codex", run.id, "active");
+    f.store.setGoalState(second.id, "claude", "other-goal", "active");
+    await f.coordinator.request(f.source, "goal");
+    for (const status of [
+      "complete",
+      "paused",
+      "blocked",
+      "usageLimited",
+      "budgetLimited",
+      "cleared",
+    ]) {
+      f.store.setGoalState(f.chat.id, "codex", run.id, status);
+      await f.coordinator.tick();
+      assert.equal(f.handoffs.length, 0);
+    }
+    f.store.setGoalState(second.id, "claude", "other-goal", "complete");
+    await f.coordinator.tick();
+    assert.deepEqual(f.coordinator.status().blockers, ["Active chats"]);
+    assert.equal(f.handoffs.length, 0);
+    f.store.setRun(run.id, "completed");
+    await f.coordinator.tick();
+    assert.equal(f.stopped, true);
+  } finally {
+    await f.close();
+  }
+});
+
+test("automatic restart leaves a real Codex runner alive between Goal turns", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"] });
+  const f = await fixture({ idleMs: 5000 });
+  const rpc = new EventEmitter(),
+    started = Promise.withResolvers(),
+    calls = [];
+  let closed = false;
+  const notify = (method, params) =>
+    rpc.emit("notification", {
+      method,
+      params: { threadId: "goal-session", ...params },
+    });
+  rpc.close = () => {
+    if (closed) return;
+    closed = rpc.closed = true;
+    rpc.emit("closed", new Error("Fixture closed"));
+  };
+  rpc.call = async (method, params) => {
+    calls.push(method);
+    if (method === "account/read")
+      return { account: { type: "chatgpt", planType: "pro" } };
+    if (method === "account/rateLimits/read")
+      return {
+        ordinaryUsageAllowed: true,
+        rateLimits: {
+          primary: { usedPercent: 1 },
+          credits: { hasCredits: false, unlimited: false, balance: "0" },
+        },
+      };
+    if (method === "config/read")
+      return { config: { model_provider: "openai" } };
+    if (method === "thread/start") return { thread: { id: "goal-session" } };
+    if (method === "thread/goal/set") {
+      setImmediate(() => {
+        notify("turn/started", { turn: { id: "goal-turn" } });
+        started.resolve();
+      });
+      return { goal: { status: params.status } };
+    }
+    assert.fail("Unexpected RPC: " + method);
+  };
+  try {
+    f.controller.providers = [
+      {
+        id: "codex",
+        connected: true,
+        models: [{ id: "fixture", efforts: [] }],
+      },
+    ];
+    f.controller.runners.codex = (ctx) =>
+      runCodex(ctx, { open: async () => rpc });
+    f.store.updateConversation(f.chat.id, { mode: "goal" });
+    f.controller.send(f.chat.id, {
+      actionId: "goal-restart-end-to-end",
+      text: "Finish the goal",
+      provider: "codex",
+      model: "fixture",
+    });
+    const work = f.controller.active.get(f.chat.id);
+    await started.promise;
+    await nextTick();
+    notify("turn/completed", {
+      turn: { id: "goal-turn", status: "completed" },
+    });
+    const commit = await f.bump();
+    await f.coordinator.request(f.source, "default", {
+      automatic: true,
+      commit,
+    });
+    await f.coordinator.tick();
+    t.mock.timers.tick(15000);
+    await nextTick();
+    await f.coordinator.tick();
+    assert.equal(f.stopped, false);
+    assert.equal(f.handoffs.length, 0);
+    assert.equal(work.abort.signal.aborted, false);
+    assert.equal(closed, false);
+    assert.equal(f.controller.active.get(f.chat.id), work);
+    assert.equal(calls.includes("turn/interrupt"), false);
+    assert.equal(calls.filter((m) => m === "thread/goal/set").length, 1);
+    notify("thread/goal/updated", { goal: { status: "complete" } });
+    await work.task;
+    assert.equal(f.store.restartBlockingGoals().length, 0);
+    await f.coordinator.tick();
+    t.mock.timers.tick(5000);
+    await f.coordinator.tick();
+    assert.equal(f.stopped, true);
+  } finally {
+    rpc.close();
+    await f.controller.close();
+    await f.close();
+  }
+});
+
+test("a Goal appearing during either final restart check cancels the switch", async () => {
+  for (const phase of ["source", "helper"]) {
+    const f = await fixture();
+    let cancelled = false;
+    try {
+      await f.coordinator.request(f.source, "default");
+      const start = () =>
+        f.store.setGoalState(f.chat.id, "codex", "late-goal", "active");
+      if (phase === "source") {
+        let checked = 0;
+        const ready = f.coordinator.sourceReady.bind(f.coordinator);
+        f.coordinator.sourceReady = async (revision) => {
+          const result = await ready(revision);
+          if (++checked === 2) start();
+          return result;
+        };
+      } else {
+        const handoff = f.coordinator.handoff;
+        f.coordinator.handoff = async (spec) => {
+          const helper = await handoff(spec);
+          start();
+          return {
+            ...helper,
+            cancel() {
+              cancelled = true;
+            },
+          };
+        };
+      }
+      await f.coordinator.tick();
+      assert.equal(f.stopped, false);
+      assert.equal(f.coordinator.gated, false);
+      assert.deepEqual(f.coordinator.status().blockers, [
+        "Unfinished or unconfirmed Goal sessions",
+      ]);
+      if (phase === "helper") assert.equal(cancelled, true);
+      else assert.equal(f.handoffs.length, 0);
+    } finally {
+      await f.close();
+    }
   }
 });
 

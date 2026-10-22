@@ -21,7 +21,7 @@ const pending = new Set(["queued", "preparing", "waiting"]);
 export const restartTool = {
   name: "restart_harness",
   description:
-    "Queue a safe Harness self restart. Only available when working on Harness itself in Default or Goal mode. Returns immediately; finish this turn normally and report that the restart is queued. Harness waits for all chats, queued messages, approvals and live terminals, prepares and checks the committed version, and restores the previous runtime if startup fails. Repeated calls return the pending request. Never claim a queued restart has completed.",
+    "Queue a safe Harness self restart. Only available when working on Harness itself in Default or Goal mode. Returns immediately; finish this turn normally and report that the restart is queued. Harness waits for all chats, unfinished or unconfirmed Goals, queued messages, approvals and live terminals, prepares and checks the committed version, and restores the previous runtime if startup fails. A continuing Goal can postpone the update indefinitely; never stop a Goal just to apply it. Repeated calls return the pending request. Never claim a queued restart has completed.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
 };
 export async function repositoryIdentity(path) {
@@ -300,6 +300,8 @@ export class SelfRestart {
     const reasons = [];
     if (this.controller.active.size || this.store.activeRuns().length)
       reasons.push("Active chats");
+    if (this.store.restartBlockingGoals().length)
+      reasons.push("Unfinished or unconfirmed Goal sessions");
     // Delivered steers remain as deduplication receipts, not waiting work.
     if (
       this.store.db
@@ -445,10 +447,12 @@ export class SelfRestart {
       environment: this.environment ?? {},
     });
     const finalSourceBlock = await this.sourceReady(target);
-    if (finalSourceBlock || this.stopped) {
+    const finalBlockers = this.blockers();
+    if (finalSourceBlock || finalBlockers.length || this.stopped) {
       helper.cancel?.();
       this.gated = false;
-      if (!this.stopped) return wait([finalSourceBlock]);
+      if (!this.stopped)
+        return wait(finalSourceBlock ? [finalSourceBlock] : finalBlockers);
       return;
     }
     this.state.previous = this.fallback;

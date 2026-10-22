@@ -30,6 +30,7 @@ import {
 import { elapsed, greeting, providerName, workingLine } from "./voice.mjs";
 import { StepSummary } from "./steps.jsx";
 import { interleave } from "../core/steps.mjs";
+import { blockingGoals } from "../core/goals.mjs";
 
 // A turn's byline names the agent once, and the model only when it changed.
 // Below it the turn reads in order: short progress updates, each followed by
@@ -735,6 +736,12 @@ export function ChatPane({
             Send a message to continue after resolving the issue.
           </div>
         )}
+        {!chat?.activeRun && blockingGoals(chat).length > 0 && (
+          <div className="notice">
+            This Goal has not been confirmed stopped, so Harness updates are
+            waiting. Send a message to continue, or use Stop work to stop it.
+          </div>
+        )}
         {/* A finished plan that was not confirmed in the turn uses the same
             card. Confirming leaves plan mode and builds. Keep planning hides
             it for that run, including after Cursor declines its plan. */}
@@ -929,7 +936,7 @@ export function ChatPane({
               onOpenConnections={onOpenConnections}
             />
             <span className="composer-spacer" />
-            {chat?.activeRun && (
+            {(chat?.activeRun || blockingGoals(chat).length > 0) && (
               <button
                 type="button"
                 className="send-button stopping"

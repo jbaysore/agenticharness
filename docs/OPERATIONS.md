@@ -519,6 +519,15 @@ then checks five seconds of idle time before switching. Close terminal tabs to
 allow an update; waiting never stops work for you. Uncommitted source changes or
 a changed source branch also postpone the switch.
 
+An unfinished or unconfirmed Goal blocks the switch even between native turns,
+after a provider disconnect, or when its chat is archived or changes modes.
+Harness never stops a Goal to apply an update; a continuing Goal can delay it
+indefinitely. Confirmed completion, pause, blocking, or usage/budget limits allow
+the update after all work settles and a fresh idle interval passes. Saved Goal
+sessions from older versions have unconfirmed status until resumed or explicitly
+stopped. For an unconfirmed Goal with no live run, send a message to continue or
+use **Stop work** to release its hold.
+
 A hidden helper keeps the same Windows session, port and configuration, takes a
 private SQLite recovery copy and starts the replacement. Startup must pass its
 readiness and revision checks before new work is admitted. A failed startup

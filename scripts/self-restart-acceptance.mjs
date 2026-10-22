@@ -73,17 +73,43 @@ try {
     page.getByText("Fixture complete.", { exact: true }).first(),
   ).toBeVisible();
   await input.fill("Unsent draft survives a Harness update");
+  const goalChat = app.store.conversations()[0];
+  app.store.setGoalState(goalChat.id, "codex", "unconfirmed-goal", "unknown");
+  app.controller.event(
+    goalChat.id,
+    null,
+    "chat",
+    app.store.conversation(goalChat.id),
+  );
+  await expect(
+    page.getByText("This Goal has not been confirmed stopped", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Stop work", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Stop work", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Stop work", exact: true }),
+  ).not.toBeVisible();
+  if (app.store.restartBlockingGoals().length)
+    throw new Error("Explicit Stop did not release the unconfirmed Goal hold");
+  await expect(input).toHaveValue("Unsent draft survives a Harness update");
   await page.evaluate(() => {
     window.restartBrowserMarker = true;
   });
   app.controller.event(null, null, "self-restart", {
     id: "browser-fixture",
     status: "waiting",
-    blockers: ["Open terminals"],
+    blockers: ["Unfinished or unconfirmed Goal sessions", "Open terminals"],
   });
   await expect(
     page.getByRole("status", { name: "Harness update status" }),
   ).toContainText("open terminals");
+  await expect(
+    page.getByRole("status", { name: "Harness update status" }),
+  ).toContainText("unfinished or unconfirmed goal sessions");
   const dialog = page.getByRole("dialog", { name: "Harness is restarting" });
   await expect(dialog).not.toBeVisible();
   allowUse = false;
@@ -196,7 +222,7 @@ try {
   await expect(input).toBeFocused();
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
-    "Passed: restart progress modal, desktop/mobile layout, readiness-based dismissal, rollback feedback, host/client reload, draft recovery, and no replay; no inference.",
+    "Passed: unconfirmed Goal stop and waiting feedback, restart progress modal, desktop/mobile layout, readiness-based dismissal, rollback feedback, host/client reload, draft recovery, and no replay; no inference.",
   );
 } finally {
   releaseWorkspace?.();
