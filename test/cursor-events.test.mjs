@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   configureCursorModel,
   cursorConfigDrift,
+  cursorMessageIds,
   cursorModels,
   cursorQuestionOutcome,
   cursorSpeedFollowUp,
@@ -255,4 +256,48 @@ test("configuring a native Cursor model confirms standard speed", async () => {
     ["model", "composer-2.5"],
     ["fast", "false"],
   ]);
+});
+
+test("a Cursor session already on the model at standard speed is not reconfigured", async () => {
+  const rpc = {
+    async call() {
+      throw new Error("no configuration call expected");
+    },
+  };
+  const current = [
+    { id: "model", currentValue: "grok-4.7" },
+    { id: "fast", currentValue: "false", options: [{ value: "false" }] },
+  ];
+  assert.deepEqual(
+    await configureCursorModel(rpc, "session-1", "grok-4.7", current),
+    { configOptions: current },
+  );
+  await assert.rejects(
+    configureCursorModel(rpc, "session-1", "composer-2.5", current),
+    /no configuration call expected/,
+  );
+});
+
+test("Cursor text either side of a tool call becomes separate messages", () => {
+  const id = cursorMessageIds(),
+    text = (t) => ({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: t },
+    });
+  assert.equal(id(text("I'll look.")), "cursor-response-1");
+  assert.equal(id(text(" Then edit.")), "cursor-response-1");
+  assert.equal(id({ sessionUpdate: "tool_call", toolCallId: "a" }), null);
+  assert.equal(
+    id({ sessionUpdate: "tool_call_update", toolCallId: "a" }),
+    null,
+  );
+  assert.equal(id(text("Found it.")), "cursor-response-2");
+  assert.equal(
+    id({
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "x" },
+    }),
+    null,
+  );
+  assert.equal(id(text(" Done.")), "cursor-response-2");
 });

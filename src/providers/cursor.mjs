@@ -122,7 +122,15 @@ export function cursorConfigDrift(configOptions, requestedId) {
     return "fast";
   return null;
 }
-export async function configureCursorModel(rpc, sessionId, modelId) {
+// A new or loaded session usually already has the requested model at standard
+// speed, which saves two round trips to Cursor before the turn.
+export async function configureCursorModel(rpc, sessionId, modelId, current) {
+  if (
+    current?.find((option) => option.id === "model")?.currentValue ===
+      modelId &&
+    !cursorSpeedFollowUp(current)
+  )
+    return { configOptions: current };
   let configured = await rpc.call("session/set_config_option", {
     sessionId,
     configId: "model",
@@ -160,6 +168,23 @@ export function cursorWorkKind(update, nativeTasks) {
   return nativeTasks.has(update.toolCallId)
     ? "native-subagent"
     : update.sessionUpdate;
+}
+// ACP streams every text chunk of a turn alike. A tool call ends one message,
+// as it does in Cursor, so the prose either side of it is not run together.
+export function cursorMessageIds() {
+  let count = 0,
+    open = false;
+  return (update) => {
+    if (update.sessionUpdate === "tool_call") open = false;
+    if (
+      update.sessionUpdate !== "agent_message_chunk" ||
+      update.content?.type !== "text"
+    )
+      return null;
+    if (!open) count++;
+    open = true;
+    return `cursor-response-${count}`;
+  };
 }
 export async function inspectCursor(cwd, confirmation) {
   const auth = await cursorAuth();
@@ -243,17 +268,28 @@ export function cursorQuestionOutcome(questions, answer) {
 }
 
 export async function runCursor(ctx) {
-  const auth = await cursorAuth(),
-    reason = checkAccountConfirmation(
+  // Starting Cursor while its status is checked saves a second; nothing is
+  // sent to a session until the account is confirmed.
+  const [status, opened] = await Promise.allSettled([
+    cursorAuth(),
+    openCursor(ctx.project.path),
+  ]);
+  const reason =
+    status.status === "fulfilled" &&
+    (checkAccountConfirmation(
       ctx.billingConfirmation,
-      auth.fingerprint,
-    );
-  if (!auth.connected || reason)
-    throw new Error(reason ?? "Cursor is signed out");
-  const rpc = await openCursor(ctx.project.path);
+      status.value.fingerprint,
+    ) ??
+      (status.value.connected ? null : "Cursor is signed out"));
+  if (status.status === "rejected" || reason) {
+    if (opened.status === "fulfilled") opened.value.close();
+    throw status.status === "rejected" ? status.reason : new Error(reason);
+  }
+  if (opened.status === "rejected") throw opened.reason;
+  const rpc = opened.value,
+    messageId = cursorMessageIds();
   let sessionId,
     live = false,
-    nativeId = "cursor-response",
     killTimer;
   const nativeTasks = new Set();
   const cancel = () => {
@@ -335,11 +371,8 @@ export async function runCursor(ctx) {
     if (!live) return;
     const update = p?.update;
     if (method === "session/update" && update) {
-      if (
-        update.sessionUpdate === "agent_message_chunk" &&
-        update.content?.type === "text"
-      )
-        ctx.emit("text", { nativeId, delta: update.content.text });
+      const nativeId = messageId(update);
+      if (nativeId) ctx.emit("text", { nativeId, delta: update.content.text });
       if (
         ["tool_call", "tool_call_update", "plan", "usage_update"].includes(
           update.sessionUpdate,
@@ -388,7 +421,12 @@ export async function runCursor(ctx) {
       throw new Error(
         "Choose an available standard Cursor preset from the live ACP catalog",
       );
-    await configureCursorModel(rpc, sessionId, ctx.model);
+    await configureCursorModel(
+      rpc,
+      sessionId,
+      ctx.model,
+      session.configOptions,
+    );
     // Cursor's own read-only Plan mode; a saved session keeps its last mode.
     await rpc.call("session/set_mode", {
       sessionId,
