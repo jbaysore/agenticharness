@@ -103,6 +103,14 @@
     Cursor model can be a worker without a usage meter.
 25. Per-project overrides for the rules, and further rules.
 
+## Future plans
+
+- [Optional cloud execution](CLOUD-EXECUTION-PLAN.md) (deferred): evaluate a limited
+  Codex Cloud integration first, then an always-on personal Windows host if all
+  providers are needed. Workers managed by Harness remain a later option. Preserve
+  subscription-only usage and validate permissions, recovery, and result delivery
+  before enabling any cloud route. Implementation is not scheduled.
+
 ## Architecture notes
 
 - Preserve app-owned SQLite history; no paid summary/embedding dependency.
