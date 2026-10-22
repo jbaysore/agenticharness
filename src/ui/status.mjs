@@ -84,10 +84,10 @@ export function attentionCount(conversations) {
   return activeChats(conversations).filter((c) => chatMarker(c) !== "running")
     .length;
 }
-// Remaining included usage, one row per provider limit window.
+// Remaining included usage, one row per reported limit window. An exhausted
+// reading still carries those windows; only a reading with no percents is blank.
 export function usageWindows(provider) {
-  if (!provider?.usage?.authoritative && !provider?.usage?.lastConfirmedAt) return [];
-  return (provider.usage.windows ?? [])
+  return (provider?.usage?.windows ?? [])
     .filter((w) => typeof w.usedPercent === "number")
     .map((w) => {
       // Claude's native meters use session/weekly_all/weekly_scoped; older

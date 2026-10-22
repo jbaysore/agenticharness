@@ -197,6 +197,31 @@ test("the header shows the tightest usage window for each provider", () => {
     usageWindows({
       id: "claude",
       usage: {
+        authoritative: false,
+        windows: [
+          { bucket: "session", usedPercent: 100 },
+          { bucket: "weekly_all", usedPercent: 40 },
+        ],
+      },
+    }).map((w) => [w.name, w.remaining]),
+    [
+      ["5-hour limit", 0],
+      ["Weekly limit", 60],
+    ],
+  );
+  assert.deepEqual(
+    usageWindows({
+      id: "claude",
+      connected: true,
+      blockReason: "The Claude CLI could not verify that paid extra usage is disabled.",
+      usage: { authoritative: false, windows: [] },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    usageWindows({
+      id: "claude",
+      usage: {
         authoritative: true,
         windows: [
           { bucket: "five_hour", usedPercent: 10 },

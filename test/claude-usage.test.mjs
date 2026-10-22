@@ -188,6 +188,56 @@ test("confirmed unsafe fields stop a verified turn even in an otherwise partial 
   }
 });
 
+test("an exhausted report keeps both header bars without a prior confirmation", () => {
+  const limits = [
+    { kind: "session", percent: 100, resets_at: "2026-10-22T18:00:00.000Z" },
+    { kind: "weekly_all", percent: 40, resets_at: "2026-10-28T00:00:00.000Z" },
+  ];
+  const exhausted = createClaudeUsageMonitor(auth).update({
+    ...reading(100),
+    rate_limits: { ...reading().rate_limits, limits },
+  });
+  assert.match(exhausted.reason, /exhausted/);
+  assert.equal(exhausted.usage.authoritative, false);
+  assert.equal(exhausted.usage.lastConfirmedAt, null);
+  assert.equal(exhausted.usage.verificationStatus, "blocked");
+  const provider = {
+    id: "claude",
+    connected: true,
+    blockReason: exhausted.reason,
+    usage: exhausted.usage,
+  };
+  assert.deepEqual(
+    usageGlance(provider).bars.map(({ resetsAt, ...bar }) => bar),
+    [
+      { name: "5-hour limit", short: "5h", remaining: 0, level: "out" },
+      { name: "Weekly limit", short: "wk", remaining: 60, level: "ok" },
+    ],
+  );
+  assert.ok(usageGlance(provider).bars.every((bar) => bar.resetsAt));
+  assert.equal(usageGlance(provider).level, "out");
+  const healthy = createClaudeUsageMonitor(auth).update({
+    ...reading(26),
+    rate_limits: {
+      ...reading().rate_limits,
+      limits: limits.map((limit, index) => ({
+        ...limit,
+        percent: index === 0 ? 26 : limit.percent,
+      })),
+    },
+  });
+  assert.deepEqual(
+    usageGlance({ id: "claude", connected: true, usage: healthy.usage }).bars.map(
+      (bar) => bar.short,
+    ),
+    ["5h", "wk"],
+  );
+  assert.deepEqual(
+    usageWindows({ id: "claude", usage: createClaudeUsageMonitor(auth).update(null).usage }),
+    [],
+  );
+});
+
 test("unknown usage labels its cached values and does not advertise them as current", () => {
   const monitor = createClaudeUsageMonitor(auth);
   monitor.update(reading());

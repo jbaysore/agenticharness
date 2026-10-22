@@ -1174,8 +1174,12 @@ function App() {
                     {usageVerificationLabel(p)}
                   </p>
                 )}
-                {p.usage?.authoritative || p.usage?.lastConfirmedAt ? (
-                  p.usage.windows.map((w, i) => (
+                {(p.usage?.windows ?? []).some(
+                  (w) => typeof w.usedPercent === "number",
+                ) ? (
+                  p.usage.windows
+                    .filter((w) => typeof w.usedPercent === "number")
+                    .map((w, i) => (
                     <div className="usage-meter" key={i}>
                       <div>
                         <span>

@@ -248,7 +248,14 @@ try {
   await context.route("https://claude.ai/**", (route) => route.fulfill({
     contentType: "text/html", body: "<title>Claude usage fixture</title>",
   }));
-  const exhausted = monitor.update(reading(100));
+  // A fresh monitor has never confirmed a reading under the limit. The
+  // reported 5-hour and weekly windows must still match a reading with usage left.
+  const exhausted = createClaudeUsageMonitor({
+    loggedIn: true,
+    authMethod: "claude.ai",
+    apiProvider: "firstParty",
+    subscriptionType: "pro",
+  }).update(reading(100));
   app.controller.providers[0].usage = exhausted.usage;
   app.controller.providers[0].blockReason = exhausted.reason;
   const page = await context.newPage();
@@ -267,7 +274,34 @@ try {
   const popup = await popupOpened;
   await expect(popup).toHaveURL("https://claude.ai/settings/usage");
   await popup.close();
-  await expect(page.locator(".usage-chip.claude .usage-chip-value").first()).toHaveText("0%");
+  await expect(page.locator(".usage-chip.claude .usage-chip-span")).toHaveText([
+    "5h", "wk",
+  ]);
+  await expect(page.locator(".usage-chip.claude .usage-chip-value")).toHaveText([
+    "0%", "73%",
+  ]);
+  await expect(page.locator(".usage-chip.claude .usage-chip-reset")).toHaveText([
+    "3h 20m", "4d 6h",
+  ]);
+  await expect(popover.getByText("Out of usage", { exact: true })).toBeVisible();
+  await expect(popover.getByText("0% left", { exact: true })).toBeVisible();
+  await expect(popover.getByText("73% left", { exact: true })).toBeVisible();
+  await expect(popover.getByText(/last confirmed/)).toHaveCount(0);
+  await page.screenshot({
+    path: ".local/screenshots/claude-usage-exhausted.png",
+  });
+  await page.locator(".usage-popover-link").click();
+  const exhaustedConnections = page.getByRole("dialog", {
+    name: "Connections & usage",
+    exact: true,
+  });
+  await expect(exhaustedConnections.getByText("0% remaining", { exact: true })).toBeVisible();
+  await expect(exhaustedConnections.getByText("73% remaining", { exact: true })).toBeVisible();
+  await expect(
+    exhaustedConnections.getByText("Quota information unavailable through this integration"),
+  ).toHaveCount(1);
+  await exhaustedConnections.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.locator(".usage-glance-trigger").click();
   let releaseRefresh, refreshCalls = 0;
   await page.route("**/api/providers/refresh", async (route) => {
     refreshCalls++;
