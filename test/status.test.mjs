@@ -209,11 +209,15 @@ test("the header shows the tightest usage window for each provider", () => {
   assert.equal(resetLabel(Date.now() + 135 * 60000 + 1000), "Resets in 2h 15m");
 });
 
-test("reset countdowns stay compact for the top bar", () => {
+test("reset countdowns stay compact and round up", () => {
   const now = 1_000_000_000_000;
   assert.equal(resetCountdown(null, now), "");
-  assert.equal(resetCountdown(now + 45 * 60000, now), "45m");
-  assert.equal(resetCountdown(now + 200 * 60000, now), "3h");
-  assert.equal(resetCountdown(now + (2 * 24 + 4) * 3600000 + 5 * 60000, now), "2d 4h");
   assert.equal(resetCountdown(now - 60000, now), "0m");
+  assert.equal(resetCountdown(now + 30000, now), "1m");
+  assert.equal(resetCountdown(now + 44 * 60000 + 1000, now), "45m");
+  assert.equal(resetCountdown(now + 60 * 60000, now), "1h");
+  assert.equal(resetCountdown(now + 219 * 60000 + 1000, now), "3h 40m");
+  assert.equal(resetCountdown(now + 1439 * 60000 + 1000, now), "1d");
+  assert.equal(resetCountdown(now + (4 * 24 + 5) * 3600000 + 60000, now), "4d 6h");
+  assert.equal(resetCountdown(now + (2 * 24 + 23) * 3600000 + 60000, now), "3d");
 });

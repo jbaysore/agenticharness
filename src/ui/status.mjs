@@ -174,14 +174,16 @@ export function usageGlance(provider) {
       : [{ name: "Usage", short: "", remaining, level, resetsAt: null }],
   };
 }
-// Compact time until a reset for the top bar: "45m", "3h", "2d 4h".
+// Compact time until a reset for the top bar: "45m", "3h 40m", "4d 6h".
+// Rounds up, so the meter is never back later than the header says.
 export function resetCountdown(at, now = Date.now()) {
   if (!at) return "";
-  const minutes = Math.max(0, Math.floor((at - now) / 60000));
+  const minutes = Math.max(0, Math.ceil((at - now) / 60000));
   if (minutes < 60) return minutes + "m";
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return hours + "h";
-  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  if (minutes < 1440)
+    return `${Math.floor(minutes / 60)}h` + (minutes % 60 ? ` ${minutes % 60}m` : "");
+  const hours = Math.ceil(minutes / 60);
+  return `${Math.floor(hours / 24)}d` + (hours % 24 ? ` ${hours % 24}h` : "");
 }
 export function resetLabel(at, now = Date.now()) {
   if (!at) return "";

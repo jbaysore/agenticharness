@@ -107,13 +107,13 @@ try {
       "5h", "wk",
     ]);
     await expect(page.locator(".usage-chip.claude .usage-chip-reset")).toHaveText([
-      "3h", "4d 5h",
+      "3h 20m", "4d 6h",
     ]);
     await expect(page.locator(".usage-chip.codex .usage-chip-value")).toHaveText([
       "90%", "80%",
     ]);
     await expect(page.locator(".usage-chip.codex .usage-chip-reset")).toHaveText([
-      /^(29|30)m$/,
+      /^(29|30)m$/, "",
     ]);
     await page.screenshot({
       path: `.local/screenshots/usage-header-${mobile ? "mobile" : "desktop"}.png`,

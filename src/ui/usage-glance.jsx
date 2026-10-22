@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Icon } from "./components.jsx";
 import {
   providerStatusLabel,
   resetCountdown,
@@ -63,26 +64,32 @@ export function UsageGlance({ providers, onOpenConnections }) {
               )
               .join(", ")}`}
           >
-            {g.bars.map((b, i) => (
-              <span className={"usage-chip-row " + b.level} key={i}>
-                <span className="usage-chip-bar">
-                  <span style={{ width: (b.remaining ?? 0) + "%" }} />
-                </span>
-                <span className="usage-chip-value">
-                  {b.remaining === null
-                    ? g.level === "out"
-                      ? "0%"
-                      : "–"
-                    : b.remaining + "%"}
-                </span>
-                {b.short && <span className="usage-chip-span">{b.short}</span>}
-                {b.resetsAt && (
-                  <span className="usage-chip-reset">
-                    {resetCountdown(b.resetsAt, now)}
+            <span className="usage-chip-name">{p.name}</span>
+            <span className="usage-chip-rows">
+              {g.bars.map((b, i) => (
+                <span className={"usage-chip-row " + b.level} key={i}>
+                  <span className="usage-chip-span">{b.short}</span>
+                  <span className="usage-chip-bar">
+                    <span style={{ width: (b.remaining ?? 0) + "%" }} />
                   </span>
-                )}
-              </span>
-            ))}
+                  <span className="usage-chip-value">
+                    {b.remaining === null
+                      ? g.level === "out"
+                        ? "0%"
+                        : "–"
+                      : b.remaining + "%"}
+                  </span>
+                  <span className="usage-chip-reset">
+                    {b.resetsAt && (
+                      <>
+                        <Icon name="refresh" size={10} />
+                        {resetCountdown(b.resetsAt, now)}
+                      </>
+                    )}
+                  </span>
+                </span>
+              ))}
+            </span>
           </span>
         ))}
       </button>
