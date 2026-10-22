@@ -45,9 +45,11 @@ across reload after both a lost response and an unreceived request.
   terminates a disposable host during streaming, then restarts and continues.
 - `npm run test:self-restart`: real headless Edge and disposable hosts with a
   simulated provider, no inference. Passed update blocker status, reconnect,
-  client reload, saved draft recovery and no message replay. The unit suite also
-  verifies automatic self delivery, mode and repository restrictions, the idle
-  gates, IPC helper, activation admission, failed startup rollback, private SQLite
+  client reload, saved draft recovery and no message replay. It also covers the
+  restart progress modal on desktop and mobile, dismissal only after workspace
+  readiness, and feedback during startup recovery. The unit suite verifies
+  automatic self delivery, mode and repository restrictions, the idle gates,
+  IPC helper, activation admission, failed startup rollback, private SQLite
   recovery and launcher serialization using real Git, SQLite and child processes.
 - `node scripts/outbox-acceptance.mjs`: real Edge/HTTP with an explicitly simulated
   provider; verifies action reconciliation and draft recovery after reload.

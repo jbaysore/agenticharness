@@ -508,6 +508,9 @@ through `land_changes` automatically queue a self restart. An agent working on
 that source in Default or Goal mode can also call `restart_harness`. The tool
 returns a queued status immediately; finish the turn normally. The update banner
 shows preparation, blockers, completion and failures.
+During the restart, a modal with an animated progress bar stays visible through
+reconnection and any client reload. It closes automatically after the host is
+accepting work and the workspace has loaded. Your saved drafts remain in place.
 
 Harness exports the committed revision into a separate runtime, installs its
 locked dependencies, builds it and runs the tests without inference. It waits

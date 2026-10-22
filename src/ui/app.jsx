@@ -19,6 +19,7 @@ import { RulesModal } from "./rules-modal.jsx";
 import { SkillsModal } from "./skills-modal.jsx";
 import { UsageGlance } from "./usage-glance.jsx";
 import { ClaudeResets } from "./claude-resets.jsx";
+import { useRestartProgress } from "./restart-progress.jsx";
 import {
   activeChats,
   attentionCount,
@@ -224,6 +225,11 @@ function App() {
     },
     [admit],
   );
+  const restartProgress = useRestartProgress({
+    restart: state.selfRestart,
+    ready: ready && !needsPair,
+    ensureReady: ensureRestartReady,
+  });
   const openChat = useCallback(
     async (id, beside = false) => {
       const next = admit(await api("/api/chats/" + id));
@@ -390,27 +396,48 @@ function App() {
   // restart from Hub it reloads itself. Drafts and unsent messages are saved.
   // Hub rebuilds before it restarts the host, so a new build is trusted only
   // once the same host has reported it twice, a few seconds apart.
+  async function usableHost() {
+    try {
+      const response = await fetch("/health", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!response.ok) return null;
+      const h = await response.json();
+      return h.app === "Agentic Harness" &&
+        h.ready !== false &&
+        h.acceptingWork !== false &&
+        h.build
+        ? h
+        : null;
+    } catch {
+      return null;
+    }
+  }
   async function checkBuild() {
-    const health = () =>
-      fetch("/health", { cache: "no-store" })
-        .then((r) => r.json())
-        .then(
-          (h) =>
-            h.acceptingWork !== false &&
-            h.build &&
-            `${h.instanceId} ${h.build}`,
-          () => null,
-        );
-    const first = await health();
-    if (!first) return;
-    const latest = first.split(" ")[1];
+    const first = await usableHost();
+    if (!first) return null;
+    const latest = first.build;
     if (!build.current) {
       build.current = latest;
-      return;
+      return first;
     }
-    if (build.current === latest) return;
+    if (build.current === latest) return first;
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    if ((await health()) === first) location.reload();
+    const second = await usableHost();
+    if (second?.instanceId === first.instanceId && second.build === latest)
+      location.reload();
+    return null;
+  }
+  async function ensureRestartReady() {
+    const host = await checkBuild();
+    if (!host) return false;
+    await refresh();
+    await Promise.all([...tracked.current].map((id) => reload(id)));
+    const latest = await usableHost();
+    return (
+      latest?.instanceId === host.instanceId && latest.build === host.build
+    );
   }
   useEffect(() => {
     const visible = () =>
@@ -792,6 +819,7 @@ function App() {
   if (needsPair)
     return (
       <main className="pair-page">
+        {restartProgress}
         <Mark />
         <h1>Your workspace, connected.</h1>
         <p>Enter the pairing code from Harness on your Windows computer.</p>
@@ -821,6 +849,7 @@ function App() {
   if (!ready)
     return (
       <main className="pair-page">
+        {restartProgress}
         <Mark />
         <p>
           {online
@@ -842,6 +871,7 @@ function App() {
         "--panes": shown.length,
       }}
     >
+      {restartProgress}
       {mobile && sidebar && (
         <button
           className="sidebar-backdrop"
