@@ -143,6 +143,53 @@ test("Claude plans in its plan mode, and an approved plan resumes the chat's per
   ]);
 });
 
+test("a Claude goal leaves plan mode without leaving Goal", async () => {
+  let approved = 0,
+    decision;
+  const { run } = fakeClaude(
+    {
+      text: "All tests pass",
+      mode: "goal",
+      permissions: "auto",
+      approve: async () => ({ allow: true }),
+      planApproved: () => approved++,
+    },
+    async (options) => {
+      decision = await options.canUseTool("ExitPlanMode", {
+        plan: "1. Add a cache",
+      });
+    },
+  );
+  assert.equal((await run).status, "completed");
+  assert.equal(approved, 0);
+  assert.equal(decision.behavior, "allow");
+  assert.deepEqual(decision.updatedPermissions, [
+    { type: "setMode", mode: "auto", destination: "session" },
+  ]);
+});
+
+test("Claude includes a Goal decline reason with the instruction not to retry", async () => {
+  let decision;
+  const { run } = fakeClaude(
+    {
+      text: "Keep going",
+      mode: "goal",
+      approve: async () => ({
+        allow: false,
+        reason:
+          "Goal mode declined this because it needs you. Continue without it.",
+      }),
+    },
+    async (options) => {
+      decision = await options.canUseTool("Bash", { command: "git push" });
+    },
+  );
+  await run;
+  assert.equal(decision.behavior, "deny");
+  assert.match(decision.message, /Goal mode declined this/);
+  assert.match(decision.message, /Do not retry this action/);
+});
+
 test("a Claude goal is set with /goal, and its hand-off moves to the system prompt", async () => {
   const { run, seen } = fakeClaude({
     text: "All tests in test/auth pass",

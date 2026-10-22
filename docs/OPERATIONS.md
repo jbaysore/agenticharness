@@ -41,6 +41,15 @@ so the plan can be built. **Goal** keeps Codex or Claude Code working until the
 message's condition is met. Cursor has no goal mode. `/ask`, `/plan`, `/goal`,
 and `/default` at the start of a message switch modes the same way.
 
+In Goal the agent stays in Goal until the condition is met. It does not suggest
+another mode, and carrying out a plan does not leave Goal. Permission requests
+are decided by the automatic reviewer, including when permissions are Manual,
+and one that needs you is declined so the work continues. Override still allows
+those actions. A question is shown for 60 seconds. If it is not answered, the
+agent chooses the path that best completes the objective and continues. The
+same question does not wait again after it times out, and after three timeouts
+further questions are answered by the agent at once.
+
 Three projects are configured on the delivery PC: Agentic Harness, linescience,
 and linescience-personal. Only linescience-personal lists linescience as an
 upstream reference. The reverse relationship is absent. Add more folders with
@@ -281,9 +290,12 @@ only for a managerial choice the task did not already settle, such as spending
 money, publishing or sending something, signing in, or changing the goal, and
 the note explains that choice in plain language. If automatic review cannot run,
 the action comes to you with that reason; decline it if you are not sure.
+In Goal, a review that asks you or cannot run is declined and the agent continues.
 **Manual** shows each request for **Allow once**. **Override** allows actions
-without asking. Plans still come to you in every mode. Agents are told to ask
-only a managerial question, and to explain why they cannot decide it.
+without asking. Plans still come to you, except in Goal, where a plan is carried
+out and the chat stays in Goal. Agents are told to ask only a managerial question,
+and to explain why they cannot decide it. In Goal that question waits 60 seconds
+and then the agent chooses.
 
 Requested commands, tool actions, plans and questions appear in the conversation
 when they need you. Open the action details before **Allow once**. Approvals are

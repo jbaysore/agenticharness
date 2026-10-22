@@ -1,8 +1,19 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { providerName } from "./voice.mjs";
+import { secondsRemaining, serverClock } from "./clock.mjs";
 import { QuestionField, questionId, questionAnswer } from "./question-form.jsx";
+
+function useClock(active) {
+  const [now, setNow] = useState(() => serverClock.now());
+  useEffect(() => {
+    if (!active) return undefined;
+    const timer = setInterval(() => setNow(serverClock.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
 
 const paths = {
   attach: "m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9m-2 14 7-7",
@@ -130,7 +141,9 @@ export function Modal({ title, children, onClose, wide = false }) {
 export function Approval({ approval, onAnswer }) {
   const [responses, setResponses] = useState({}),
     [submitting, setSubmitting] = useState(false),
-    r = approval.request;
+    r = approval.request,
+    now = useClock(r.kind === "question" && Number.isFinite(r.deadline)),
+    remaining = secondsRemaining(r.deadline, now);
   const answers = Object.fromEntries(
     (r.questions ?? []).map((q) => [
       questionId(q),
@@ -182,17 +195,26 @@ export function Approval({ approval, onAnswer }) {
           </p>
         </>
       ) : r.kind === "question" ? (
-        r.questions?.map((q) => (
-          <QuestionField
-            key={questionId(q)}
-            question={q}
-            value={responses[questionId(q)]}
-            disabled={submitting}
-            onChange={(value) =>
-              setResponses((prior) => ({ ...prior, [questionId(q)]: value }))
-            }
-          />
-        ))
+        <>
+          {remaining != null && (
+            <p className="muted small">
+              {remaining === 0
+                ? "The agent is choosing."
+                : `The agent chooses in ${remaining} ${remaining === 1 ? "second" : "seconds"} if you do not answer.`}
+            </p>
+          )}
+          {r.questions?.map((q) => (
+            <QuestionField
+              key={questionId(q)}
+              question={q}
+              value={responses[questionId(q)]}
+              disabled={submitting}
+              onChange={(value) =>
+                setResponses((prior) => ({ ...prior, [questionId(q)]: value }))
+              }
+            />
+          ))}
+        </>
       ) : (
         <details>
           <summary>Review requested action</summary>

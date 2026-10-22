@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
+import { GOAL_QUESTION_TIMEOUT } from "../src/core/modes.mjs";
 
 test("an approval can be answered synchronously and retries never answer twice", async () => {
   const store = new Store(":memory:"),
@@ -526,6 +530,283 @@ test("a saved queue waits through a restart until the next submit, oldest first"
     while (seen.length < 2 && Date.now() < deadline)
       await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(seen, ["Older", "Newer"]);
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+const question = (text) => ({
+  kind: "question",
+  title: text,
+  questions: [{ id: "q", question: text, options: [{ label: "Yes" }] }],
+});
+
+test("goal decides permissions and plans without a card and does not leave goal", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-goal-")),
+    store = new Store(":memory:"),
+    controller = new Controller(store, {}),
+    events = [];
+  controller.providers = [
+    {
+      id: "codex",
+      name: "Codex",
+      connected: true,
+      models: [{ id: "m", name: "M", isDefault: true, efforts: [] }],
+    },
+  ];
+  controller.workers.codex = async () => ({
+    text: JSON.stringify({
+      decision: "ask",
+      reason: "This would publish the release.",
+    }),
+  });
+  controller.on("event", (e) => events.push(e));
+  const chat = store.createConversation({
+    projectId: store.addProject("fixture", root).id,
+  });
+  let seen;
+  const turn = (actionId, permissions, run) => {
+    controller.runners.codex = run;
+    controller.send(chat.id, {
+      actionId,
+      text: "Ship the parser",
+      provider: "codex",
+      model: "m",
+      permissions,
+      mode: "goal",
+    });
+    return controller.active.get(chat.id).task;
+  };
+  try {
+    await turn("goal-manual-check", "manual", async (ctx) => {
+      seen = {
+        instructions: ctx.instructions,
+        tools: ctx.tools.map((tool) => tool.name),
+        permission: await ctx.approve({
+          kind: "permission",
+          title: "git push",
+          details: { command: "git push" },
+        }),
+        plan: await ctx.approve({
+          kind: "plan",
+          title: "Review the plan",
+          plan: "Ship it",
+        }),
+        mode: await ctx.history("suggest_mode", {
+          mode: "plan",
+          reason: "Plan first",
+        }),
+      };
+      return { status: "completed" };
+    });
+    assert.equal(seen.permission.allow, false);
+    assert.match(seen.permission.reason, /publish the release/);
+    assert.match(seen.permission.reason, /Goal mode declined this/);
+    assert.equal(seen.plan.allow, true);
+    assert.equal(seen.mode.changed, false);
+    assert.match(seen.mode.reason, /stays on until the objective is met/);
+    assert.equal(seen.tools.includes("suggest_mode"), false);
+    assert.match(seen.instructions, /stay in Goal until the objective is met/);
+    assert.doesNotMatch(seen.instructions, /You may call suggest_mode/);
+    assert.equal(store.conversation(chat.id).mode, "goal");
+    assert.equal(store.conversation(chat.id).permissions, "manual");
+    assert.equal(store.pendingApprovals(chat.id).length, 0);
+    assert.ok(events.some((e) => e.payload.kind === "goal-declined"));
+
+    let reviewed = 0;
+    controller.workers.codex = async () => {
+      reviewed++;
+      return { text: "{}" };
+    };
+    await turn("goal-override-check", "override", async (ctx) => {
+      seen = await ctx.approve({
+        kind: "permission",
+        title: "git push",
+        details: { command: "git push" },
+      });
+      return { status: "completed" };
+    });
+    assert.equal(seen.allow, true);
+    assert.equal(reviewed, 0);
+    assert.equal(store.conversation(chat.id).mode, "goal");
+    assert.equal(store.pendingApprovals(chat.id).length, 0);
+  } finally {
+    await controller.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a goal question waits briefly, then the agent chooses, and repeats do not wait", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.goalQuestionTimeoutMs = 40;
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  const chat = store.createConversation({
+    projectId: store.addProject("fixture", "C:\\goal-questions").id,
+    mode: "goal",
+  });
+  const results = [];
+  controller.runners.codex = async (ctx) => {
+    results.push(await ctx.approve(question("Which approach?")));
+    results.push(await ctx.approve(question("Which approach?")));
+    results.push(await ctx.approve(question("Which name?")));
+    results.push(await ctx.approve(question("Which file?")));
+    results.push(await ctx.approve(question("Which test?")));
+    return { status: "completed" };
+  };
+  const events = [];
+  controller.on("event", (e) => {
+    if (e.type === "approval") events.push(e.payload);
+  });
+  try {
+    controller.send(chat.id, {
+      actionId: "goal-question-timeout",
+      text: "Finish the parser",
+      provider: "codex",
+      model: "m",
+    });
+    await controller.active.get(chat.id).task;
+    assert.equal(events.length, 3);
+    assert.ok(events[0].request.deadline > Date.now() - 1000);
+    for (const result of results) {
+      assert.equal(result.timedOut, true);
+      assert.equal(result.answers.q, GOAL_QUESTION_TIMEOUT);
+    }
+    assert.equal(store.pendingApprovals(chat.id).length, 0);
+    assert.equal(store.conversation(chat.id).mode, "goal");
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+test("answering a goal question before the deadline uses that answer", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.goalQuestionTimeoutMs = 2000;
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  const chat = store.createConversation({
+    projectId: store.addProject("fixture", "C:\\goal-answer").id,
+    mode: "goal",
+  });
+  let outcome;
+  controller.runners.codex = async (ctx) => {
+    outcome = await ctx.approve(question("Which approach?"));
+    return { status: "completed" };
+  };
+  try {
+    controller.send(chat.id, {
+      actionId: "goal-question-answer",
+      text: "Finish the parser",
+      provider: "codex",
+      model: "m",
+    });
+    const deadline = Date.now() + 3000;
+    while (!store.pendingApprovals(chat.id).length) {
+      assert.ok(Date.now() < deadline);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const pending = store.pendingApprovals(chat.id)[0];
+    assert.ok(pending.request.deadline > Date.now());
+    controller.answer(pending.id, {
+      allow: true,
+      answers: { q: "Keep the cache" },
+    });
+    await controller.active.get(chat.id).task;
+    assert.equal(outcome.timedOut, undefined);
+    assert.equal(outcome.answers.q, "Keep the cache");
+    assert.equal(store.conversation(chat.id).mode, "goal");
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+test("stopping a goal expires its open question", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.goalQuestionTimeoutMs = 5000;
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  const chat = store.createConversation({
+    projectId: store.addProject("fixture", "C:\\goal-stop").id,
+    mode: "goal",
+  });
+  let outcome;
+  controller.runners.codex = async (ctx) => {
+    outcome = await ctx.approve(question("Which approach?"));
+    return { status: "completed" };
+  };
+  try {
+    controller.send(chat.id, {
+      actionId: "goal-question-stop",
+      text: "Finish the parser",
+      provider: "codex",
+      model: "m",
+    });
+    const deadline = Date.now() + 3000;
+    while (!store.pendingApprovals(chat.id).length) {
+      assert.ok(Date.now() < deadline);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    controller.cancel(chat.id);
+    await controller.active.get(chat.id).task;
+    assert.equal(outcome.allow, false);
+    assert.equal(store.pendingApprovals(chat.id).length, 0);
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+test("goal question timeouts survive a permission change in the same run", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.goalQuestionTimeoutMs = 40;
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  const chat = store.createConversation({
+    projectId: store.addProject("fixture", "C:\\goal-restart").id,
+    mode: "goal",
+    permissions: "manual",
+  });
+  const results = [];
+  let calls = 0;
+  controller.runners.codex = async (ctx) => {
+    calls++;
+    if (calls === 1) {
+      results.push(await ctx.approve(question("Which approach?")));
+      results.push(await ctx.approve(question("Which name?")));
+      return { status: "completed" };
+    }
+    results.push(await ctx.approve(question("Which approach?")));
+    return { status: "completed" };
+  };
+  try {
+    controller.send(chat.id, {
+      actionId: "goal-question-restart",
+      text: "Finish the parser",
+      provider: "codex",
+      model: "m",
+    });
+    const task = controller.active.get(chat.id).task;
+    const deadline = Date.now() + 3000;
+    while (results.length < 1) {
+      assert.ok(Date.now() < deadline);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    while (!store.pendingApprovals(chat.id).length) {
+      assert.ok(Date.now() < deadline);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    controller.setPermissions(chat.id, "override");
+    await task;
+    assert.equal(results[0].timedOut, true);
+    assert.equal(results[1].allow, false);
+    assert.equal(results[2].timedOut, true);
+    assert.equal(calls, 2);
+    assert.equal(store.conversation(chat.id).mode, "goal");
+    assert.equal(store.conversation(chat.id).permissions, "override");
   } finally {
     await controller.close();
     store.close();

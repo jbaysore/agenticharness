@@ -25,3 +25,8 @@ export function createServerClock({
 }
 
 export const serverClock = createServerClock();
+
+export function secondsRemaining(deadline, now) {
+  if (!Number.isFinite(deadline) || !Number.isFinite(now)) return null;
+  return Math.max(0, Math.ceil((deadline - now) / 1000));
+}

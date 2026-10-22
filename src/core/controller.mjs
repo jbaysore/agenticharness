@@ -28,11 +28,17 @@ import {
 import {
   ASK_DENY,
   ASK_INSTRUCTIONS,
+  GOAL_INSTRUCTIONS,
+  GOAL_QUESTION_LIMIT,
+  GOAL_QUESTION_TIMEOUT,
+  GOAL_QUESTION_TIMEOUT_MS,
   MODE_SUGGESTION_INSTRUCTIONS,
   askHostAllowed,
   checkMode,
+  goalQuestionAnswers,
   hostToolsForMode,
   modeSuggestionTool,
+  questionKey,
 } from "./modes.mjs";
 import {
   invokedSkills,
@@ -92,6 +98,7 @@ export class Controller extends EventEmitter {
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
     this.workerTimeoutMs = 5 * 60 * 1000;
     this.reviewerTimeoutMs = 60 * 1000;
+    this.goalQuestionTimeoutMs = GOAL_QUESTION_TIMEOUT_MS;
     this.runCommand = runCommand;
     store.recover();
   }
@@ -606,8 +613,11 @@ export class Controller extends EventEmitter {
     // Override answers every permission request itself and logs it. Questions,
     // plans and mode suggestions still reach the user. In Auto-review, the
     // reviewer decides permissions and asks the user only when it returns ask.
+    // Goal never waits on a permission, a plan, or a mode change. A question
+    // waits 60 seconds, then the agent chooses and the goal continues.
+    const goal = chat.mode === "goal";
     const reviewer =
-      permissions === "auto"
+      permissions === "auto" || (goal && permissions === "manual")
         ? new ActionReviewer({
             controller: this,
             run,
@@ -622,6 +632,17 @@ export class Controller extends EventEmitter {
       if (abort.signal.aborted) return { allow: false };
       if (result.decision !== "ask")
         return { allow: result.decision === "allow", reason: result.reason };
+      if (goal) {
+        const reason = `${result.reason} Goal mode declined this because it needs you. Continue without it.`;
+        emit("work", {
+          kind: "goal-declined",
+          item: {
+            title: `Goal declined ${request.title ?? "an action"} that needs you`,
+            description: reason,
+          },
+        });
+        return { allow: false, reason };
+      }
       return this.waitApproval(
         run,
         { ...request, reviewReason: result.reason },
@@ -630,6 +651,15 @@ export class Controller extends EventEmitter {
     };
     const approve = async (request) => {
       if (abort.signal.aborted) return Promise.resolve({ allow: false });
+      if (goal && request.kind === "mode-change")
+        return {
+          allow: false,
+          reason:
+            "Goal mode stays on until the objective is met. Do not suggest another mode.",
+        };
+      if (goal && request.kind === "plan") return { allow: true };
+      if (goal && request.kind === "question")
+        return this.answerGoalQuestion(chat.id, run, request, abort.signal);
       if (reviewer && request.kind === "permission") return review(request);
       if (
         permissions !== "override" ||
@@ -730,6 +760,7 @@ export class Controller extends EventEmitter {
         project,
         plan,
         signal: abort.signal,
+        approve: goal ? approve : null,
       });
     if (plan.note || plan.skipped.length)
       this.event(chat.id, run.id, "work", {
@@ -877,6 +908,13 @@ export class Controller extends EventEmitter {
           mode: current.mode,
           reason: "Already in this mode.",
         };
+      if (current.mode === "goal")
+        return {
+          changed: false,
+          mode: "goal",
+          reason:
+            "Goal mode stays on until the objective is met. Do not suggest another mode.",
+        };
       if (suggestingMode)
         return {
           changed: false,
@@ -967,14 +1005,16 @@ export class Controller extends EventEmitter {
         rulesInstructions(rules, plan, this.providers, COMMAND_SHELL) +
         skillInstructions(skills) +
         "\n\n" +
-        MODE_SUGGESTION_INSTRUCTIONS +
+        (chat.mode === "goal"
+          ? GOAL_INSTRUCTIONS
+          : MODE_SUGGESTION_INSTRUCTIONS) +
         (startGoal ? "\n\n" + continuationText : "") +
         (chat.mode === "ask" ? "\n\n" + ASK_INSTRUCTIONS : ""),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
       tools: [
         ...hostToolsForMode(chat.mode, [
           ...historyTools,
-          modeSuggestionTool,
+          ...(chat.mode === "goal" ? [] : [modeSuggestionTool]),
           ...(project.worktree ? [landTool] : []),
           ...plan.tools,
         ]),
@@ -1117,17 +1157,61 @@ export class Controller extends EventEmitter {
     if (project?.worktree) this.tidy(chat.id);
     this.releaseQueue(chat.id);
   }
-  waitApproval(run, request, signal) {
+  // A Goal question waits out its deadline, then the agent chooses. Any other
+  // call still waits until the user answers or the turn stops.
+  async answerGoalQuestion(chatId, run, request, signal) {
+    const active = this.active.get(chatId);
+    if (active) {
+      active.goalQuestions ??= new Set();
+      active.goalTimeouts ??= 0;
+    }
+    const key = questionKey(request);
+    const outcome = () => ({
+      allow: true,
+      timedOut: true,
+      answers: goalQuestionAnswers(request.questions),
+      reason: GOAL_QUESTION_TIMEOUT,
+    });
+    const repeated =
+      active &&
+      ((key && active.goalQuestions.has(key)) ||
+        active.goalTimeouts >= GOAL_QUESTION_LIMIT);
+    if (repeated) {
+      this.event(chatId, run.id, "work", {
+        kind: "goal-question",
+        item: {
+          title: "The agent is choosing",
+          description: key && active.goalQuestions.has(key)
+            ? "This question already timed out. " + GOAL_QUESTION_TIMEOUT
+            : "Three questions already timed out. " + GOAL_QUESTION_TIMEOUT,
+        },
+      });
+      return outcome();
+    }
+    const answer = await this.waitApproval(run, request, signal, {
+      timeoutMs: this.goalQuestionTimeoutMs,
+    });
+    if (answer.timedOut && active) {
+      active.goalTimeouts += 1;
+      if (key) active.goalQuestions.add(key);
+    }
+    return answer;
+  }
+  waitApproval(run, request, signal, { timeoutMs = 0 } = {}) {
     if (signal.aborted) return Promise.resolve({ allow: false });
+    const stored =
+      timeoutMs > 0 ? { ...request, deadline: Date.now() + timeoutMs } : request;
     const approval = this.store.addApproval(
       run.conversation_id,
       run.id,
       run.provider,
-      request,
+      stored,
     );
     this.store.setRun(run.id, "waiting");
+    let timer;
     const response = new Promise((resolve) => {
       const onAbort = () => {
+        clearTimeout(timer);
         this.approvalWaiters.delete(approval.id);
         this.store.expireApprovals(run.id);
         resolve({ allow: false });
@@ -1136,11 +1220,35 @@ export class Controller extends EventEmitter {
       this.approvalWaiters.set(approval.id, {
         runId: run.id,
         resolve: (answer) => {
+          clearTimeout(timer);
           signal.removeEventListener("abort", onAbort);
+          this.approvalWaiters.delete(approval.id);
           this.store.setRun(run.id, "running");
           resolve(answer);
         },
       });
+      if (timeoutMs > 0)
+        timer = setTimeout(() => {
+          const result = {
+            allow: true,
+            timedOut: true,
+            answers: goalQuestionAnswers(request.questions),
+            reason: GOAL_QUESTION_TIMEOUT,
+          };
+          if (!this.store.resolveApproval(approval.id, result)) return;
+          this.event(run.conversation_id, run.id, "approval-resolved", {
+            id: approval.id,
+            response: result,
+          });
+          this.event(run.conversation_id, run.id, "work", {
+            kind: "goal-question",
+            item: {
+              title: "No answer in time. The agent is choosing.",
+              description: GOAL_QUESTION_TIMEOUT,
+            },
+          });
+          this.approvalWaiters.get(approval.id)?.resolve(result);
+        }, timeoutMs);
     });
     this.event(run.conversation_id, run.id, "approval", approval);
     return response;

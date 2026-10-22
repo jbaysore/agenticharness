@@ -379,7 +379,8 @@ export async function runClaude(
               message:
                 "The user wants to keep planning. Stay in plan mode and ask what to change.",
             };
-          ctx.planApproved?.();
+          // Carrying out a plan inside Goal must not switch the chat to Default.
+          if (ctx.mode !== "goal") ctx.planApproved?.();
           return {
             behavior: "allow",
             updatedInput: args,
@@ -408,7 +409,11 @@ export async function runClaude(
             }
           : {
               behavior: "deny",
-              message: "The user declined this action. Do not retry it.",
+              message: answer.reason
+                ? /do not retry/i.test(answer.reason)
+                  ? answer.reason
+                  : `${answer.reason} Do not retry this action.`
+                : "The user declined this action. Do not retry it.",
             };
       },
     },

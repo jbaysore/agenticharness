@@ -164,7 +164,9 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     steerHold = null;
   const steers = [];
   // A goal runs turn after turn until Codex marks it met, blocked or paused.
-  ((goalStatus = null), goalWait, onTurnStarted);
+  let goalStatus = null,
+    goalWait,
+    onTurnStarted;
   const goal = ctx.mode === "goal";
   const done = new Promise((resolve, reject) => {
     resolveDone = resolve;

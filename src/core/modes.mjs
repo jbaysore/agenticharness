@@ -29,6 +29,31 @@ export const modeSuggestionTool = {
 
 export const MODE_SUGGESTION_INSTRUCTIONS = `You may call suggest_mode when another chat mode would better suit the current task: Default performs work normally; Ask answers read-only questions; Plan proposes work before implementation; Goal keeps working until a concrete condition is met. Explain the benefit and include the objective for Goal. Harness always asks the user to approve a mode suggestion manually, even under Auto-review or Override. Stay within the current mode until approved; after a decline, continue in the current mode and do not repeat the suggestion unless the user's needs change. Changing modes does not approve a proposed plan or expand the user's task scope.`;
 
+// Goal stays on until the objective is met. The agent is not offered a way out.
+export const GOAL_INSTRUCTIONS = `Goal mode: stay in Goal until the objective is met. Do not suggest another mode and do not enter plan mode. You may ask a question when only the user can decide. Harness shows it for 60 seconds. If nobody answers, choose the path that best completes the objective and continue, and do not ask that question again. A permission request that needs the user is declined so you can continue without it.`;
+
+export const GOAL_QUESTION_TIMEOUT_MS = 60_000;
+export const GOAL_QUESTION_LIMIT = 3;
+export const GOAL_QUESTION_TIMEOUT =
+  "The user did not answer in time. This is not a refusal of the goal. Choose the path that best completes the objective and continue.";
+
+export function questionKey(request) {
+  const text = (request?.questions ?? [])
+    .map((q) => String(q.question ?? q.header ?? q.prompt ?? "").trim())
+    .filter(Boolean)
+    .join("\n");
+  return text || String(request?.title ?? "").trim();
+}
+
+export function goalQuestionAnswers(questions = []) {
+  return Object.fromEntries(
+    questions.map((q, index) => [
+      q.id ?? q.question ?? q.header ?? `question-${index + 1}`,
+      GOAL_QUESTION_TIMEOUT,
+    ]),
+  );
+}
+
 export function checkMode(mode, provider) {
   if (!CHAT_MODES.includes(mode))
     throw new Error("Choose the default, ask, plan or goal mode");

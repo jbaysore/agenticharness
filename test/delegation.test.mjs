@@ -132,8 +132,11 @@ async function fixture({ workers = [luna, haiku], actions } = {}) {
     refreshes,
     commands,
     git,
-    async start(provider, model) {
-      const chat = store.createConversation({ projectId: project.id });
+    async start(provider, model, mode = "default") {
+      const chat = store.createConversation({
+        projectId: project.id,
+        mode,
+      });
       latest = null;
       controller.send(chat.id, {
         actionId: `delegation-turn-${++count}-${provider}`,
@@ -372,6 +375,22 @@ test("a command needs approval; short output comes back whole and long output as
   });
   assert.equal(refused.declined, true);
   assert.equal(ran, false);
+  await f.close();
+});
+
+test("goal decides a handed-off command without waiting for approval", async () => {
+  const f = await fixture();
+  f.controller.waitApproval = async () => {
+    throw new Error("Goal should not wait for a handed-off command");
+  };
+  const ctx = await f.start("claude", "opus", "goal");
+  const refused = await ctx.history("delegate_run", { command: "npm test" });
+  assert.equal(refused.declined, true);
+  assert.match(refused.reason, /Goal mode declined this/);
+  assert.equal(f.commands.length, 0);
+  assert.ok(
+    f.store.events().some((event) => event.payload.kind === "goal-declined"),
+  );
   await f.close();
 });
 

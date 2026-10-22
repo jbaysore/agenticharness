@@ -118,8 +118,6 @@ for (const permissions of ["auto", "manual", "override"])
 for (const [from, to] of [
   ["ask", "default"],
   ["plan", "goal"],
-  ["goal", "ask"],
-  ["goal", "default"],
   ["plan", "default"],
 ])
   test(`approved ${from} to ${to} suggestions apply the requested mode and goal objective`, async (t) => {
@@ -226,6 +224,29 @@ test("invalid, redundant and concurrent suggestions cannot change the mode or by
   });
   await task;
   assert.equal(store.conversation(chat.id).mode, "ask");
+});
+
+test("an agent in Goal cannot switch itself to another mode", async (t) => {
+  const { store, chat, start } = fixture(t, { mode: "goal" });
+  let result;
+  const { task } = start(async (ctx) => {
+    assert.equal(
+      ctx.tools.some((tool) => tool.name === "suggest_mode"),
+      false,
+    );
+    assert.match(ctx.instructions, /stay in Goal until the objective is met/);
+    assert.doesNotMatch(ctx.instructions, /You may call suggest_mode/);
+    for (const mode of ["plan", "ask", "default"]) {
+      result = await ctx.history("suggest_mode", suggestion(mode));
+      assert.equal(result.changed, false);
+      assert.equal(result.mode, "goal");
+      assert.match(result.reason, /stays on until the objective is met/);
+    }
+    return { status: "completed" };
+  });
+  await task;
+  assert.equal(store.pendingApprovals(chat.id).length, 0);
+  assert.equal(store.conversation(chat.id).mode, "goal");
 });
 
 test("Goal suggestions need a nonempty objective before reaching the user", async (t) => {

@@ -47,8 +47,8 @@ const DRAFT_TASK = {
 };
 
 export class Delegator {
-  constructor({ controller, run, project, plan, signal }) {
-    Object.assign(this, { controller, run, project, plan, signal });
+  constructor({ controller, run, project, plan, signal, approve = null }) {
+    Object.assign(this, { controller, run, project, plan, signal, approve });
     this.workers = [...plan.workers];
     this.running = 0;
     this.started = 0;
@@ -362,19 +362,20 @@ export class Delegator {
     if (!command || command.length > 4000)
       return { error: "Give one command." };
     const cwd = this.project.path,
-      approval = await this.controller.waitApproval(
-        this.run,
-        {
-          kind: "permission",
-          title: command,
-          details: { command, cwd, requestedThrough: "delegate_run" },
-        },
-        this.signal,
-      );
+      request = {
+        kind: "permission",
+        title: command,
+        details: { command, cwd, requestedThrough: "delegate_run" },
+      },
+      approval = this.approve
+        ? await this.approve(request)
+        : await this.controller.waitApproval(this.run, request, this.signal);
     if (!approval.allow)
       return {
         declined: true,
-        reason: "The user declined this command. Do not retry it.",
+        reason:
+          approval.reason ||
+          "The user declined this command. Do not retry it.",
       };
     let result;
     try {

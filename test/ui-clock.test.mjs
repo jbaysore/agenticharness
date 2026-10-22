@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServerClock } from "../src/ui/clock.mjs";
+import { createServerClock, secondsRemaining } from "../src/ui/clock.mjs";
 
 test("usage time follows the host and advances despite a wrong or changed device clock", () => {
   let wall = 0, monotonic = 100;
@@ -19,4 +19,12 @@ test("usage time follows the host and advances despite a wrong or changed device
   monotonic += 500;
   clock.observe(new Date(host + 60000).toUTCString());
   assert.equal(clock.now(), host + 60000);
+});
+
+test("a question countdown rounds up and stops at zero", () => {
+  assert.equal(secondsRemaining(10_500, 10_000), 1);
+  assert.equal(secondsRemaining(12_000, 10_000), 2);
+  assert.equal(secondsRemaining(10_000, 10_000), 0);
+  assert.equal(secondsRemaining(9_000, 10_000), 0);
+  assert.equal(secondsRemaining(undefined, 10_000), null);
 });
