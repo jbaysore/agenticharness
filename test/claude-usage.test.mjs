@@ -30,6 +30,11 @@ const reading = (percent = 26) => ({
 });
 // The actual incomplete response recorded immediately before the old stops.
 const incomplete = { rate_limits_available: true, rate_limits: {} };
+// Existing turn regressions exercise every supplied transition immediately.
+// Account-wide timing and coalescing use the production defaults in polling tests.
+const unthrottledTracker = () => createClaudeUsageTracker(undefined, {
+  intervalMs: 0, retryMs: 0, maxRetryMs: 0,
+});
 
 test("native Claude meters show separate session and weekly header bars", () => {
   const monitor = createClaudeUsageMonitor(auth);
@@ -208,7 +213,7 @@ function fixture(
   {
     nativeBoundary = false,
     readAuth = async () => auth,
-    usageForAccount = createClaudeUsageTracker(),
+    usageForAccount = unthrottledTracker(),
   } = {},
 ) {
   let release;
@@ -366,7 +371,7 @@ test("the next SDK turn continues when its initial quota lookup is empty or fail
     { ...reading(), rate_limits: { ...reading().rate_limits, limits: [] } },
     new Error("lookup failed"),
   ]) {
-    const usageForAccount = createClaudeUsageTracker();
+    const usageForAccount = unthrottledTracker();
     const first = fixture([reading(20), incomplete], { usageForAccount });
     assert.equal((await first.run()).status, "completed");
     const lastConfirmedAt = first.events.find((e) => e.type === "usage")
@@ -382,7 +387,7 @@ test("the next SDK turn continues when its initial quota lookup is empty or fail
 });
 
 test("a native quota boundary prevents the next turn using cached verification", async () => {
-  const usageForAccount = createClaudeUsageTracker();
+  const usageForAccount = unthrottledTracker();
   const first = fixture([reading()], { nativeBoundary: true, usageForAccount });
   assert.equal((await first.run()).status, "failed");
   const next = fixture([incomplete], { usageForAccount });
@@ -391,7 +396,7 @@ test("a native quota boundary prevents the next turn using cached verification",
 });
 
 test("connection refresh preserves verification and the model catalog during a telemetry outage", async () => {
-  const usageForAccount = createClaudeUsageTracker();
+  const usageForAccount = unthrottledTracker();
   const first = fixture([reading()], { usageForAccount });
   await first.run();
   let closed = false;

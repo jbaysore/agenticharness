@@ -1,3 +1,5 @@
+export const CLAUDE_USAGE_POLL_INTERVAL_MS = 60_000;
+
 // Missing telemetry makes verified subscription-only usage stale. Only an
 // explicit billing boundary invalidates it; turns share it for the same account.
 function confirmedBoundary(usage) {
@@ -64,15 +66,100 @@ function publicUsage(usage) {
   };
 }
 
+function retryAfterMs(error, now) {
+  const headers = error?.response?.headers ?? error?.headers;
+  const value = headers?.get?.("retry-after") ?? headers?.["retry-after"];
+  if (value == null) return 0;
+  const seconds = Number(value);
+  const delay = Number.isFinite(seconds)
+    ? seconds * 1000
+    : Date.parse(value) - now;
+  return Number.isFinite(delay) ? Math.max(0, delay) : 0;
+}
+
+// Keep only diagnostic categories and HTTP status, never arbitrary SDK error
+// text: it may contain account details or credentials.
+function lookupFailure(error, fallback) {
+  if (!error) return fallback;
+  const status = error.status ?? error.response?.status;
+  return Number.isInteger(status) && status >= 100 && status <= 599
+    ? `Claude usage lookup failed (HTTP ${status}).`
+    : "Claude usage lookup failed.";
+}
+
 export function createClaudeUsageMonitor(
   auth,
   now = () => new Date().toISOString(),
+  {
+    clock = Date.now,
+    intervalMs = CLAUDE_USAGE_POLL_INTERVAL_MS,
+    retryMs = 5 * 60_000,
+    maxRetryMs = 15 * 60_000,
+  } = {},
 ) {
   let lastConfirmed = null,
-    lastConfirmedAt = null;
-  return {
+    lastConfirmedAt = null,
+    current = null,
+    pending = null,
+    nextReadAt = 0,
+    failures = 0,
+    generation = 0;
+  const monitor = {
     invalidate() {
       lastConfirmed = null;
+      current = null;
+      pending = null;
+      nextReadAt = 0;
+      failures = 0;
+      generation++;
+    },
+    // All chats, catalog probes and workers for this account share both an
+    // in-flight request and its result. Reusing it never advances confirmation.
+    async read(fetchUsage) {
+      if (pending) return pending;
+      if (current && clock() < nextReadAt) return current;
+      const startedGeneration = generation;
+      const task = Promise.resolve()
+        .then(async () => {
+          let reading = null,
+            error;
+          try {
+            reading = await fetchUsage();
+          } catch (failure) {
+            error = failure;
+          }
+          // A native boundary observed during the lookup takes precedence over
+          // its older answer. It must not resurrect subscription verification.
+          if (startedGeneration !== generation)
+            return current ?? monitor.update(null);
+          const problem = checkClaudeBilling(auth, reading);
+          const failed = !!problem && !confirmedBoundary(reading);
+          failures = failed ? failures + 1 : 0;
+          const checkedAt = clock();
+          const delay = failed
+            ? Math.max(
+                Math.min(retryMs * 2 ** Math.min(failures - 1, 10), maxRetryMs),
+                retryAfterMs(error, checkedAt),
+              )
+            : intervalMs;
+          nextReadAt = checkedAt + delay;
+          const result = monitor.update(reading);
+          current = {
+            ...result,
+            usage: {
+              ...result.usage,
+              lastAttemptAt: new Date(checkedAt).toISOString(),
+              nextCheckAt: new Date(nextReadAt).toISOString(),
+              lookupProblem: failed ? lookupFailure(error, problem) : null,
+            },
+          };
+          return current;
+        })
+        .finally(() => {
+          if (pending === task) pending = null;
+        });
+      pending = task;
+      return task;
     },
     update(reading) {
       const problem = checkClaudeBilling(auth, reading);
@@ -98,11 +185,12 @@ export function createClaudeUsageMonitor(
       };
     },
   };
+  return monitor;
 }
 
 // Keep verification in memory for this host, across chats, probes and workers.
 // A changed account, organization, plan or login route must verify afresh.
-export function createClaudeUsageTracker(now) {
+export function createClaudeUsageTracker(now, polling) {
   let account = null,
     monitor;
   return (auth) => {
@@ -116,8 +204,9 @@ export function createClaudeUsageTracker(now) {
           ])
         : null;
     if (!key || key !== account) {
+      monitor?.invalidate();
       account = key;
-      monitor = createClaudeUsageMonitor(auth, now);
+      monitor = createClaudeUsageMonitor(auth, now, polling);
     }
     return monitor;
   };

@@ -9,7 +9,10 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AsyncQueue } from "../core/queue.mjs";
 import { checkCodexBilling } from "../security/billing.mjs";
 import { claudeAuth, claudeOptions, usageOf } from "./claude.mjs";
-import { claudeUsageForAccount } from "../security/claude-usage.mjs";
+import {
+  claudeUsageForAccount,
+  CLAUDE_USAGE_POLL_INTERVAL_MS,
+} from "../security/claude-usage.mjs";
 import { checkCodexRoute, openCodex } from "./codex.mjs";
 import {
   REVIEW_PROMPT,
@@ -58,7 +61,7 @@ export async function runClaudeWorker(
     readAuth = claudeAuth,
     baseOptions = claudeOptions,
     readUsage = usageOf,
-    pollIntervalMs = 15000,
+    pollIntervalMs = CLAUDE_USAGE_POLL_INTERVAL_MS,
     usageForAccount = claudeUsageForAccount,
   } = {},
 ) {
@@ -111,7 +114,7 @@ export async function runClaudeWorker(
   try {
     const auth = await readAuth(),
       monitor = usageForAccount(auth),
-      reason = monitor.update(await readUsage(q).catch(() => null)).reason;
+      { reason } = await monitor.read(() => readUsage(q));
     if (reason) throw new WorkerUnavailable(reason);
     if (signal.aborted) throw cancelled();
     input.push({
@@ -125,9 +128,7 @@ export async function runClaudeWorker(
         if (checkingQuota) return;
         checkingQuota = true;
         try {
-          const { reason: blocked } = monitor.update(
-            await readUsage(q).catch(() => null),
-          );
+          const { reason: blocked } = await monitor.read(() => readUsage(q));
           if (blocked) throw new WorkerUnavailable(blocked);
         } catch (error) {
           boundaryError = error;
@@ -169,9 +170,7 @@ export async function runClaudeWorker(
           event.errors?.join("\n") || "The worker ended without an answer",
         );
       if (mode === "review") {
-        const { reason: blocked } = monitor.update(
-          await readUsage(q).catch(() => null),
-        );
+        const { reason: blocked } = await monitor.read(() => readUsage(q));
         if (blocked) throw new WorkerUnavailable(blocked);
       }
       const used = Object.values(event.modelUsage ?? {});

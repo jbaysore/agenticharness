@@ -80,6 +80,10 @@ Unknown and the last confirmation time. Complete readings restore the meter
 automatically. Account, organization, plan or login-route changes require fresh
 verification; confirmed exhausted limits or enabled paid usage invalidate the
 saved verification and stop the turn with a visible reason.
+Claude usage reads are shared across chats, connection refreshes and workers,
+at most once a minute while active. Missing or failed readings retry after five,
+then ten, then fifteen minutes; a longer provider Retry-After is honored. Cached
+reads retain their original confirmation time. Refresh also respects this cooldown.
 Unknown or exhausted quota stops Codex. Cursor's account-level disabled on-demand setting is the
 billing boundary. The app never supplies an inference API key or buys credits.
 

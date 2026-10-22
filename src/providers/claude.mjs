@@ -17,6 +17,7 @@ import { claudeContent } from "./attachments.mjs";
 import {
   checkClaudeBilling,
   claudeUsageForAccount,
+  CLAUDE_USAGE_POLL_INTERVAL_MS,
 } from "../security/claude-usage.mjs";
 export { checkClaudeBilling };
 const exec = promisify(execFile);
@@ -83,11 +84,7 @@ export async function projectInstructions(dir) {
 export async function usageOf(q) {
   const fn = q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
   if (typeof fn !== "function") return null;
-  try {
-    return await fn.call(q, { skipBehaviors: true });
-  } catch {
-    return null;
-  }
+  return await fn.call(q, { skipBehaviors: true });
 }
 export async function inspectClaude(
   cwd,
@@ -115,7 +112,7 @@ export async function inspectClaude(
     q = queryFn({ prompt: input, options: { ...baseOptions(cwd), tools: [] } });
   try {
     const models = await q.supportedModels(),
-      verification = monitor.update(await readUsage(q).catch(() => null));
+      verification = await monitor.read(() => readUsage(q));
     return {
       id: "claude",
       name: "Claude Code",
@@ -187,7 +184,7 @@ export async function runClaude(
     readAuth = claudeAuth,
     readUsage = usageOf,
     baseOptions = claudeOptions,
-    pollIntervalMs = 20000,
+    pollIntervalMs = CLAUDE_USAGE_POLL_INTERVAL_MS,
     usageForAccount = claudeUsageForAccount,
   } = {},
 ) {
@@ -396,7 +393,7 @@ export async function runClaude(
   try {
     const auth = await readAuth(),
       monitor = usageForAccount(auth),
-      initial = monitor.update(await readUsage(q).catch(() => null));
+      initial = await monitor.read(() => readUsage(q));
     ctx.emit("usage", initial.usage);
     if (initial.reason) throw new Error(initial.reason);
     if (ctx.signal.aborted)
@@ -415,9 +412,8 @@ export async function runClaude(
       polling = true;
       try {
         // A failed lookup is telemetry loss, not evidence of a billing change.
-        const reading = await readUsage(q).catch(() => null);
+        const next = await monitor.read(() => readUsage(q));
         if (finished || ctx.signal.aborted) return;
-        const next = monitor.update(reading);
         ctx.emit("usage", next.usage);
         if (next.reason) {
           stopped = next.reason;

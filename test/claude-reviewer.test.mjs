@@ -34,11 +34,14 @@ const result = () => ({
     },
   },
 });
+const unthrottledTracker = () => createClaudeUsageTracker(undefined, {
+  intervalMs: 0, retryMs: 0, maxRetryMs: 0,
+});
 
 function fixture({
   problem,
   signal = new AbortController().signal,
-  usageForAccount = createClaudeUsageTracker(),
+  usageForAccount = unthrottledTracker(),
 } = {}) {
   let options,
     closed = false,
@@ -214,9 +217,19 @@ for (const problem of ["post-unknown", "poll-unknown", "poll-error"])
   });
 
 test("a worker can start with unknown telemetry for an already verified account", async () => {
-  const usageForAccount = createClaudeUsageTracker();
+  const usageForAccount = unthrottledTracker();
   await fixture({ usageForAccount }).run();
   const next = fixture({ problem: "unknown", usageForAccount });
   assert.equal((await next.run()).text, JSON.stringify(verdict));
   assert.equal(next.inputSeen, true);
+});
+
+test("short Claude reviews share the account reading without pre/post request bursts", async () => {
+  const usageForAccount = createClaudeUsageTracker();
+  const first = fixture({ usageForAccount });
+  const next = fixture({ usageForAccount });
+  assert.equal((await first.run()).text, JSON.stringify(verdict));
+  assert.equal((await next.run()).text, JSON.stringify(verdict));
+  assert.equal(first.reads, 1);
+  assert.equal(next.reads, 0);
 });
