@@ -20,7 +20,7 @@ try {
     role: "user",
     content: "Check the editorial workspace and adjustable sidebars.",
   });
-  for (const title of ["Second chat", "Third chat"])
+  for (const title of ["Second chat", "Third chat", "Fourth chat"])
     app.store.addMessage({
       conversationId: app.store.createConversation({
         projectId: project.id,
@@ -163,7 +163,8 @@ try {
   await page.setViewportSize({ width: 1512, height: 982 });
   await expect(right).toBeVisible();
 
-  // Up to three chats sit side by side; the work panel gives way before a chat does.
+  // One to three chats sit side by side; four fill a two-by-two grid.
+  // The work panel gives way before a chat does.
   const panes = page.locator(".chat-pane");
   const focused = page.locator(".chat-pane.focused");
   const paneFor = (name) => page.getByRole("region", { name, exact: true });
@@ -194,7 +195,7 @@ try {
   await sidebarChat("Third chat").click({ button: "middle" });
   await expect(panes).toHaveCount(3);
   await expect(focused).toHaveAttribute("aria-label", "Third chat");
-  await expect(page.getByLabel("Add a pane beside")).toBeDisabled();
+  await expect(page.getByLabel("Add a pane beside")).toBeEnabled();
   for (const paneWidth of await panes.evaluateAll((all) =>
     all.map((pane) => pane.getBoundingClientRect().width),
   ))
@@ -208,6 +209,46 @@ try {
     path: ".local/screenshots/three-panes-desktop.png",
     fullPage: true,
   });
+  await sidebarChat("Fourth chat").click({ button: "middle" });
+  await expect(panes).toHaveCount(4);
+  await expect(page.locator(".pane-strip")).toHaveClass(/quad/);
+  await expect(focused).toHaveAttribute("aria-label", "Fourth chat");
+  const boxes = await panes.evaluateAll((all) =>
+    all.map((pane) => {
+      const box = pane.getBoundingClientRect();
+      return {
+        label: pane.ariaLabel,
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+      };
+    }),
+  );
+  expect(boxes.map((box) => box.label)).toEqual([
+    "Layout check",
+    "Second chat",
+    "Third chat",
+    "Fourth chat",
+  ]);
+  for (const box of boxes) {
+    expect(box.width).toBeGreaterThanOrEqual(390);
+    expect(box.height).toBeGreaterThan(0);
+  }
+  expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThan(1);
+  expect(Math.abs(boxes[2].y - boxes[3].y)).toBeLessThan(1);
+  expect(boxes[2].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 1);
+  expect(Math.abs(boxes[0].x - boxes[2].x)).toBeLessThan(1);
+  expect(Math.abs(boxes[1].x - boxes[3].x)).toBeLessThan(1);
+  expect(boxes[1].x).toBeGreaterThan(boxes[0].x);
+  await expect(page.getByLabel("Add a pane beside")).toBeDisabled();
+  await noOverflow();
+  await page.keyboard.press("Alt+4");
+  await expect(focused).toHaveAttribute("aria-label", "Fourth chat");
+  await expect(focused.getByLabel("Message your coding agent")).toBeFocused();
+  await paneFor("Fourth chat").getByLabel("Close pane").click();
+  await expect(panes).toHaveCount(3);
+  await expect(page.locator(".pane-strip")).not.toHaveClass(/quad/);
   await sidebarChat("Layout check").click();
   await expect(panes).toHaveCount(3);
   await expect(focused).toHaveAttribute("aria-label", "Layout check");
@@ -559,7 +600,7 @@ try {
   await expect.poll(() => width(left)).toBe(256);
   expect(errors).toEqual([]);
   console.log(
-    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, header drag reordering and cancellation, draft preservation, unused empty chats discarded on close, pin and unpin, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
+    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, a two-by-two grid of four, header drag reordering and cancellation, draft preservation, unused empty chats discarded on close, pin and unpin, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
   );
 } finally {
   await browser?.close();

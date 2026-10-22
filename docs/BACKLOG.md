@@ -29,7 +29,7 @@
 
 7. Rename/archive projects and delete chats from the UI, and add more keyboard
    shortcuts. Chats can be renamed and archived, panels collapse and resize, and
-   Alt+1/2/3 moves between side-by-side chats.
+   Alt+1 through Alt+4 moves between open chats.
 8. Group tool events into one updating card and make native subagent progress
    easier to scan. Keep provider-managed work distinct from app orchestration.
 9. Resolve/retire individual review comments and navigate deleted-line anchors.

@@ -35,6 +35,7 @@ import {
   readExpandedFolders,
 } from "./sidebar-folders.mjs";
 import {
+  canOpenAnother,
   closePane,
   focusedPane,
   focusPane,
@@ -48,6 +49,7 @@ import {
   setPaneChat,
   showHome,
   toSearch,
+  visibleCount,
   visiblePanes,
 } from "./panes.mjs";
 
@@ -96,7 +98,7 @@ function App() {
     setLayout,
     mobile,
     docked,
-    paneLimit,
+    columnBudget,
     leftWidth,
     rightWidth,
     leftMax,
@@ -156,11 +158,11 @@ function App() {
     }),
     paneRefs = useRef({}),
     draggedPane = useRef(null),
-    limit = useRef(paneLimit),
+    limit = useRef(columnBudget),
     marking = useRef(new Set()),
     errorTimer = useRef(null),
     build = useRef(loadedBuild);
-  limit.current = paneLimit;
+  limit.current = columnBudget;
   const report = useCallback((e, kind = "error") => {
     setToastKind(kind);
     setError(e.message ?? String(e));
@@ -459,7 +461,10 @@ function App() {
     document.addEventListener("visibilitychange", changed);
     return () => document.removeEventListener("visibilitychange", changed);
   }, []);
-  const shown = visiblePanes(view, paneLimit),
+  const shown = visiblePanes(
+      view,
+      visibleCount(view.panes.length, columnBudget),
+    ),
     current = focusedPane(view),
     chat = (current.chatId && chats[current.chatId]) || null;
   const finishPaneDrag = () => {
@@ -558,7 +563,7 @@ function App() {
         !mobile &&
         !!current.chatId &&
         !openIds.includes(c.id) &&
-        view.panes.length < paneLimit
+        canOpenAnother(view.panes.length, columnBudget)
       }
       onOpen={(beside) => action(() => openChat(c.id, beside))()}
       onRename={(title) =>
@@ -940,11 +945,14 @@ function App() {
               className="icon-button"
               aria-label="Add a pane beside"
               title={
-                view.panes.length >= paneLimit
-                  ? "No room for another chat at this window size"
-                  : "Open another chat beside this one"
+                canOpenAnother(view.panes.length, columnBudget)
+                  ? "Open another chat beside this one"
+                  : "No room for another chat at this window size"
               }
-              disabled={view.panes.length >= paneLimit || !current.chatId}
+              disabled={
+                !canOpenAnother(view.panes.length, columnBudget) ||
+                !current.chatId
+              }
               onClick={() =>
                 setView((v) =>
                   openBeside(v, null, project?.id ?? "", limit.current),
@@ -971,7 +979,7 @@ function App() {
             sent twice.
           </div>
         )}
-        <div className="pane-strip">
+        <div className={"pane-strip" + (shown.length === 4 ? " quad" : "")}>
           {shown.map((p) => (
             <ChatPane
               key={p.key}

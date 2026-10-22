@@ -676,6 +676,11 @@ small {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(var(--panes, 1), minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+.pane-strip.quad {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 .chat-pane {
   display: flex;
@@ -686,6 +691,15 @@ small {
 }
 .chat-pane + .chat-pane {
   border-left: 1px solid var(--line);
+}
+.pane-strip.quad > .chat-pane {
+  border-left: 0;
+}
+.pane-strip.quad > .chat-pane:nth-child(even) {
+  border-left: 1px solid var(--line);
+}
+.pane-strip.quad > .chat-pane:nth-child(n + 3) {
+  border-top: 1px solid var(--line);
 }
 .pane-header {
   height: 39px;

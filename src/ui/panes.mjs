@@ -1,6 +1,7 @@
-// Which chats are open side by side. A pane's key is its identity: replacing
+// Which chats are open together. A pane's key is its identity: replacing
 // the chat in a pane makes a new key, so the composer starts fresh for it.
-export const MAX_PANES = 3;
+// One to three panes share a row. Four panes are a two-by-two grid.
+export const MAX_PANES = 4;
 export const MIN_PANE_WIDTH = 390;
 const storageKey = "harness.panes.v1";
 let created = 0;
@@ -48,13 +49,14 @@ export function openInFocused(state, chatId, projectId = "") {
     focused: next.key,
   };
 }
+// `limit` is how many columns the window can hold, not a pane count.
 export function openBeside(state, chatId, projectId = "", limit = MAX_PANES) {
   const existing = chatId && state.panes.find((p) => p.chatId === chatId);
   if (existing) return focusPane(state, existing.key);
   const current = focusedPane(state);
   if (!current.chatId)
     return chatId ? openInFocused(state, chatId, projectId) : state;
-  if (state.panes.length >= Math.min(limit, MAX_PANES))
+  if (!canOpenAnother(state.panes.length, limit))
     return chatId ? openInFocused(state, chatId, projectId) : state;
   const next = pane(chatId, projectId),
     index = state.panes.indexOf(current);
@@ -98,11 +100,31 @@ export function closePane(state, key, projectId = "") {
         : state.focused,
   };
 }
+// Four panes use two columns. Fewer panes stay on one row, one column each.
+export function columnsFor(count) {
+  return count === 4 ? 2 : Math.max(1, count);
+}
+export function columnBudget(viewport, leftSpace = 0) {
+  return Math.max(1, Math.floor((viewport - leftSpace) / MIN_PANE_WIDTH));
+}
+export function canOpenAnother(openCount, budget) {
+  const next = openCount + 1;
+  return next <= MAX_PANES && columnsFor(next) <= Math.max(1, budget);
+}
+// The largest count that still fits. Four stay visible on a two-column window.
+export function visibleCount(openCount, budget) {
+  const room = Math.max(1, budget);
+  for (let n = Math.min(openCount, MAX_PANES); n > 1; n--) {
+    if (columnsFor(n) <= room) return n;
+  }
+  return 1;
+}
+// How many panes you can reach by opening one at a time at this width.
 export function maxPanes(viewport, leftSpace = 0) {
-  return Math.min(
-    MAX_PANES,
-    Math.max(1, Math.floor((viewport - leftSpace) / MIN_PANE_WIDTH)),
-  );
+  const budget = columnBudget(viewport, leftSpace);
+  let count = 1;
+  while (canOpenAnother(count, budget)) count += 1;
+  return count;
 }
 // When the window is too narrow for every pane, the focused one always shows.
 export function visiblePanes(state, limit) {

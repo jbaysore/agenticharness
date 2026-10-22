@@ -65,8 +65,8 @@ and on phones the project sidebar does too. Escape dismisses these overlays.
 
 ## Working in several chats
 
-Each chat runs its own turn, so several can work at once. Up to three show side
-by side:
+Each chat runs its own turn, so several can work at once. Up to four show at
+once. One, two, or three sit side by side; four fill a two-by-two grid:
 
 - Click a chat to open it in the focused pane. Ctrl-click or middle-click it, or
   use **Open beside** on its sidebar row, to add a pane. The split button in the
@@ -75,10 +75,13 @@ by side:
 - Each pane has its own composer, draft, agent and model. A draft stays with its
   chat when the pane is closed. Closing a pane never stops the chat's work.
 - The header breadcrumb and the work panel (Review, Work, Files, Terminal) follow
-  the pane you last clicked. Alt+1, Alt+2 and Alt+3 move focus between panes.
-- The window width decides how many panes fit: each needs 390 px. A pane that
-  does not fit stays open and reappears when the window widens. The work panel
-  stays docked while every pane keeps that width and otherwise opens over them.
+  the pane you last clicked. Alt+1, Alt+2, Alt+3 and Alt+4 move focus between
+  panes.
+- The window width decides how many panes fit. A row needs 390 px for each
+  pane. Four panes need the width of two, because they stack in two rows. A
+  pane that does not fit stays open and reappears when the window widens. The
+  work panel stays docked while every pane keeps that width and otherwise
+  opens over them.
 - Open panes are part of the address and are restored on the next launch.
 
 Sidebar rows mark what a chat is doing: a pulsing dot while it works, **!** when

@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  canOpenAnother,
   closePane,
+  columnBudget,
+  columnsFor,
   focusedPane,
   focusPane,
   initialPanes,
@@ -15,6 +18,7 @@ import {
   setPaneChat,
   showHome,
   toSearch,
+  visibleCount,
   visiblePanes,
 } from "../src/ui/panes.mjs";
 const chats = (state) => state.panes.map((p) => p.chatId);
@@ -28,7 +32,7 @@ test("a workspace starts with one empty pane and opens a chat in it", () => {
   assert.notEqual(state.focused, blank);
   assert.equal(focusedPane(state).projectId, "project");
 });
-test("opening beside adds panes after the focused one, up to three", () => {
+test("opening beside adds panes after the focused one, up to four", () => {
   let state = openInFocused(initialPanes(), "a");
   state = openBeside(state, "b");
   state = focusPane(state, state.panes[0].key);
@@ -36,7 +40,10 @@ test("opening beside adds panes after the focused one, up to three", () => {
   assert.deepEqual(chats(state), ["a", "c", "b"]);
   assert.equal(focusedPane(state).chatId, "c");
   state = openBeside(state, "d");
-  assert.deepEqual(chats(state), ["a", "d", "b"]);
+  assert.deepEqual(chats(state), ["a", "c", "d", "b"]);
+  assert.equal(focusedPane(state).chatId, "d");
+  state = openBeside(state, "e");
+  assert.deepEqual(chats(state), ["a", "c", "e", "b"]);
   assert.equal(openBeside(state, null), state);
 });
 test("the narrower limit of the window is respected when opening beside", () => {
@@ -94,11 +101,28 @@ test("reordering moves panes in both directions without changing their identity 
   assert.equal(movePane(state, a.key, "missing"), state);
 });
 test("the window width decides how many panes show, keeping the focused one", () => {
-  assert.equal(maxPanes(1920, 246), 3);
+  assert.equal(columnBudget(1920, 246), 4);
+  assert.equal(columnBudget(1512, 246), 3);
+  assert.equal(columnBudget(1366, 246), 2);
+  assert.equal(columnBudget(1000, 246), 1);
+  assert.equal(maxPanes(1920, 246), 4);
+  assert.equal(maxPanes(1512, 246), 4);
   assert.equal(maxPanes(1366, 246), 2);
   assert.equal(maxPanes(1000, 246), 1);
   assert.equal(maxPanes(390, 0), 1);
   assert.equal(maxPanes(200, 0), 1);
+  assert.equal(columnsFor(1), 1);
+  assert.equal(columnsFor(3), 3);
+  assert.equal(columnsFor(4), 2);
+  assert.equal(canOpenAnother(2, 2), false);
+  assert.equal(canOpenAnother(3, 2), true);
+  assert.equal(canOpenAnother(3, 3), true);
+  assert.equal(canOpenAnother(4, 4), false);
+  assert.equal(visibleCount(3, 2), 2);
+  assert.equal(visibleCount(4, 2), 4);
+  assert.equal(visibleCount(4, 1), 1);
+  const wide = openBeside(initialPanes(["a", "b", "c"], 2), "d", "", 2);
+  assert.deepEqual(chats(wide), ["a", "b", "c", "d"]);
   const state = initialPanes(["a", "b", "c"], 2);
   assert.deepEqual(
     visiblePanes(state, 2).map((p) => p.chatId),
@@ -113,6 +137,12 @@ test("the window width decides how many panes show, keeping the focused one", ()
     ["a", "b"],
   );
   assert.equal(visiblePanes(state, 3), state.panes);
+  const four = initialPanes(["a", "b", "c", "d"], 3);
+  assert.equal(visiblePanes(four, visibleCount(4, 2)), four.panes);
+  assert.deepEqual(
+    visiblePanes(four, visibleCount(4, 1)).map((p) => p.chatId),
+    ["d"],
+  );
 });
 test("home is one new conversation and stays put when that is already open", () => {
   const split = openBeside(openInFocused(initialPanes(), "a"), "b");
@@ -133,7 +163,8 @@ test("open chats round-trip through the address and a single-chat link still wor
   assert.equal(toSearch(state), "/?chat=a,b");
   assert.deepEqual(parseSearch("?chat=a,b"), ["a", "b"]);
   assert.deepEqual(parseSearch("?chat=a"), ["a"]);
-  assert.deepEqual(parseSearch("?chat=a,a,,b,c,d"), ["a", "b", "c"]);
+  assert.deepEqual(parseSearch("?chat=a,a,,b,c,d"), ["a", "b", "c", "d"]);
+  assert.deepEqual(parseSearch("?chat=a,b,c,d,e"), ["a", "b", "c", "d"]);
   assert.deepEqual(parseSearch(""), []);
   assert.equal(toSearch(initialPanes()), "/");
 });

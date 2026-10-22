@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { MIN_PANE_WIDTH, maxPanes } from "./panes.mjs";
+import {
+  MIN_PANE_WIDTH,
+  columnBudget,
+  columnsFor,
+  visibleCount,
+} from "./panes.mjs";
 
 const storageKey = "harness.sidebar-layout.v1";
 const defaults = {
@@ -50,9 +55,9 @@ export function useSidebarLayout(paneCount = 1) {
     : Math.min(420, viewport - MIN_PANE_WIDTH);
   const leftWidth = clamp(layout.leftWidth, 220, leftLimit);
   const leftSpace = layout.leftOpen ? leftWidth : 0;
-  // The sidebar keeps its width; the window decides how many chats fit beside it.
-  const paneLimit = mobile ? 1 : maxPanes(viewport, leftSpace);
-  const chatSpace = MIN_PANE_WIDTH * Math.min(paneCount, paneLimit);
+  // The sidebar keeps its width; the window decides how many columns fit beside it.
+  const budget = mobile ? 1 : columnBudget(viewport, leftSpace);
+  const chatSpace = MIN_PANE_WIDTH * columnsFor(visibleCount(paneCount, budget));
   const docked = viewport > 1150 && viewport - leftSpace - 320 >= chatSpace;
   const rightMax = docked
     ? Math.min(640, viewport - leftSpace - chatSpace)
@@ -68,7 +73,7 @@ export function useSidebarLayout(paneCount = 1) {
     setLayout,
     mobile,
     docked,
-    paneLimit,
+    columnBudget: budget,
     leftWidth,
     rightWidth,
     leftMax,
