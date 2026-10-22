@@ -33,6 +33,7 @@ import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
 import { uploadAttachment, serveAttachment } from "./core/attachments.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
+import { openReviewer } from "./providers/workers.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
 import { APP_VERSION } from "./core/version.mjs";
@@ -838,6 +839,7 @@ export async function createHarness({
     bridgeUrl: localOrigin,
     browser: startProviders ? new Browser(dataDir) : null,
     worktreeRoot: join(dataDir, "worktrees"),
+    openReviewer,
   });
   controller.tidyAll();
   controller.on("event", (event) => {

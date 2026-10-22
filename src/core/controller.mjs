@@ -57,11 +57,7 @@ import {
   attachmentInfo,
   resolveAttachments,
 } from "./attachments.mjs";
-import {
-  openReviewer,
-  runClaudeWorker,
-  runCodexWorker,
-} from "../providers/workers.mjs";
+import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
 import {
   createWorktree,
@@ -81,7 +77,14 @@ export const PERMISSION_MODES = ["auto", "manual", "override"];
 export class Controller extends EventEmitter {
   constructor(
     store,
-    { probePath, bridgeUrl, browser = null, worktreeRoot = null, dataDir },
+    {
+      probePath,
+      bridgeUrl,
+      browser = null,
+      worktreeRoot = null,
+      dataDir,
+      openReviewer: openReviewerOption = null,
+    },
   ) {
     super();
     this.store = store;
@@ -102,7 +105,7 @@ export class Controller extends EventEmitter {
     this.tidying = new Map();
     this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
-    this.openReviewer = openReviewer;
+    this.openReviewer = openReviewerOption;
     this.workerTimeoutMs = 5 * 60 * 1000;
     this.reviewerTimeoutMs = 60 * 1000;
     this.goalQuestionTimeoutMs = GOAL_QUESTION_TIMEOUT_MS;
@@ -1243,9 +1246,10 @@ export class Controller extends EventEmitter {
         kind: "goal-question",
         item: {
           title: "The agent is choosing",
-          description: key && active.goalQuestions.has(key)
-            ? "This question already timed out. " + GOAL_QUESTION_TIMEOUT
-            : "Three questions already timed out. " + GOAL_QUESTION_TIMEOUT,
+          description:
+            key && active.goalQuestions.has(key)
+              ? "This question already timed out. " + GOAL_QUESTION_TIMEOUT
+              : "Three questions already timed out. " + GOAL_QUESTION_TIMEOUT,
         },
       });
       return outcome();
@@ -1262,7 +1266,9 @@ export class Controller extends EventEmitter {
   waitApproval(run, request, signal, { timeoutMs = 0 } = {}) {
     if (signal.aborted) return Promise.resolve({ allow: false });
     const stored =
-      timeoutMs > 0 ? { ...request, deadline: Date.now() + timeoutMs } : request;
+      timeoutMs > 0
+        ? { ...request, deadline: Date.now() + timeoutMs }
+        : request;
     const approval = this.store.addApproval(
       run.conversation_id,
       run.id,
