@@ -17,6 +17,8 @@ import { UsageGlance } from "./usage-glance.jsx";
 import {
   activeChats,
   attentionCount,
+  pinnedChats,
+  sidebarOrder,
   usageVerificationLabel,
   workspacePeers,
   workspacePeersLabel,
@@ -467,6 +469,7 @@ function App() {
   }, [shown.map((p) => p.key).join(",")]);
   // The taskbar shows how many chats are waiting while the window is in the background.
   const active = activeChats(state.conversations),
+    pinned = pinnedChats(state.conversations),
     attention = attentionCount(state.conversations),
     foldersOpen = openFolderIds(expandedFolders, selectedProject);
   useEffect(() => {
@@ -501,6 +504,9 @@ function App() {
       onOpen={(beside) => action(() => openChat(c.id, beside))()}
       onRename={(title) =>
         action(() => api("/api/chats/" + c.id, { title }, "PATCH"))()
+      }
+      onPin={(pinned) =>
+        action(() => api("/api/chats/" + c.id, { pinned }, "PATCH"))()
       }
       onArchive={(archived) => action(() => archiveChat(c, archived))()}
     />
@@ -659,6 +665,19 @@ function App() {
             </div>
           </>
         )}
+        {pinned.length > 0 && (
+          <>
+            <div className="section-label">Pinned</div>
+            <div className="active-list" role="group" aria-label="Pinned chats">
+              {pinned.map((c) =>
+                chatRow(
+                  c,
+                  state.projects.find((p) => p.id === c.project_id)?.name,
+                ),
+              )}
+            </div>
+          </>
+        )}
         <div className="section-label">
           Projects
           <button
@@ -674,7 +693,8 @@ function App() {
             const mine = state.conversations.filter(
                 (c) => c.project_id === p.id,
               ),
-              archived = mine.filter((c) => c.archived_at),
+              archived = sidebarOrder(mine.filter((c) => c.archived_at)),
+              openChats = sidebarOrder(mine.filter((c) => !c.archived_at)),
               open = foldersOpen.includes(p.id),
               showingArchived = archivedOpen.includes(p.id);
             return (
@@ -718,7 +738,7 @@ function App() {
                 </div>
                 {open && (
                   <div id={`project-${p.id}-chats`}>
-                    {mine.filter((c) => !c.archived_at).map((c) => chatRow(c))}
+                    {openChats.map((c) => chatRow(c))}
                     {archived.length > 0 && (
                       <button
                         className="archived-toggle"

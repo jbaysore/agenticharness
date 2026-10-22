@@ -35,6 +35,24 @@ export function chatMarkerLabel(marker) {
     }[marker] ?? ""
   );
 }
+// Pinned chats lead, most recently pinned first. The rest stay in
+// newest-activity order. Pinning does not change that activity time.
+export function sidebarOrder(conversations) {
+  return [...conversations].sort((a, b) => {
+    if (a.pinned_at || b.pinned_at) {
+      if (!a.pinned_at) return 1;
+      if (!b.pinned_at) return -1;
+      const pin = b.pinned_at.localeCompare(a.pinned_at);
+      if (pin) return pin;
+    }
+    return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
+  });
+}
+export function pinnedChats(conversations) {
+  return sidebarOrder(conversations).filter(
+    (c) => c.pinned_at && !c.archived_at,
+  );
+}
 export function activeChats(conversations) {
   const order = ["approval", "failed", "unread", "running"];
   return conversations

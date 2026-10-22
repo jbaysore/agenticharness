@@ -11,6 +11,7 @@ export function ChatRow({
   canSplit,
   onOpen,
   onRename,
+  onPin,
   onArchive,
 }) {
   const [title, setTitle] = useState(null),
@@ -52,9 +53,14 @@ export function ChatRow({
     <div
       className={
         `chat-row ${chat.provider} ${placement}` +
-        (chat.archived_at ? " archived" : "")
+        (chat.archived_at ? " archived" : "") +
+        (chat.pinned_at ? " pinned" : "") +
+        (canSplit ? " can-split" : "")
       }
-      title={label || undefined}
+      title={
+        [label, chat.pinned_at && "Pinned"].filter(Boolean).join(" · ") ||
+        undefined
+      }
     >
       <button
         className="chat-open"
@@ -64,6 +70,11 @@ export function ChatRow({
         }}
       >
         <span className={"provider-dot " + chat.provider} aria-hidden="true" />
+        {chat.pinned_at && (
+          <span className="chat-pin" aria-hidden="true">
+            <Icon name="pin" size={12} />
+          </span>
+        )}
         <span>{chat.title}</span>
       </button>
       {detail && (
@@ -89,6 +100,15 @@ export function ChatRow({
             <Icon name="split" size={13} />
           </button>
         )}
+        <button
+          className={"icon-button" + (chat.pinned_at ? " active" : "")}
+          aria-label={`${chat.pinned_at ? "Unpin" : "Pin"} ${chat.title}`}
+          aria-pressed={!!chat.pinned_at}
+          title={chat.pinned_at ? "Unpin" : "Pin"}
+          onClick={() => onPin(!chat.pinned_at)}
+        >
+          <Icon name="pin" size={13} />
+        </button>
         <button
           className="icon-button"
           aria-label={`Rename ${chat.title}`}

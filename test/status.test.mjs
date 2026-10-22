@@ -5,8 +5,10 @@ import {
   attentionCount,
   chatMarker,
   chatMarkerLabel,
+  pinnedChats,
   providerStatusLabel,
   resetLabel,
+  sidebarOrder,
   usageGlance,
   usageWindows,
 } from "../src/ui/status.mjs";
@@ -99,6 +101,36 @@ test("the active list puts chats that need you first and leaves out archived one
   );
   assert.equal(attentionCount(conversations), 3);
   assert.equal(attentionCount([]), 0);
+});
+
+test("pinned chats lead their project and archived pins stay out of the pinned list", () => {
+  const chat = (id, updated_at, extra = {}) => ({ id, updated_at, ...extra });
+  const conversations = [
+    chat("old", "2026-01-03T00:00:00.000Z"),
+    chat("fresh", "2026-01-04T00:00:00.000Z"),
+    chat("held", "2026-01-01T00:00:00.000Z", {
+      pinned_at: "2026-01-02T00:00:00.000Z",
+    }),
+    chat("kept", "2026-01-01T00:00:00.000Z", {
+      pinned_at: "2026-01-05T00:00:00.000Z",
+    }),
+    chat("shelved", "2026-01-06T00:00:00.000Z", {
+      pinned_at: "2026-01-07T00:00:00.000Z",
+      archived_at: "2026-01-07T00:00:00.000Z",
+    }),
+  ];
+  assert.deepEqual(
+    pinnedChats(conversations).map((c) => c.id),
+    ["kept", "held"],
+  );
+  assert.deepEqual(
+    sidebarOrder(conversations.filter((c) => !c.archived_at)).map((c) => c.id),
+    ["kept", "held", "fresh", "old"],
+  );
+  assert.deepEqual(
+    sidebarOrder(conversations.filter((c) => c.archived_at)).map((c) => c.id),
+    ["shelved"],
+  );
 });
 
 test("the header shows the tightest usage window for each provider", () => {

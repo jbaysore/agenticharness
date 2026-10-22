@@ -85,6 +85,9 @@ export class Store {
       );
     if (!conversation.includes("archived_at"))
       this.db.exec("ALTER TABLE conversations ADD COLUMN archived_at TEXT");
+    // Kept until the chat is unpinned, including while it is archived.
+    if (!conversation.includes("pinned_at"))
+      this.db.exec("ALTER TABLE conversations ADD COLUMN pinned_at TEXT");
     // Existing history starts out read; only later turns can mark a chat unread.
     if (!conversation.includes("read_at"))
       this.db.exec(
@@ -178,7 +181,9 @@ export class Store {
   }
   conversations() {
     return this.db
-      .prepare(`${summary} ORDER BY c.updated_at DESC`)
+      .prepare(
+        `${summary} ORDER BY c.pinned_at IS NULL, c.pinned_at DESC, c.updated_at DESC`,
+      )
       .all()
       .map(summarize);
   }
@@ -195,6 +200,13 @@ export class Store {
     this.db
       .prepare("UPDATE conversations SET archived_at=? WHERE id=?")
       .run(archived ? this.now() : null, id);
+  }
+  // Pinning leaves updated_at alone, so unpinning returns the chat to its
+  // place among the others. Pinning again records a new time and moves it up.
+  setPinned(id, pinned) {
+    this.db
+      .prepare("UPDATE conversations SET pinned_at=? WHERE id=?")
+      .run(pinned ? this.now() : null, id);
   }
   createConversation({
     projectId,

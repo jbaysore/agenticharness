@@ -232,6 +232,50 @@ try {
   await page.setViewportSize({ width: 1512, height: 982 });
   await expect(right).toBeVisible();
 
+  // An older chat jumps to the top when pinned, stays there across reload, and
+  // returns to its activity place when unpinned.
+  app.store.stampConversation(
+    chat.id,
+    "2020-01-01T00:00:00.000Z",
+    "2020-01-01T00:00:00.000Z",
+  );
+  await page.reload();
+  const projectChats = left.locator(`#project-${project.id}-chats`);
+  const layoutRow = projectChats.locator(".chat-row", {
+    hasText: "Layout check",
+  });
+  await expect(projectChats.locator(".chat-open").last()).toHaveText(
+    "Layout check",
+  );
+  await layoutRow.hover();
+  await layoutRow
+    .getByRole("button", { name: "Pin Layout check", exact: true })
+    .click();
+  const pinnedGroup = left.getByRole("group", { name: "Pinned chats" });
+  await expect(pinnedGroup).toBeVisible();
+  await expect(
+    pinnedGroup.getByRole("button", { name: "Layout check", exact: true }),
+  ).toBeVisible();
+  await expect(projectChats.locator(".chat-open").first()).toHaveText(
+    "Layout check",
+  );
+  await expect(projectChats.locator(".chat-pin")).toBeVisible();
+  expect(app.store.conversation(chat.id).pinned_at).toBeTruthy();
+  await page.reload();
+  await expect(pinnedGroup).toBeVisible();
+  await expect(projectChats.locator(".chat-open").first()).toHaveText(
+    "Layout check",
+  );
+  await layoutRow.hover();
+  await layoutRow
+    .getByRole("button", { name: "Unpin Layout check", exact: true })
+    .click();
+  await expect(pinnedGroup).toHaveCount(0);
+  await expect(projectChats.locator(".chat-open").last()).toHaveText(
+    "Layout check",
+  );
+  expect(app.store.conversation(chat.id).pinned_at).toBeNull();
+
   const mobile = await browser.newContext({
     ...devices["iPhone 13"],
     defaultBrowserType: undefined,
@@ -349,7 +393,7 @@ try {
   await expect.poll(() => width(left)).toBe(256);
   expect(errors).toEqual([]);
   console.log(
-    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
+    "Layout checks passed: resizing, keyboard bounds, collapse/reopen, persistence, one to three side-by-side chats, pin and unpin, responsive layouts, populated-sidebar viewport bounds, storage recovery, and no page errors.",
   );
 } finally {
   await browser?.close();

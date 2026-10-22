@@ -495,9 +495,24 @@ small {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.chat-pin {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-2);
+}
 .chat-row:hover,
 .chat-row:focus-within {
   background: var(--hover);
+}
+/* The hover actions sit beside the title. Covering it made the middle of a
+   short row open nothing once pin joined split, rename and archive. */
+.chat-row:hover .chat-open,
+.chat-row:focus-within .chat-open {
+  margin-right: 84px;
+}
+.chat-row.can-split:hover .chat-open,
+.chat-row.can-split:focus-within .chat-open {
+  margin-right: 108px;
 }
 .chat-row.archived {
   font-style: italic;
@@ -568,6 +583,9 @@ small {
 .chat-row:hover .row-actions,
 .chat-row:focus-within .row-actions {
   opacity: 1;
+}
+.chat-row:hover .row-actions .icon-button,
+.chat-row:focus-within .row-actions .icon-button {
   pointer-events: auto;
 }
 .chat-row.selected .row-actions {

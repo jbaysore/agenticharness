@@ -26,6 +26,7 @@ const paths = {
   split: "M3 4h18v16H3V4Zm9 0v16",
   edit: "M4 20h4L19 9l-4-4L4 16v4Zm10-14 4 4",
   archive: "M3 5h18v4H3V5Zm2 4v10h14V9M10 13h4",
+  pin: "M12 16v6M8 4h8l-1 7h3l-6 5-6-5h3L8 4z",
   rules:
     "m4 6 1.5 1.5L8 5m3 1h9M4 12l1.5 1.5L8 11m3 1h9M4 18l1.5 1.5L8 17m3 1h9",
   skill: "M6 3h12v18l-6-4-6 4V3Z",

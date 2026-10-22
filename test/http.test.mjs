@@ -326,6 +326,21 @@ test("a chat can be renamed, archived and marked read, and each change is announ
         .archived_at,
       null,
     );
+    app.controller.active.set(chat.id, { abort: new AbortController() });
+    const pinnedWhileBusy = await call(
+      `/api/chats/${chat.id}`,
+      { pinned: true },
+      "PATCH",
+    );
+    assert.equal(pinnedWhileBusy.status, 200);
+    assert.ok(pinnedWhileBusy.body.pinned_at);
+    assert.equal((await listed()).id, chat.id);
+    app.controller.active.delete(chat.id);
+    assert.equal(
+      (await call(`/api/chats/${chat.id}`, { pinned: false }, "PATCH")).body
+        .pinned_at,
+      null,
+    );
     assert.equal((await call("/api/chats/missing/read", {})).status, 404);
   } finally {
     await app.close();

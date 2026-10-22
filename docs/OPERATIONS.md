@@ -65,8 +65,11 @@ it waits for your approval, **×** when it stopped before finishing, and a solid
 dot when it finished since you last looked. **Active** at the top of the sidebar
 lists those chats from every project, and the window title counts the ones
 waiting on you. A chat shown in a visible window counts as looked at. Hover a
-row to rename or archive it; archived chats sit behind **Show archived** in
-their project and return when you unarchive them or send them a message.
+row to rename, pin, or archive it. Pinned chats stay at the top of their
+project and are listed under **Pinned**, newest pin first. A pin is kept while
+a chat is archived, and the chat returns to **Pinned** when you unarchive it
+or send it a message. Archived chats sit behind **Show archived** in their
+project.
 
 When a chat's first turn starts while another chat is working on the same
 project, and the project folder is the top of a Git repository on a branch, the

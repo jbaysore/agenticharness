@@ -486,6 +486,8 @@ export async function createHarness({
                 throw new Error("Stop the turn before archiving this chat");
               store.setArchived(id, body.archived === true);
             }
+            if (body.pinned !== undefined)
+              store.setPinned(id, body.pinned === true);
             if (Object.hasOwn(body, "permissions"))
               controller.setPermissions(id, body.permissions);
             if (Object.hasOwn(body, "mode")) controller.setMode(id, body.mode);

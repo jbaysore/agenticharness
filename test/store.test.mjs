@@ -313,6 +313,47 @@ test("marking read and archiving leave the conversation order alone", () => {
   assert.equal(db.conversation(older.id).archived_at, null);
   db.close();
 });
+test("pinning floats a chat without moving its activity time", () => {
+  const db = new Store(":memory:"),
+    p = db.addProject("P", "C:\\p"),
+    older = db.createConversation({ projectId: p.id, title: "Older" }),
+    newer = db.createConversation({ projectId: p.id, title: "Newer" });
+  db.stampConversation(
+    older.id,
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z",
+  );
+  const pinAt = (id, at) =>
+    db.db
+      .prepare("UPDATE conversations SET pinned_at=? WHERE id=?")
+      .run(at, id);
+  db.setPinned(older.id, true);
+  const [first, second] = db.conversations();
+  assert.equal(first.id, older.id);
+  assert.equal(first.updated_at, "2026-01-01T00:00:00.000Z");
+  assert.ok(first.pinned_at);
+  assert.equal(second.id, newer.id);
+  assert.equal(second.pinned_at, null);
+  pinAt(older.id, "2026-01-02T00:00:00.000Z");
+  db.setPinned(newer.id, true);
+  pinAt(newer.id, "2026-01-03T00:00:00.000Z");
+  const pinned = db.conversations();
+  assert.equal(pinned[0].id, newer.id);
+  assert.equal(pinned[1].id, older.id);
+  db.setPinned(older.id, false);
+  const after = db.conversations();
+  assert.equal(after[0].id, newer.id);
+  assert.equal(after[1].id, older.id);
+  assert.equal(after[1].updated_at, "2026-01-01T00:00:00.000Z");
+  assert.equal(db.conversation(older.id).pinned_at, null);
+  db.setPinned(older.id, true);
+  db.setArchived(older.id, true);
+  pinAt(older.id, "2026-02-01T00:00:00.000Z");
+  assert.ok(db.conversation(older.id).pinned_at);
+  assert.ok(db.conversation(older.id).archived_at);
+  assert.equal(db.conversations()[0].id, older.id);
+  db.close();
+});
 test("an existing workspace gains the chat columns with its history already read", async () => {
   const directory = await mkdtemp(join(tmpdir(), "harness-migrate-")),
     path = join(directory, "db.sqlite"),
@@ -332,6 +373,7 @@ test("an existing workspace gains the chat columns with its history already read
   assert.deepEqual(db.settings(), { defaultHistoryScope: "all" });
   assert.equal(chat.read_at, "2026-01-02T00:00:00.000Z");
   assert.equal(chat.archived_at, null);
+  assert.equal(chat.pinned_at, null);
   assert.deepEqual(
     { status: chat.status, unread: chat.unread },
     { status: "idle", unread: false },
