@@ -31,7 +31,7 @@ import {
   resolveAttachments,
 } from "./attachments.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
-import { CursorReviewer } from "./reviewer.mjs";
+import { ActionReviewer } from "./reviewer.mjs";
 import {
   createWorktree,
   landTool,
@@ -345,10 +345,11 @@ export class Controller extends EventEmitter {
       this.event(chat.id, run.id, type, payload);
     };
     // Override answers every permission request itself and logs it; questions
-    // for the user still reach the user.
+    // for the user still reach the user. In Auto-review, the reviewer decides
+    // Cursor's permission requests and every agent's browser actions.
     const reviewer =
-      permissions === "auto" && run.provider === "cursor"
-        ? new CursorReviewer({
+      permissions === "auto"
+        ? new ActionReviewer({
             controller: this,
             run,
             project,
@@ -357,25 +358,28 @@ export class Controller extends EventEmitter {
             signal: abort.signal,
           })
         : null;
+    const review = async (request) => {
+      const result = await reviewer.review(request);
+      if (abort.signal.aborted) return { allow: false };
+      if (result.decision !== "ask")
+        return { allow: result.decision === "allow", reason: result.reason };
+      return this.waitApproval(
+        run,
+        { ...request, reviewReason: result.reason },
+        abort.signal,
+      );
+    };
     const approve = async (request) => {
       if (abort.signal.aborted) return Promise.resolve({ allow: false });
       if (
         reviewer &&
+        run.provider === "cursor" &&
         request.kind === "permission" &&
         ["session/request_permission", "cursor/create_plan"].includes(
           request.method,
         )
-      ) {
-        const result = await reviewer.review(request);
-        if (abort.signal.aborted) return { allow: false };
-        if (result.decision !== "ask")
-          return { allow: result.decision === "allow", reason: result.reason };
-        return this.waitApproval(
-          run,
-          { ...request, reviewReason: result.reason },
-          abort.signal,
-        );
-      }
+      )
+        return review(request);
       if (
         permissions !== "override" ||
         ["question", "plan"].includes(request.kind)
@@ -489,21 +493,30 @@ export class Controller extends EventEmitter {
           },
         )
       : [];
-    // Every action that can change a page asks the user, whichever agent calls it.
+    // Every action that can change a page is approved first, whichever agent
+    // calls it: by the reviewer in Auto-review, otherwise by the user.
     const browser = async (name, args) => {
       const input = typeof args === "string" ? JSON.parse(args) : (args ?? {}),
         title = browserTitle(name, input);
       if (await this.browser.needsApproval(name)) {
-        const answer = await approve({
-          kind: "permission",
-          title,
-          details: { tool: name, input },
-        });
+        const request = {
+            kind: "permission",
+            title,
+            details: { tool: name, input },
+          },
+          answer = await (reviewer && !abort.signal.aborted
+            ? review(request)
+            : approve(request));
         if (!answer.allow)
           return {
             isError: true,
             content: [
-              { type: "text", text: "The user declined this browser action." },
+              {
+                type: "text",
+                text: answer.reason
+                  ? `Auto-review declined this browser action: ${answer.reason}`
+                  : "The user declined this browser action.",
+              },
             ],
           };
       }

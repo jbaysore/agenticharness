@@ -170,13 +170,14 @@ function ReviewerSettings({ value, providers, onChange }) {
   return (
     <section className="connection">
       <header>
-        <h3>Cursor automatic reviewer</h3>
+        <h3>Automatic reviewer</h3>
       </header>
       <p>
-        Choose the Codex model that reviews Cursor actions in Auto-review mode.
-        If Codex cannot review, the Claude model below takes over using its
-        included subscription usage. Both receive the task, recent user
-        instructions and refusals, project rules, and exact action details.
+        Choose the Codex model that reviews Cursor actions and every agent's
+        browser actions in Auto-review mode. If Codex cannot review, the Claude
+        model below takes over using its included subscription usage. Both
+        receive the task, recent user instructions and refusals, project rules,
+        the agent's recent actions, and exact action details.
       </p>
       {["codex", "claude"].map((id) => {
         const automatic = reviewerModel(providers, id, null),

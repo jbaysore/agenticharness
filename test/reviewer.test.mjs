@@ -37,7 +37,7 @@ const decision = (value, reason = "A review reason.") => ({
   text: JSON.stringify({ decision: value, reason }),
 });
 
-async function fixture(t, permissions = "auto") {
+async function fixture(t, permissions = "auto", provider = "cursor") {
   const root = await mkdtemp(join(tmpdir(), "harness-review-"));
   await writeFile(
     join(root, "AGENTS.md"),
@@ -63,12 +63,16 @@ async function fixture(t, permissions = "auto") {
       connected: true,
       models: [{ id: "review-model", name: "Reviewer", isDefault: true }],
     },
+    // A Claude chat; otherwise Claude stays out so fallback tests choose it.
+    ...(provider === "claude"
+      ? [{ id: "claude", connected: true, models: [{ id: "review-model" }] }]
+      : []),
   ];
   controller.workers.codex = async (job) => {
     jobs.push(job);
     return decision("allow");
   };
-  controller.runners.cursor = async (ctx) => {
+  controller.runners[provider] = async (ctx) => {
     contexts.push(ctx);
     if (!ctx.signal.aborted)
       await new Promise((resolve) =>
@@ -79,8 +83,8 @@ async function fixture(t, permissions = "auto") {
   const run = controller.send(chat.id, {
     actionId: "review-fixture-action",
     text: "Run the tests",
-    provider: "cursor",
-    model: "cursor-model",
+    provider,
+    model: provider === "cursor" ? "cursor-model" : "review-model",
   });
   await waitFor(() => contexts.length === 1);
   t.after(async () => {
@@ -241,6 +245,100 @@ test("reviewer declines actions and reviews plans, while questions and browser r
     assert.equal((await result).allow, true);
   }
   assert.equal(calls, 2);
+});
+
+// A stand-in browser: snapshots are read-only, everything else changes a page.
+const fakeBrowser = (f) => {
+  const calls = [];
+  f.controller.browser = {
+    needsApproval: async (name) => name !== "browser_snapshot",
+    call: async (name, input) => {
+      calls.push(name);
+      return { content: [{ type: "text", text: `${name} done` }] };
+    },
+    close() {},
+  };
+  return calls;
+};
+
+for (const provider of ["codex", "claude", "cursor"])
+  test(`${provider} browser actions in Auto-review go to the reviewer, not the user`, async (t) => {
+    const f = await fixture(t, "auto", provider),
+      calls = fakeBrowser(f);
+    const result = await f.ctx.browser("browser_click", {
+      element: "Save",
+      target: "#save",
+    });
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(calls, ["browser_click"]);
+    assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
+    assert.equal(f.jobs.length, 1);
+    const context = JSON.parse(f.jobs[0].task);
+    assert.equal(
+      context.agent,
+      { codex: "Codex", claude: "Claude Code", cursor: "Cursor" }[provider],
+    );
+    assert.equal(context.proposedAction.title, "Browser: click · Save");
+    assert.deepEqual(context.proposedAction.details, {
+      tool: "browser_click",
+      input: { element: "Save", target: "#save" },
+    });
+    const review = f.store
+      .events()
+      .filter((e) => e.payload.kind === "permission-review")
+      .at(-1).payload;
+    assert.equal(review.provider, provider);
+    // Read-only browser tools are never reviewed.
+    await f.ctx.browser("browser_snapshot", {});
+    assert.equal(f.jobs.length, 1);
+  });
+
+test("a declined browser action tells the agent why, and its earlier browser steps inform the next review", async (t) => {
+  const f = await fixture(t, "auto", "codex"),
+    calls = fakeBrowser(f);
+  await f.ctx.browser("browser_navigate", { url: "http://localhost:5173" });
+  f.controller.workers.codex = async (job) => {
+    f.jobs.push(job);
+    return decision("deny", "Submitting the payment form was not requested.");
+  };
+  const result = await f.ctx.browser("browser_click", { element: "Pay now" });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Auto-review declined.*payment form/);
+  assert.deepEqual(calls, ["browser_navigate"]);
+  assert.deepEqual(JSON.parse(f.jobs[1].task).recentSteps, [
+    {
+      verb: "browse",
+      target: "Browser: navigate · http://localhost:5173",
+      status: "ok",
+    },
+  ]);
+});
+
+test("a browser action the reviewer cannot decide asks the user with its reason", async (t) => {
+  const f = await fixture(t, "auto", "claude"),
+    calls = fakeBrowser(f);
+  f.controller.workers.codex = async () =>
+    decision("ask", "Signing in was not requested.");
+  const result = f.ctx.browser("browser_type", { text: "password" });
+  await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
+  const pending = f.store.pendingApprovals(f.chat.id)[0];
+  assert.equal(pending.request.reviewReason, "Signing in was not requested.");
+  f.controller.answer(pending.id, { allow: true });
+  assert.equal((await result).isError, undefined);
+  assert.deepEqual(calls, ["browser_type"]);
+});
+
+test("in Manual, browser actions still ask the user and skip the reviewer", async (t) => {
+  const f = await fixture(t, "manual", "codex"),
+    calls = fakeBrowser(f);
+  const result = f.ctx.browser("browser_click", { element: "Save" });
+  await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
+  f.controller.answer(f.store.pendingApprovals(f.chat.id)[0].id, {
+    allow: false,
+  });
+  assert.match((await result).content[0].text, /The user declined/);
+  assert.deepEqual(calls, []);
+  assert.equal(f.jobs.length, 0);
 });
 
 for (const mode of ["manual", "override"])

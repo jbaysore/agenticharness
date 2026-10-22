@@ -1,4 +1,5 @@
-// Cursor's ACP permission requests are reviewed in separate subscription sessions.
+// In Auto-review, Cursor's ACP permission requests and every agent's browser
+// actions are reviewed in separate subscription sessions.
 // The user authorized sharing task instructions, rules, refusals, the agent's
 // recent actions this turn and the action under review.
 import { randomUUID } from "node:crypto";
@@ -6,15 +7,20 @@ import { agentInstructions } from "./history.mjs";
 import { readRepositoryFile } from "./repository.mjs";
 import { readRules } from "./rules.mjs";
 import { cursorReviewer, parseReview } from "./review-policy.mjs";
+import { applyWork } from "./steps.mjs";
 
-export class CursorReviewer {
+const agentNames = { cursor: "Cursor", codex: "Codex", claude: "Claude Code" };
+const clip = (text, length) =>
+  text.length > length ? text.slice(0, length - 1) + "…" : text;
+
+export class ActionReviewer {
   constructor({ controller, run, project, chat, text, signal }) {
     Object.assign(this, { controller, run, project, chat, text, signal });
     this.queue = Promise.resolve();
     this.unavailable = new Map();
   }
   review(request) {
-    // Parallel ACP requests still get individual decisions, in request order.
+    // Parallel requests still get individual decisions, in request order.
     const result = this.queue.then(() => this.decide(request));
     this.queue = result.catch(() => {});
     return result;
@@ -22,9 +28,8 @@ export class CursorReviewer {
   // The agent's earlier actions this turn, so a step is judged by what it is
   // part of. Only actions, never the agent's prose, which could argue its case.
   recentSteps(request) {
-    const calls = new Map(),
-      clip = (text, length) =>
-        text.length > length ? text.slice(0, length - 1) + "…" : text;
+    if (this.run.provider !== "cursor") return this.workSteps();
+    const calls = new Map();
     for (const row of this.controller.store.db
       .prepare(
         "SELECT payload FROM events WHERE run_id=? AND type='work' AND json_extract(payload,'$.kind') IN ('tool_call','tool_call_update') ORDER BY id",
@@ -52,10 +57,47 @@ export class CursorReviewer {
         ...(input && { input: clip(JSON.stringify(input), 300) }),
       }));
   }
+  // Codex and Claude work, as the chat's step list shows it. Browser actions
+  // come from Harness's own record, which names what each one acted on.
+  workSteps() {
+    let steps = [];
+    for (const row of this.controller.store.db
+      .prepare(
+        "SELECT id, payload FROM events WHERE run_id=? AND type='work' ORDER BY id",
+      )
+      .all(this.run.id)) {
+      const p = JSON.parse(row.payload);
+      steps =
+        p.kind === "browser-tool"
+          ? [
+              ...steps,
+              {
+                id: "browser:" + row.id,
+                verb: "browse",
+                target: p.item?.title,
+                status: "ok",
+              },
+            ]
+          : applyWork(steps, p);
+    }
+    return steps
+      .filter(
+        (s) =>
+          s.target &&
+          !s.id.startsWith("review:") &&
+          !/^(mcp__harness__)?browser_/.test(s.target),
+      )
+      .slice(-15)
+      .map(({ verb, target, status }) => ({
+        verb,
+        target: clip(String(target), 200),
+        status,
+      }));
+  }
   async context(request) {
     const { controller, project, chat } = this;
     if (!request.details)
-      throw new Error("Cursor did not provide the exact action for review.");
+      throw new Error("The agent did not provide the exact action for review.");
     let projectRules = "";
     try {
       projectRules = (await readRepositoryFile(project.path, "AGENTS.md"))
@@ -80,6 +122,7 @@ export class CursorReviewer {
       )
       .map(({ request, createdAt }) => ({ request, createdAt }));
     const task = JSON.stringify({
+      agent: agentNames[this.run.provider] ?? this.run.provider,
       hostPolicies: agentInstructions(project, chat),
       standingInstructions: readRules(controller.store).instructions,
       turnInstructions: this.instructions ?? "",
@@ -141,11 +184,12 @@ export class CursorReviewer {
   }
   async decide(request) {
     const { controller, run, chat, signal } = this,
+      agent = agentNames[run.provider] ?? run.provider,
       id = randomUUID(),
       note = (status, title, reason, extra = {}) =>
         controller.event(chat.id, run.id, "work", {
           kind: "permission-review",
-          provider: "cursor",
+          provider: run.provider,
           status,
           item: { id, title, description: reason },
           ...extra,
@@ -169,7 +213,7 @@ export class CursorReviewer {
           );
           note(
             "running",
-            "Auto-reviewing Cursor action",
+            `Auto-reviewing ${agent} action`,
             `${reviewer.name}: ${request.title}`,
             { reviewer },
           );
@@ -183,7 +227,7 @@ export class CursorReviewer {
             }[decision.decision];
           note(
             decision.decision,
-            `Auto-review ${label} Cursor action`,
+            `Auto-review ${label} ${agent} action`,
             decision.reason,
             {
               reviewer,

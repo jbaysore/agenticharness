@@ -38,15 +38,16 @@ this too has only been checked with simulated providers.
 with its slash command, and that message includes the full text for Codex,
 Claude Code and Cursor.
 Every chat can also drive a shared Chrome on the host through Playwright MCP;
-each action that can change a page asks for approval unless **Override** is selected.
+in **Auto-review** the automatic reviewer approves each action that can change a
+page, and in **Manual** each one asks you; read-only actions never ask.
 New conversations default to **Auto-review**. The permission picker saves each
 selection immediately, including during a turn. Harness pauses the agent and
 resumes its native session under the new mode, keeping the same conversation,
 turn and completed work. **Override** bypasses permission review; questions still
 require your input. Existing conversations keep their saved mode.
-Cursor's **Auto-review** uses a separate Codex session, with a Claude subscription
-fallback if Codex cannot review. Choose each model and effort in **Agent rules →
-Cursor automatic reviewer**. Unpinned defaults show their current model names;
+Cursor's **Auto-review**, and browser actions under every agent's **Auto-review**,
+use a separate Codex session, with a Claude subscription fallback if Codex cannot
+review. Choose each model and effort in **Agent rules → Automatic reviewer**. Unpinned defaults show their current model names;
 pinned choices never silently change. Saving applies to the next review, even
 during a running turn. The reviewer evaluates each proposed action
 against your request and project rules, then allows, declines, or asks you when

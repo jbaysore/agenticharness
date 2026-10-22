@@ -160,7 +160,7 @@ try {
     .locator(".connection")
     .filter({
       has: page.getByRole("heading", {
-        name: "Cursor automatic reviewer",
+        name: "Automatic reviewer",
         exact: true,
       }),
     })
@@ -203,7 +203,7 @@ try {
     .locator(".connection")
     .filter({
       has: phone.getByRole("heading", {
-        name: "Cursor automatic reviewer",
+        name: "Automatic reviewer",
         exact: true,
       }),
     })
