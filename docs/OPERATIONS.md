@@ -71,6 +71,10 @@ a chat is archived, and the chat returns to **Pinned** when you unarchive it
 or send it a message. Archived chats sit behind **Show archived** in their
 project.
 
+Codex, Claude Code and Cursor give new chats a short title silently at the start
+of their work. If an agent misses naming a chat, it is reminded on the next turn.
+An automatic title never replaces one you chose or an earlier automatic title.
+
 When a chat's first turn starts while another chat is working on the same
 project, and the project folder is the top of a Git repository on a branch, the
 chat gets its own Git worktree under `%LOCALAPPDATA%\AgenticHarness\worktrees`

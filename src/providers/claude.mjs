@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncQueue } from "../core/queue.mjs";
+import { historyTools } from "../core/history.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
@@ -251,7 +252,7 @@ export async function runClaude(
       ),
       tool(
         "rename_chat",
-        "Give this chat a concise title summarizing the user's first message. Works once and never replaces a title the user chose.",
+        historyTools.find((t) => t.name === "rename_chat").description,
         { title: z.string() },
         async (args) => ({
           content: [
@@ -261,6 +262,8 @@ export async function runClaude(
             },
           ],
         }),
+        // Naming happens before task work, without a tool-discovery round trip.
+        { alwaysLoad: true },
       ),
       // Offered only on turns where the user's rules allow a hand-off.
       ...(ctx.tools ?? [])
@@ -314,6 +317,7 @@ export async function runClaude(
       model: ctx.model,
       effort: ctx.effort || undefined,
       resume: ctx.session?.id,
+      allowedTools: ["mcp__harness__rename_chat"],
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

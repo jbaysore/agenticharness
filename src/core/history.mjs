@@ -50,7 +50,7 @@ export const historyTools = [
   {
     name: "rename_chat",
     description:
-      "Give this chat a concise title that summarizes the user's first message. Works once, and never replaces a title the user chose.",
+      "Silently give this chat a concise title that summarizes the user's first message. Never announce or mention the rename. Works once, and never replaces a title the user chose.",
     inputSchema: {
       type: "object",
       properties: { title: { type: "string" } },
@@ -69,9 +69,12 @@ export function provisionalTitle(text, attachments = []) {
   );
 }
 
-// Asked on a chat's first turn only.
-export const renameInstructions =
-  "\nThis is the chat's first message. Early in this turn, call rename_chat once with a concise title of at most six words summarizing what the user asked for: plain text, no quotes or trailing punctuation.";
+// Retry on a later turn if the agent missed naming the chat earlier.
+export function renameInstructions(provider) {
+  const tool =
+    provider === "claude" ? "mcp__harness__rename_chat" : "rename_chat";
+  return `\nThis chat still needs an automatic title. Before your first user-facing response or other task work this turn, silently call ${tool} once with a concise title of at most six words summarizing the user's first request: plain text, no quotes or trailing punctuation. Do not announce, narrate, or mention the rename in progress updates or the final response. Immediately continue the user's task.`;
+}
 
 function renameChat(store, chat, title) {
   const first = store.messages(chat.id).find((m) => m.role === "user");
@@ -263,5 +266,5 @@ function workspaceInstructions(project) {
 }
 
 export function agentInstructions(project, chat) {
-  return `This is the user's personal Agentic Harness workspace. Use only the current subscription integration for all AI work, including summaries and subagents. Never use inference API keys, paid overages, credit purchases, or other paid inference routes. Stop on subscription limits.\nApp conversation: harness://conversation/${chat.id}. Shared history scope: ${chat.scope}. Search and read history on demand; don't load the entire archive. Preserve source links. Native sessions from other providers are not interchangeable.\nWhen asking the user a multiple-choice question, use the native question tool so Harness can show its question UI. Give every option a short label and a brief description explaining when to choose it or its main tradeoff. If the tool only accepts option labels, include the explanation after " — " in the label. Harness adds an Other response field automatically; do not add a duplicate Other option.\nPrimary writable repository: ${project.path}.\nUpstream references (read-only, one-way; never modify unless the user explicitly changes scope): ${project.repositories.map((r) => `${r.name}: ${r.path}`).join("; ") || "none"}. Consult project instructions. Keep each repository's Git state distinct. Report verification results accurately.\n${workspaceInstructions(project)}`;
+  return `Automatic chat naming is silent housekeeping. Never announce, narrate, or mention your own automatic chat rename in progress updates or final responses.\nThis is the user's personal Agentic Harness workspace. Use only the current subscription integration for all AI work, including summaries and subagents. Never use inference API keys, paid overages, credit purchases, or other paid inference routes. Stop on subscription limits.\nApp conversation: harness://conversation/${chat.id}. Shared history scope: ${chat.scope}. Search and read history on demand; don't load the entire archive. Preserve source links. Native sessions from other providers are not interchangeable.\nWhen asking the user a multiple-choice question, use the native question tool so Harness can show its question UI. Give every option a short label and a brief description explaining when to choose it or its main tradeoff. If the tool only accepts option labels, include the explanation after " — " in the label. Harness adds an Other response field automatically; do not add a duplicate Other option.\nPrimary writable repository: ${project.path}.\nUpstream references (read-only, one-way; never modify unless the user explicitly changes scope): ${project.repositories.map((r) => `${r.name}: ${r.path}`).join("; ") || "none"}. Consult project instructions. Keep each repository's Git state distinct. Report verification results accurately.\n${workspaceInstructions(project)}`;
 }

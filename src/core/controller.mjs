@@ -9,6 +9,7 @@ import {
   handoffContext,
   historyCall,
   historyTools,
+  provisionalTitle,
   renameInstructions,
   workspaceNotice,
   workspacePeers,
@@ -663,8 +664,15 @@ export class Controller extends EventEmitter {
       ],
     };
     if (reviewer) reviewer.instructions = ctx.instructions;
-    // Only the agent doing the work names the chat, not its reviewer.
-    if (ctx.firstTurn) ctx.instructions += renameInstructions;
+    // Only the agent doing the work names the chat, not its reviewer. A missed
+    // first-turn rename is retried until the provisional title is replaced.
+    const firstMessage = messages.find((m) => m.role === "user");
+    if (
+      firstMessage &&
+      chat.title ===
+        provisionalTitle(firstMessage.content, firstMessage.attachments)
+    )
+      ctx.instructions += renameInstructions(run.provider);
     try {
       this.store.setRun(run.id, "running");
       this.event(chat.id, run.id, "run", {

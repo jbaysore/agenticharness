@@ -130,7 +130,7 @@ test("Cursor auto-review allows routine work with task/rules context and records
   assert.equal(context.standingInstructions, "Keep edits small.");
   // Naming the chat is the working agent's job, not the reviewer's.
   assert.equal(
-    context.turnInstructions + renameInstructions,
+    context.turnInstructions + renameInstructions("cursor"),
     f.ctx.instructions,
   );
   assert.match(context.projectRules, /Commit and push/);
