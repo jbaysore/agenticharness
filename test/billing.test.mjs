@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   checkCodexBilling,
   checkAccountConfirmation,
+  isUsageExhausted,
   publicCodexUsage,
 } from "../src/security/billing.mjs";
 import { checkClaudeBilling } from "../src/providers/claude.mjs";
@@ -127,6 +128,28 @@ test("provider children cannot inherit API credentials, gateways or node injecti
     AWS_SECRET_ACCESS_KEY: "secret",
   });
   assert.deepEqual(env, { PATH: "safe", CODEX_HOME: "home" });
+});
+test("only an exhausted included-usage limit counts as running out", () => {
+  assert.equal(
+    isUsageExhausted("Included Codex quota is exhausted."),
+    true,
+  );
+  assert.equal(
+    isUsageExhausted("A provider usage limit has been reached."),
+    true,
+  );
+  assert.equal(
+    isUsageExhausted("Claude reported a usage boundary"),
+    true,
+  );
+  for (const reason of [
+    "Lost authoritative quota information",
+    "Paid Claude extra usage is enabled. Disable it before continuing.",
+    "Included Codex usage could not be verified.",
+    "Codex credit fallback cannot be ruled out.",
+    null,
+  ])
+    assert.equal(isUsageExhausted(reason), false);
 });
 test("public usage omits account identifiers and credit reset identifiers", () => {
   const result = publicCodexUsage({

@@ -563,7 +563,7 @@ small {
   flex-shrink: 0;
 }
 /* Markers differ in shape as well as color: a breathing dot works, a white dot is new,
-   yellow "!" needs Josh, red "×" stopped. */
+   yellow "!" needs Josh, "0" ran out of usage, red "×" stopped. */
 .chat-marker {
   display: inline-flex;
   align-items: center;
@@ -584,6 +584,7 @@ small {
   animation: breathe 2.4s var(--ease) infinite;
 }
 .chat-marker.marker-approval,
+.chat-marker.marker-usage,
 .chat-marker.marker-failed {
   width: 15px;
   height: 15px;
@@ -594,6 +595,15 @@ small {
 }
 .chat-marker.marker-approval::after {
   content: "!";
+}
+.chat-marker.marker-usage {
+  background: none;
+  border: 1px solid var(--signal);
+  color: var(--signal);
+  font-size: 9px;
+}
+.chat-marker.marker-usage::after {
+  content: "0";
 }
 .chat-marker.marker-failed {
   background: none;
@@ -1791,6 +1801,18 @@ small {
 .notice.failed strong {
   color: var(--danger-ink);
   font-weight: 600;
+}
+.notice-dismiss {
+  display: block;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .reconnect-banner {
   border-radius: 0;
@@ -3024,6 +3046,11 @@ small {
   border: 0;
   padding: 0;
   margin: 20px 0 0;
+}
+.question-page {
+  margin: 14px 0 0;
+  color: var(--text-3);
+  font-size: 12px;
 }
 .agent-question legend {
   padding: 0;

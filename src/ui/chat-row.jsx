@@ -13,6 +13,7 @@ export function ChatRow({
   onRename,
   onPin,
   onArchive,
+  onDismissUsage,
 }) {
   const [title, setTitle] = useState(null),
     settled = useRef(true);
@@ -90,6 +91,16 @@ export function ChatRow({
         />
       )}
       <span className="row-actions">
+        {chat.usage_stopped_at && (
+          <button
+            className="icon-button"
+            aria-label={`Dismiss usage flag for ${chat.title}`}
+            title="Dismiss usage flag"
+            onClick={() => onDismissUsage?.()}
+          >
+            <Icon name="close" size={13} />
+          </button>
+        )}
         {canSplit && (
           <button
             className="icon-button"

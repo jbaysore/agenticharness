@@ -113,6 +113,16 @@ export class Store {
     // The chat's own Git worktree, created on its first turn.
     if (!conversation.includes("worktree"))
       this.db.exec("ALTER TABLE conversations ADD COLUMN worktree TEXT");
+    // Set when a turn that had already started stopped because included usage
+    // ran out. Cleared when a later turn starts working, or when dismissed.
+    if (!conversation.includes("usage_stopped_at"))
+      this.db.exec(
+        "ALTER TABLE conversations ADD COLUMN usage_stopped_at TEXT",
+      );
+    if (!conversation.includes("usage_stopped_reason"))
+      this.db.exec(
+        "ALTER TABLE conversations ADD COLUMN usage_stopped_reason TEXT",
+      );
     // Run on a chat's rebased branch before it lands on the project's branch.
     if (!columns("projects").includes("check_command"))
       this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
@@ -283,6 +293,25 @@ export class Store {
     this.db
       .prepare("UPDATE conversations SET pinned_at=? WHERE id=?")
       .run(pinned ? this.now() : null, id);
+  }
+  // Leaves updated_at alone, so the reminder does not reorder the chat.
+  setUsageStop(id, reason) {
+    const text = String(reason ?? "").trim().slice(0, 500);
+    if (!text) throw new Error("A usage stop needs a reason");
+    this.db
+      .prepare(
+        "UPDATE conversations SET usage_stopped_at=?, usage_stopped_reason=? WHERE id=?",
+      )
+      .run(this.now(), text, id);
+    return this.conversation(id);
+  }
+  clearUsageStop(id) {
+    this.db
+      .prepare(
+        "UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL WHERE id=?",
+      )
+      .run(id);
+    return this.conversation(id);
   }
   createConversation({
     projectId,

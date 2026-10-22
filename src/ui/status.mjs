@@ -1,9 +1,7 @@
+import { isUsageExhausted } from "../security/billing.mjs";
+
 export function providerStatusLabel(provider) {
-  if (
-    provider?.blockReason &&
-    /exhausted|usage limit has been reached/i.test(provider.blockReason)
-  )
-    return "Out of usage";
+  if (isUsageExhausted(provider?.blockReason)) return "Out of usage";
   if (provider?.blockReason) return "Setup needed";
   if (provider?.connected && provider.usage?.verificationStatus === "unknown")
     return "Usage unknown";
@@ -19,9 +17,11 @@ export function usageVerificationLabel(provider) {
 }
 // What a chat is asking of you right now, most pressing first. A turn that
 // failed or finished stops being marked once the chat has been looked at.
+// A usage stop stays until the chat is continued or the flag is dismissed.
 export function chatMarker(chat) {
   if (chat?.status === "needs-approval") return "approval";
   if (chat?.status === "running") return "running";
+  if (chat?.usage_stopped_at) return "usage";
   if (!chat?.unread) return null;
   return ["failed", "interrupted"].includes(chat.status) ? "failed" : "unread";
 }
@@ -30,6 +30,7 @@ export function chatMarkerLabel(marker) {
     {
       approval: "Waiting for your approval",
       running: "Working",
+      usage: "Stopped because usage ran out",
       failed: "Stopped before finishing",
       unread: "Finished since you last looked",
     }[marker] ?? ""
@@ -54,7 +55,7 @@ export function pinnedChats(conversations) {
   );
 }
 export function activeChats(conversations) {
-  const order = ["approval", "failed", "unread", "running"];
+  const order = ["approval", "usage", "failed", "unread", "running"];
   return conversations
     .filter((c) => !c.archived_at && chatMarker(c))
     .sort(

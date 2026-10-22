@@ -1,6 +1,7 @@
 import React, { useId } from "react";
+import { questionIdentity } from "../core/questions.mjs";
 
-export const questionId = (q) => q.id ?? q.question ?? q.header;
+export const questionId = questionIdentity;
 const multipleChoice = (q) => q.multiple || q.multiSelect;
 const optionValue = (q, option) =>
   q.selectionOnly ? option.id : (option.label ?? option);

@@ -1,3 +1,12 @@
+// Included-usage exhaustion, as distinct from an unverified meter, credits,
+// or a lost reading. The header and a mid-turn stop share this wording.
+export function isUsageExhausted(reason) {
+  return (
+    typeof reason === "string" &&
+    /exhausted|usage limit has been reached|usage boundary/i.test(reason)
+  );
+}
+
 export function checkCodexBilling(account, usage) {
   if (account?.type !== "chatgpt")
     return "Sign in to Codex with ChatGPT. API and gateway billing are disabled.";

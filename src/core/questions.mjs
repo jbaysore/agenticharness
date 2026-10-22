@@ -39,6 +39,28 @@ export const askUserTool = {
   },
 };
 
+export const questionIdentity = (q) => q?.id ?? q?.question ?? q?.header;
+
+// One question per page once a turn asks more than one. Answers are the
+// values already accepted for each question; an unanswered one is undefined.
+export function questionPage(questions, answers, page = 0) {
+  const list = Array.isArray(questions) ? questions : [];
+  const paged = list.length > 1;
+  const index = paged
+    ? Math.min(Math.max(0, page | 0), list.length - 1)
+    : 0;
+  const ready = (q) => answers?.[questionIdentity(q)] !== undefined;
+  const last = !paged || index >= list.length - 1;
+  return {
+    paged,
+    index,
+    label: paged ? `Question ${index + 1} of ${list.length}` : "",
+    canBack: paged && index > 0,
+    primary: last ? "send" : "next",
+    primaryEnabled: last ? list.every(ready) : ready(list[index]),
+  };
+}
+
 export const QUESTION_INSTRUCTIONS =
   "For user questions, prefer Harness ask_user. Set multiSelect: true when choices can be combined; leave it false for mutually exclusive decisions. Multiple selections are returned as an array, including any Other response. Never preselect or submit an answer on the user's behalf. Native question tools remain available.";
 

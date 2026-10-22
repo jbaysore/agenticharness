@@ -68,6 +68,7 @@ import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
 import { restartTool } from "./self-restart.mjs";
 import { blockingGoals, goalStopped } from "./goals.mjs";
+import { isUsageExhausted } from "../security/billing.mjs";
 import {
   createWorktree,
   landTool,
@@ -691,14 +692,34 @@ export class Controller extends EventEmitter {
       latestProposal = text;
       this.event(chat.id, run.id, "proposed-plan", { text });
     };
+    // A usage flag from an earlier turn drops once this turn is actually
+    // working. The stop itself is recorded after the runner returns.
+    let sawWork = false,
+      billingStop = null,
+      usageStopReason = null,
+      usageFlag = Boolean(
+        this.store.conversation(chat.id)?.usage_stopped_at,
+      );
+    const noteUsageStop = (reason) => {
+      if (isUsageExhausted(reason)) usageStopReason ??= reason;
+    };
+    const noteActivity = () => {
+      sawWork = true;
+      if (!usageFlag || usageStopReason || abort.signal.aborted) return;
+      usageFlag = false;
+      this.store.clearUsageStop(chat.id);
+      this.event(chat.id, null, "chat", this.store.conversation(chat.id));
+    };
     const emit = (type, payload) => {
       if (type === "proposed-plan") {
+        noteActivity();
         saveProposal(proposalText(payload.text));
         return;
       }
       if (type === "nativeModel" && typeof payload.model === "string")
         actualModel = payload.model;
       if (type === "text") {
+        noteActivity();
         let id = messageMap.get(payload.nativeId);
         if (!id) {
           id = this.store.addMessage({
@@ -729,8 +750,18 @@ export class Controller extends EventEmitter {
         });
         return;
       }
-      if (type === "nativeTurn")
+      if (type === "nativeTurn") {
+        noteActivity();
         this.store.setRun(run.id, "running", payload.id);
+      }
+      if (type === "work" && payload?.kind === "billing-stop") {
+        billingStop = typeof payload.reason === "string" ? payload.reason : "";
+        noteUsageStop(billingStop);
+      } else if (
+        type === "work" &&
+        !["token-usage", "error"].includes(payload?.kind)
+      )
+        noteActivity();
       if (type === "usage") {
         // Reloading the page must keep the latest reading, including stale status.
         this.providers = this.providers.map((p) =>
@@ -1283,6 +1314,13 @@ export class Controller extends EventEmitter {
         // A stopped/replaced runner cannot release a newer session's hold.
         if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id)
           return;
+        // Claude labels every billing stop usageLimited. A native Goal that
+        // actually reached its usage limit has no earlier, different reason.
+        if (
+          status === "usageLimited" &&
+          (!billingStop || isUsageExhausted(billingStop))
+        )
+          noteUsageStop("A provider usage limit has been reached.");
         const updated = this.store.setGoalState(
           chat.id,
           run.provider,
@@ -1359,9 +1397,23 @@ export class Controller extends EventEmitter {
           : "failed";
       error =
         typeof result.error === "string" ? result.error : result.error?.message;
+      if (
+        !usageStopReason &&
+        sawWork &&
+        !abort.signal.aborted &&
+        isUsageExhausted(error)
+      )
+        usageStopReason = error;
     } catch (caught) {
       status = abort.signal.aborted ? "cancelled" : "failed";
       error = caught.message;
+      if (
+        !usageStopReason &&
+        sawWork &&
+        !abort.signal.aborted &&
+        isUsageExhausted(error)
+      )
+        usageStopReason = error;
     } finally {
       await reviewer?.close();
       this.store.expireApprovals(run.id);
@@ -1399,6 +1451,13 @@ export class Controller extends EventEmitter {
         ?.goal;
       if (goal?.runId === run.id && !goalStopped(goal.status))
         this.store.setGoalState(chat.id, run.provider, run.id, "unknown");
+    }
+    // A quota poll can interrupt the native turn. Keep that as a failed turn
+    // with the usage reason, not as a host restart.
+    if (usageStopReason && !abort.signal.aborted) {
+      status = "failed";
+      error = usageStopReason;
+      this.store.setUsageStop(chat.id, usageStopReason);
     }
     this.store.setRun(run.id, status, null, error ?? null);
     this.requeuePending(active);

@@ -299,6 +299,22 @@ test("a chat summary follows its newest turn: running, needs approval, unread, f
   assert.equal(db.conversation(c.id).last_error, "Out of usage");
   db.close();
 });
+test("a usage stop is remembered until it is dismissed, without reordering the chat", () => {
+  const db = new Store(":memory:"),
+    p = db.addProject("P", "C:\\usage-stop"),
+    chat = db.createConversation({ projectId: p.id });
+  const before = chat.updated_at;
+  const flagged = db.setUsageStop(chat.id, "Included Codex quota is exhausted.");
+  assert.ok(flagged.usage_stopped_at);
+  assert.equal(flagged.usage_stopped_reason, "Included Codex quota is exhausted.");
+  assert.equal(flagged.updated_at, before);
+  assert.throws(() => db.setUsageStop(chat.id, "  "), /reason/);
+  const cleared = db.clearUsageStop(chat.id);
+  assert.equal(cleared.usage_stopped_at, null);
+  assert.equal(cleared.usage_stopped_reason, null);
+  assert.equal(cleared.updated_at, before);
+  db.close();
+});
 test("marking read and archiving leave the conversation order alone", () => {
   const db = new Store(":memory:"),
     p = db.addProject("P", "C:\\p"),

@@ -188,6 +188,7 @@ export function ChatPane({
   report,
   onOpenConnections,
   onOpenWork,
+  onDismissUsage,
 }) {
   const draftKey = chat?.id ?? "new:" + (project?.id ?? "");
   const [provider, setProvider] = useState(
@@ -607,7 +608,7 @@ export function ChatPane({
         >
           <span className={"provider-dot " + (chat?.provider ?? provider)} />
           <strong title={title}>{title}</strong>
-          {["approval", "running"].includes(marker) && (
+          {["approval", "running", "usage"].includes(marker) && (
             <span
               className={"chat-marker marker-" + marker}
               role="img"
@@ -729,7 +730,23 @@ export function ChatPane({
             a message to continue. No action was replayed.
           </div>
         )}
-        {!chat?.activeRun && chat?.runs?.[0]?.status === "failed" && (
+        {!chat?.activeRun && chat?.usage_stopped_at && (
+          <div className="notice failed">
+            <strong>This turn stopped because usage ran out.</strong>{" "}
+            {chat.usage_stopped_reason} Come back after it resets, or continue
+            with another agent.
+            <button
+              type="button"
+              className="notice-dismiss"
+              onClick={() => onDismissUsage?.()}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        {!chat?.activeRun &&
+          !chat?.usage_stopped_at &&
+          chat?.runs?.[0]?.status === "failed" && (
           <div className="notice failed">
             <strong>Work stopped.</strong>{" "}
             {chat.runs[0].error ?? "The provider could not finish this turn."}{" "}

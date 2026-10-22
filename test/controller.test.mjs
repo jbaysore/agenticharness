@@ -813,3 +813,133 @@ test("goal question timeouts survive a permission change in the same run", async
     store.close();
   }
 });
+
+test("a mid-turn usage stop flags the chat until a later turn is working", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {}),
+    project = store.addProject("fixture", "C:\\usage-flag"),
+    chat = store.createConversation({ projectId: project.id, provider: "codex" });
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  let mode = "lost";
+  controller.runners.codex = async (ctx) => {
+    if (mode === "prestart")
+      throw new Error(
+        "Included Codex usage is exhausted. Wait for the provider to restore it.",
+      );
+    if (mode === "goal") {
+      ctx.goalState("usageLimited");
+      return { status: "completed" };
+    }
+    if (mode === "paid") {
+      ctx.emit("text", { nativeId: "paid", text: "Partial" });
+      ctx.emit("work", {
+        kind: "billing-stop",
+        reason: "Paid Claude extra usage is enabled. Disable it before continuing.",
+      });
+      ctx.goalState("usageLimited");
+      return {
+        status: "failed",
+        error: "Paid Claude extra usage is enabled. Disable it before continuing.",
+      };
+    }
+    ctx.emit("text", { nativeId: mode, text: "Partial" });
+    if (mode === "stop") {
+      ctx.emit("work", {
+        kind: "billing-stop",
+        reason: "Included Codex quota is exhausted.",
+      });
+      return { status: "interrupted" };
+    }
+    if (mode === "lost") {
+      ctx.emit("work", {
+        kind: "billing-stop",
+        reason: "Lost authoritative quota information",
+      });
+      return { status: "interrupted" };
+    }
+    if (mode === "cancel") {
+      ctx.emit("text", { nativeId: "cancel", text: "Stopping" });
+      ctx.emit("work", {
+        kind: "billing-stop",
+        reason: "Included Codex quota is exhausted.",
+      });
+      await new Promise((resolve) => {
+        if (ctx.signal.aborted) resolve();
+        else ctx.signal.addEventListener("abort", resolve, { once: true });
+      });
+      return { status: "cancelled" };
+    }
+    return { status: "completed" };
+  };
+  const turn = (actionId) => {
+    const run = controller.send(chat.id, {
+      actionId,
+      text: "Continue the task",
+      provider: "codex",
+      model: "m",
+    });
+    return { run, task: controller.active.get(chat.id).task };
+  };
+  try {
+    const lost = turn("usage-flag-lost-quota");
+    await lost.task;
+    assert.equal(store.run(lost.run.id).status, "interrupted");
+    assert.equal(store.conversation(chat.id).usage_stopped_at, null);
+
+    mode = "stop";
+    const stopped = turn("usage-flag-mid-turn");
+    await stopped.task;
+    assert.equal(store.run(stopped.run.id).status, "failed");
+    assert.equal(
+      store.run(stopped.run.id).error,
+      "Included Codex quota is exhausted.",
+    );
+    assert.ok(store.conversation(chat.id).usage_stopped_at);
+    assert.equal(
+      store.conversation(chat.id).usage_stopped_reason,
+      "Included Codex quota is exhausted.",
+    );
+
+    mode = "prestart";
+    const blocked = turn("usage-flag-prestart");
+    await blocked.task;
+    assert.equal(store.run(blocked.run.id).status, "failed");
+    assert.ok(store.conversation(chat.id).usage_stopped_at);
+
+    mode = "continue";
+    const continued = turn("usage-flag-continue");
+    await continued.task;
+    assert.equal(store.run(continued.run.id).status, "completed");
+    assert.equal(store.conversation(chat.id).usage_stopped_at, null);
+
+    mode = "cancel";
+    const cancelled = turn("usage-flag-user-stop");
+    await waitFor(() =>
+      store.messages(chat.id).some((m) => m.content === "Stopping"),
+    );
+    controller.cancel(chat.id);
+    await cancelled.task;
+    assert.equal(store.run(cancelled.run.id).status, "cancelled");
+    assert.equal(store.conversation(chat.id).usage_stopped_at, null);
+
+    mode = "goal";
+    const limited = turn("usage-flag-goal-limit");
+    await limited.task;
+    assert.equal(store.run(limited.run.id).status, "failed");
+    assert.match(
+      store.conversation(chat.id).usage_stopped_reason,
+      /usage limit has been reached/,
+    );
+
+    store.clearUsageStop(chat.id);
+    mode = "paid";
+    const paid = turn("usage-flag-paid-extra");
+    await paid.task;
+    assert.equal(store.run(paid.run.id).status, "failed");
+    assert.match(store.run(paid.run.id).error, /extra usage/);
+    assert.equal(store.conversation(chat.id).usage_stopped_at, null);
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});

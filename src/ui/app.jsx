@@ -657,6 +657,10 @@ function App() {
     currentGroup = groupOf(current);
   const emptyPane = (projectId) =>
     setView((v) => openInFocused(v, null, projectId));
+  async function dismissUsage(chatId) {
+    await api("/api/chats/" + chatId, { usageStopped: false }, "PATCH");
+    await refresh();
+  }
   async function archiveChat(c, archived) {
     await api("/api/chats/" + c.id, { archived }, "PATCH");
     if (archived)
@@ -688,6 +692,7 @@ function App() {
         action(() => api("/api/chats/" + c.id, { pinned }, "PATCH"))()
       }
       onArchive={(archived) => action(() => archiveChat(c, archived))()}
+      onDismissUsage={() => action(() => dismissUsage(c.id))()}
     />
   );
   async function newTerminal(beside = false, shell = "powershell") {
@@ -1359,6 +1364,9 @@ function App() {
                 refresh={refresh}
                 report={report}
                 onOpenConnections={() => setModal("connections")}
+                onDismissUsage={() =>
+                  p.chatId && action(() => dismissUsage(p.chatId))()
+                }
                 onOpenWork={() => {
                   setView((v) => focusPane(v, p.key));
                   setPanel("activity");

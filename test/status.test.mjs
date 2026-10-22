@@ -75,8 +75,31 @@ test("a chat is marked by what it needs, and a seen result is no longer marked",
   assert.equal(chatMarker({ status: "failed", unread: false }), null);
   assert.equal(chatMarker({ status: "idle", unread: true }), "unread");
   assert.equal(chatMarker({ status: "idle", unread: false }), null);
+  assert.equal(
+    chatMarker({
+      status: "failed",
+      unread: false,
+      usage_stopped_at: "2026-01-02T00:00:00.000Z",
+    }),
+    "usage",
+  );
+  assert.equal(
+    chatMarker({
+      status: "needs-approval",
+      unread: false,
+      usage_stopped_at: "2026-01-02T00:00:00.000Z",
+    }),
+    "approval",
+  );
+  assert.equal(
+    chatMarker({
+      status: "running",
+      usage_stopped_at: "2026-01-02T00:00:00.000Z",
+    }),
+    "running",
+  );
   assert.equal(chatMarker(undefined), null);
-  for (const marker of ["approval", "running", "failed", "unread"])
+  for (const marker of ["approval", "running", "usage", "failed", "unread"])
     assert.ok(chatMarkerLabel(marker));
   assert.equal(chatMarkerLabel(null), "");
 });
@@ -95,13 +118,16 @@ test("the active list puts chats that need you first and leaves out archived one
     chat("finished", "idle", true),
     chat("broken", "failed", true),
     chat("asking", "needs-approval", false),
+    chat("limited", "failed", false, {
+      usage_stopped_at: "2026-01-02T00:00:00.000Z",
+    }),
     chat("shelved", "idle", true, { archived_at: "2026-01-02T00:00:00.000Z" }),
   ];
   assert.deepEqual(
     activeChats(conversations).map((c) => c.id),
-    ["asking", "broken", "finished", "working"],
+    ["asking", "limited", "broken", "finished", "working"],
   );
-  assert.equal(attentionCount(conversations), 3);
+  assert.equal(attentionCount(conversations), 4);
   assert.equal(attentionCount([]), 0);
 });
 

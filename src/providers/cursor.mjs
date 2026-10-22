@@ -1,7 +1,10 @@
 import { RpcProcess } from "../core/rpc.mjs";
 import { cursorCommand } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
-import { checkAccountConfirmation } from "../security/billing.mjs";
+import {
+  checkAccountConfirmation,
+  isUsageExhausted,
+} from "../security/billing.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
@@ -590,6 +593,9 @@ export async function runCursor(ctx, deps = {}) {
         timeout,
       );
     }
+    const error = result.stopReason === "end_turn" ? null : result.stopReason;
+    if (isUsageExhausted(error))
+      ctx.emit("work", { kind: "billing-stop", reason: error });
     return {
       status:
         ctx.signal.aborted || result.stopReason === "cancelled"
@@ -597,8 +603,12 @@ export async function runCursor(ctx, deps = {}) {
           : result.stopReason === "end_turn"
             ? "completed"
             : "failed",
-      error: result.stopReason === "end_turn" ? null : result.stopReason,
+      error,
     };
+  } catch (error) {
+    if (live && isUsageExhausted(error?.message))
+      ctx.emit("work", { kind: "billing-stop", reason: error.message });
+    throw error;
   } finally {
     accepting = false;
     clearTimeout(killTimer);

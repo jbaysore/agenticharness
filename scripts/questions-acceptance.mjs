@@ -54,7 +54,12 @@ try {
       .fill("Ask the fixture question");
     await page.getByLabel("Send message").click();
     await expect(approval).toBeVisible();
-    await expect(send).toBeDisabled();
+    if (questions.length > 1) {
+      await expect(
+        approval.getByRole("button", { name: "Next", exact: true }),
+      ).toBeDisabled();
+      await expect(send).toHaveCount(0);
+    } else await expect(send).toBeDisabled();
   };
   const sent = async (answer) => {
     await expect(approval).toHaveCount(0);
@@ -104,7 +109,14 @@ try {
     path: ".local/screenshots/questions-phone.png",
     fullPage: true,
   });
-  const group = approval.getByRole("group", {
+  await expect(
+    approval.getByText("Question 1 of 2", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    approval.getByRole("group", { name: "Anything else to keep in mind?" }),
+  ).toHaveCount(0);
+  const next = approval.getByRole("button", { name: "Next", exact: true }),
+    group = approval.getByRole("group", {
       name: "How should we deliver the change?",
     }),
     focused = group.getByRole("radio", {
@@ -125,17 +137,30 @@ try {
   });
   await expect(other).toBeFocused();
   await other.fill("   ");
-  await approval
-    .getByRole("textbox", { name: "Your response", exact: true })
-    .fill("Keep keyboard support.");
-  await expect(send).toBeDisabled();
+  await expect(next).toBeDisabled();
   await other.fill("A smaller accessibility pass");
-  await expect(send).toBeEnabled();
+  await expect(next).toBeEnabled();
   // Switching back preserves the Other draft but sends only the selected choice.
   await focused.check();
   await expect(other).toHaveCount(0);
   await group.getByRole("radio", { name: "Other", exact: true }).check();
   await expect(other).toHaveValue("A smaller accessibility pass");
+  await next.click();
+  await expect(
+    approval.getByText("Question 2 of 2", { exact: true }),
+  ).toBeVisible();
+  const notes = approval.getByRole("textbox", {
+    name: "Your response",
+    exact: true,
+  });
+  await expect(send).toBeDisabled();
+  await notes.fill("Keep keyboard support.");
+  await expect(send).toBeEnabled();
+  // Back keeps both answers, including the page that is not showing.
+  await approval.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(other).toHaveValue("A smaller accessibility pass");
+  await next.click();
+  await expect(notes).toHaveValue("Keep keyboard support.");
 
   // A failed save retains answers and permits retry.
   await page.route("**/api/approvals/*", (route) =>
@@ -148,7 +173,10 @@ try {
   await send.click();
   await expect(approval.getByText("Fixture response failed")).toBeVisible();
   await expect(send).toBeEnabled();
+  await expect(notes).toHaveValue("Keep keyboard support.");
+  await approval.getByRole("button", { name: "Back", exact: true }).click();
   await expect(other).toHaveValue("A smaller accessibility pass");
+  await next.click();
   await page.unroute("**/api/approvals/*");
   // Freeze the successful request long enough to verify submission is locked.
   let release;
@@ -161,7 +189,7 @@ try {
   });
   await send.click();
   await expect(send).toBeDisabled();
-  await expect(other).toBeDisabled();
+  await expect(notes).toBeDisabled();
   release();
   await sent({
     allow: true,
@@ -203,6 +231,12 @@ try {
     await approval
       .getByRole("checkbox", { name: "Mobile", exact: true })
       .check();
+    const next = approval.getByRole("button", { name: "Next", exact: true });
+    await expect(next).toBeEnabled();
+    await expect(
+      approval.getByRole("radio", { name: "Now", exact: true }),
+    ).toHaveCount(0);
+    await next.click();
     await expect(send).toBeDisabled();
     await approval.getByRole("radio", { name: "Now", exact: true }).check();
     await send.click();

@@ -9,6 +9,7 @@ import {
   checkQuestions,
   claudeQuestionAnswers,
   codexQuestionAnswers,
+  questionPage,
 } from "../src/core/questions.mjs";
 import { proposalText, taggedProposal } from "../src/core/plans.mjs";
 import { readClaudePlan } from "../src/providers/claude.mjs";
@@ -79,6 +80,33 @@ test("questions validate distinct IDs and usable options before waiting", () => 
       checkQuestions({ questions: [{ ...questions[0], options: ["a", "b"] }] }),
     /labels/,
   );
+});
+
+test("several questions advance one page at a time and send only at the end", () => {
+  const asked = [
+    { id: "approach", question: "How?" },
+    { id: "notes", question: "Notes?" },
+  ];
+  const open = questionPage(asked, { approach: undefined, notes: undefined });
+  assert.equal(open.primary, "next");
+  assert.equal(open.primaryEnabled, false);
+  assert.equal(open.label, "Question 1 of 2");
+  const ready = questionPage(asked, { approach: "Focused", notes: undefined });
+  assert.equal(ready.primaryEnabled, true);
+  const last = questionPage(
+    asked,
+    { approach: "Focused", notes: undefined },
+    1,
+  );
+  assert.equal(last.primary, "send");
+  assert.equal(last.primaryEnabled, false);
+  assert.equal(last.canBack, true);
+  const done = questionPage(asked, { approach: "Focused", notes: "Keep it" }, 1);
+  assert.equal(done.primaryEnabled, true);
+  const single = questionPage([asked[0]], { approach: undefined });
+  assert.equal(single.paged, false);
+  assert.equal(single.primary, "send");
+  assert.equal(single.label, "");
 });
 
 test("native provider conversions preserve arrays and comma-containing labels", () => {

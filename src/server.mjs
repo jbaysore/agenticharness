@@ -603,6 +603,11 @@ export async function createHarness({
             }
             if (body.pinned !== undefined)
               store.setPinned(id, body.pinned === true);
+            if (body.usageStopped !== undefined) {
+              if (body.usageStopped !== false)
+                throw new Error("A usage flag can only be dismissed");
+              store.clearUsageStop(id);
+            }
             if (Object.hasOwn(body, "permissions"))
               controller.setPermissions(id, body.permissions);
             if (Object.hasOwn(body, "mode")) controller.setMode(id, body.mode);

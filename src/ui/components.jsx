@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { providerName } from "./voice.mjs";
 import { secondsRemaining, serverClock } from "./clock.mjs";
 import { QuestionField, questionId, questionAnswer } from "./question-form.jsx";
+import { questionPage } from "../core/questions.mjs";
 
 function useClock(active) {
   const [now, setNow] = useState(() => serverClock.now());
@@ -140,6 +141,7 @@ export function Modal({ title, children, onClose, wide = false }) {
 
 export function Approval({ approval, onAnswer }) {
   const [responses, setResponses] = useState({}),
+    [page, setPage] = useState(0),
     [submitting, setSubmitting] = useState(false),
     r = approval.request,
     now = useClock(r.kind === "question" && Number.isFinite(r.deadline)),
@@ -150,6 +152,9 @@ export function Approval({ approval, onAnswer }) {
       questionAnswer(q, responses[questionId(q)]),
     ]),
   );
+  const step =
+    r.kind === "question" ? questionPage(r.questions, answers, page) : null;
+  const current = r.questions?.[step?.index ?? 0];
   const [problem, setProblem] = useState("");
   const respond = async (answer) => {
     if (submitting) return;
@@ -210,17 +215,21 @@ export function Approval({ approval, onAnswer }) {
                 : `The agent chooses in ${remaining} ${remaining === 1 ? "second" : "seconds"} if you do not answer.`}
             </p>
           )}
-          {r.questions?.map((q) => (
+          {step?.paged && <p className="question-page">{step.label}</p>}
+          {current && (
             <QuestionField
-              key={questionId(q)}
-              question={q}
-              value={responses[questionId(q)]}
+              key={questionId(current)}
+              question={current}
+              value={responses[questionId(current)]}
               disabled={submitting}
               onChange={(value) =>
-                setResponses((prior) => ({ ...prior, [questionId(q)]: value }))
+                setResponses((prior) => ({
+                  ...prior,
+                  [questionId(current)]: value,
+                }))
               }
             />
-          ))}
+          )}
         </>
       ) : (
         <details>
@@ -241,18 +250,31 @@ export function Approval({ approval, onAnswer }) {
               ? "Keep current mode"
               : "Decline"}
         </button>
+        {step?.canBack && (
+          <button
+            className="secondary"
+            disabled={submitting}
+            onClick={() => setPage(step.index - 1)}
+          >
+            Back
+          </button>
+        )}
         <button
           className="primary"
           disabled={
             submitting ||
             (r.kind === "plan" && !r.plan?.trim()) ||
-            (r.kind === "question" &&
-              r.questions?.some((q) => answers[questionId(q)] === undefined))
+            (step && !step.primaryEnabled)
           }
-          onClick={() => respond({ allow: true, answers })}
+          onClick={() => {
+            if (step?.primary === "next") setPage(step.index + 1);
+            else respond({ allow: true, answers });
+          }}
         >
           {r.kind === "question"
-            ? "Send answer"
+            ? step?.primary === "next"
+              ? "Next"
+              : "Send answer"
             : r.kind === "plan"
               ? "Confirm and build"
               : r.kind === "mode-change"
