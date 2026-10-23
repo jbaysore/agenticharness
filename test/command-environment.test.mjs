@@ -24,6 +24,7 @@ test("provider commands find bundled ripgrep while keeping user tools and creden
       ProgramFiles: root,
       Path: "user-tools;system-tools",
       OPENAI_API_KEY: "blocked",
+      USERPROFILE: root,
     };
     const env = subscriptionEnvironment(source, { platform: "win32" });
     assert.equal(env.Path, `user-tools;system-tools;${resources("26.10.1.0")}`);
@@ -41,8 +42,32 @@ test("provider commands find bundled ripgrep while keeping user tools and creden
 });
 
 test("CLI-only installations keep their existing command PATH", () => {
-  assert.deepEqual(
-    subscriptionEnvironment({ Path: "user-tools" }, { platform: "win32" }),
-    { Path: "user-tools" },
+  const env = subscriptionEnvironment(
+    { Path: "user-tools", USERPROFILE: "C:\\no-claude-fixture" },
+    { platform: "win32" },
   );
+  assert.equal(env.Path, "user-tools");
+  assert.equal(env.PSExecutionPolicyPreference, "Bypass");
+});
+
+test("child shells find a standalone Claude install and preserve an explicit process policy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-claude-path-"));
+  try {
+    const bin = join(root, ".local", "bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, "claude.exe"), "fixture");
+    const env = subscriptionEnvironment(
+      {
+        USERPROFILE: root,
+        Path: "user-tools",
+        PSExecutionPolicyPreference: "RemoteSigned",
+      },
+      { platform: "win32" },
+    );
+    assert.equal(env.Path, `user-tools;${bin}`);
+    assert.equal(env.PSExecutionPolicyPreference, "RemoteSigned");
+    assert.deepEqual(subscriptionEnvironment(env, { platform: "win32" }), env);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

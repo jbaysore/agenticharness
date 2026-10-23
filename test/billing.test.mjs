@@ -126,7 +126,7 @@ test("provider children cannot inherit API credentials, gateways or node injecti
     NODE_OPTIONS: "--require evil",
     CLAUDE_CODE_USE_BEDROCK: "1",
     AWS_SECRET_ACCESS_KEY: "secret",
-  });
+  }, { platform: "linux" });
   assert.deepEqual(env, { PATH: "safe", CODEX_HOME: "home" });
 });
 test("only an exhausted included-usage limit counts as running out", () => {

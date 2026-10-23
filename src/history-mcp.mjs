@@ -41,9 +41,9 @@ input.on("line", async (line) => {
         },
       });
     } else if (m.method === "tools/call") {
-      // Questions and mode suggestions have no deadline. A progress ping keeps
-      // a provider from treating the quiet call as idle while someone reads
-      // or types. Browser actions and landing keep a bounded wait.
+      // Questions, mode suggestions and command permissions can wait for the
+      // person. A progress ping keeps providers from treating them as idle.
+      // Command execution has its own deadline; other tools stay bounded here.
       const timeoutMs = toolBridgeTimeoutMs(m.params?.name);
       const token = progressToken(m);
       let progress = 0;

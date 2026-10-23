@@ -42,6 +42,7 @@ import { cursorAuth } from "./providers/cursor.mjs";
 import { openReviewer } from "./providers/workers.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { terminalStreams } from "./core/terminal-stream.mjs";
+import { commandTool } from "./core/command-tool.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
 import { APP_VERSION } from "./core/version.mjs";
 import { SelfRestart, restartTool } from "./core/self-restart.mjs";
@@ -255,6 +256,7 @@ export async function createHarness({
             ...hostToolsForMode(chat?.mode, historyTools),
             ...(controller.bridgeModes.has(token) ? [modeSuggestionTool] : []),
             ...(controller.bridgeQuestions.has(token) ? [askUserTool] : []),
+            ...(controller.bridgeCommands.has(token) ? [commandTool] : []),
             ...(controller.bridgeLand.has(token) ? [landTool] : []),
             ...((await selfRestart?.eligible(
               store.project(chat?.project_id)?.path,
@@ -282,6 +284,12 @@ export async function createHarness({
             await controller.requestChatMove(chatId, body.arguments?.directory),
           );
         const browser = controller.bridgeBrowser.get(token);
+        if (body.name === "run_command" && controller.bridgeCommands.has(token))
+          return json(
+            res,
+            200,
+            await controller.bridgeCommands.get(token)(body.arguments ?? {}),
+          );
         if (body.name === "ask_user" && controller.bridgeQuestions.has(token))
           return json(
             res,

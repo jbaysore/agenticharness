@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { runCommand } from "../src/core/commands.mjs";
+import { commandShell } from "../src/core/command-shells.mjs";
 
 const cwd = tmpdir();
 
@@ -44,4 +45,95 @@ test("a command is stopped when its time is up or the turn is stopped", async ()
     pending = runCommand({ command: slow, cwd, signal: abort.signal });
   setTimeout(() => abort.abort(), 300);
   await assert.rejects(pending, /stopped/);
+});
+
+test(
+  "Windows PowerShell receives multiline quoting, variables and Unicode intact",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const result = await runCommand({
+      cwd,
+      shell: "powershell",
+      command:
+        "$text = @'\n$variable `literal` \"quoted\" café 😀\n'@\nWrite-Output $text",
+    });
+    assert.equal(result.exitCode, 0, result.output);
+    assert.match(result.output, /\$variable `literal` "quoted" café 😀/);
+  },
+);
+
+test(
+  "Node package commands run without the blocked PowerShell wrapper",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const result = await runCommand({
+      cwd,
+      shell: "powershell",
+      command: "npm --version",
+    });
+    assert.equal(result.exitCode, 0, result.output);
+    assert.match(result.output, /\d+\.\d+\.\d+/);
+  },
+);
+
+test(
+  "a PowerShell error after a successful native command still fails",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const result = await runCommand({
+      cwd,
+      shell: "powershell",
+      command: 'node -e "process.exit(0)"\nWrite-Error "expected diagnostic"',
+    });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.output, /expected diagnostic/);
+  },
+);
+
+test(
+  "cmd supports explicit && chains and keeps their failure exit codes",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const result = await runCommand({
+      cwd,
+      shell: "cmd",
+      command:
+        'node -e "console.log(123)" && node -e "process.exit(7)" && echo MUST_NOT_RUN',
+    });
+    assert.match(result.output, /123/);
+    assert.doesNotMatch(result.output, /MUST_NOT_RUN/);
+    assert.equal(result.exitCode, 7);
+    const quoted = await runCommand({
+      cwd,
+      shell: "cmd",
+      command: `"${process.execPath}" -e "console.log('quoted executable')"`,
+    });
+    assert.equal(quoted.exitCode, 0, quoted.output);
+    assert.match(quoted.output, /quoted executable/);
+  },
+);
+
+test("Bash heredocs use an explicit Bash shell", async (t) => {
+  try {
+    commandShell("bash");
+  } catch {
+    return t.skip("Bash is not installed");
+  }
+  const result = await runCommand({
+    cwd,
+    shell: "bash",
+    command:
+      "node <<'NODE'\nconsole.log('literal $value and \"quotes\"');\nNODE",
+  });
+  assert.equal(result.exitCode, 0, result.output);
+  assert.match(result.output, /literal \$value and "quotes"/);
+});
+
+test("an already stopped command never starts", async () => {
+  const abort = new AbortController();
+  abort.abort();
+  await assert.rejects(
+    runCommand({ command: "echo MUST_NOT_RUN", cwd, signal: abort.signal }),
+    /stopped/,
+  );
 });

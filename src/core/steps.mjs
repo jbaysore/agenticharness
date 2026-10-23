@@ -185,7 +185,15 @@ export function applyWork(steps, p, after = null) {
     };
     return copy;
   };
-  if (p.kind === "permission-review") {
+  if (p.kind === "host-command") {
+    step = {
+      id: "host:" + p.id,
+      verb: "run",
+      target: short(p.command),
+      status: p.status,
+      ms: p.ms ?? null,
+    };
+  } else if (p.kind === "permission-review") {
     step = {
       id: "review:" + p.item.id,
       verb: "other",

@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 
 let registeredSearchDirectory;
 
@@ -74,8 +75,25 @@ export function subscriptionEnvironment(
     if (!blocked.test(key) && value !== undefined) env[key] = value;
   }
   if (platform === "win32") {
-    const directory = bundledSearchDirectory(env);
-    if (directory) {
+    // Child shells can run locally installed npm/npx PowerShell wrappers.
+    // This is process-scoped; no user or machine execution policy is changed.
+    if (
+      !Object.keys(env).some(
+        (key) => key.toLowerCase() === "psexecutionpolicypreference",
+      )
+    )
+      env.PSExecutionPolicyPreference = "Bypass";
+    const home =
+      Object.entries(env).find(
+        ([key]) => key.toLowerCase() === "userprofile",
+      )?.[1] ?? homedir();
+    const claude =
+      env.HARNESS_CLAUDE_PATH ?? join(home, ".local", "bin", "claude.exe");
+    const directories = [
+      bundledSearchDirectory(env),
+      existsSync(claude) ? dirname(claude) : null,
+    ].filter(Boolean);
+    for (const directory of directories) {
       const key =
         Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
       const entries = (env[key] ?? "").split(";").filter(Boolean);

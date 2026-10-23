@@ -136,6 +136,22 @@ is not evidence that Codex, Claude Code, or Cursor obeys one.
 | Codex, Claude Code, and Cursor turns receive a slash command’s skill; a message without it does not; an edit is included the next time it is invoked | Unit tests with stubbed providers (`test/skills.test.mjs`) | Passed  |
 | A real agent following a skill                                                                                                                       | Requires included usage                                    | Not run |
 
+## Foreground command support — 2026-10-23
+
+No real model turn was started for these checks. Provider tool exposure was
+tested with fixtures, including Claude's real SDK MCP server and the HTTP bridge.
+
+| Check                                                                                                                 | Kind                                                                        | Result |
+| --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------ |
+| PowerShell npm wrapper, multiline quotes and Unicode; cmd `&&` failure; Bash heredoc                                  | Real shells (`test/commands.test.mjs`)                                      | Passed |
+| Linked dependency reads and Git index writes outside a worktree                                                       | Real temporary Git worktree and host command (`test/command-tool.test.mjs`) | Passed |
+| All providers receive the tool; requests use permission review; Ask cannot execute; expired capability is rejected    | Controller fixtures and real HTTP bridge                                    | Passed |
+| Stale dependency detection; approved installation detaches only the link; declining leaves shared dependencies intact | Real temporary filesystem and injected installation                         | Passed |
+| Nonzero exits, output limits, timeout and cancellation                                                                | Real shells                                                                 | Passed |
+
+Native Codex runner pipe timeouts are not repaired by these checks. The shared
+foreground tool avoids that runner; it does not blindly retry uncertain actions.
+
 ## Bugs found through dogfooding
 
 1. Official Codex default endpoint was mistaken for a custom gateway — fixed.

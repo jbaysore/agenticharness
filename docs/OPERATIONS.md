@@ -109,8 +109,11 @@ When a chat's first turn starts, and the project folder is the top of a Git
 repository on a branch, the chat gets its own Git worktree under `%LOCALAPPDATA%\AgenticHarness\worktrees`
 on a branch named `harness/<id>`. It keeps that worktree for good. Its agent,
 Review, Files and Terminal all work there, so no other chat's unfinished edits
-reach its builds, tests or commits. `node_modules` is linked from the project
-folder; `.env` files and local databases are not copied.
+reach its builds, tests or commits. `node_modules` initially links to the project
+folder. If the worktree's lockfile differs, the agent is told to install local
+dependencies. A direct package installation through `run_command` detaches the
+link first, leaving the shared dependencies intact. `.env` files and local
+databases are not copied.
 
 A chat in a worktree commits to its own branch and delivers the work by calling
 `land_changes`. Harness then lands one branch at a time per project: it rebases
@@ -332,11 +335,28 @@ no writable app API; never approve a command that writes to one unless you inten
 to change the task scope. Agent execution has the current Windows user's powers
 where a provider permits it or you approve an unsandboxed command.
 
-This PC's Codex Windows sandbox sometimes fails with `apply deny-read ACLs`.
-Harness preserves that failure and the agent can request approval for a command
-outside the sandbox. In Auto-review the automatic reviewer decides that request
-the same way it decides any other command. The app does not disable the sandbox
-globally or automatically approve the workaround.
+All three agents have a shared `run_command` tool for foreground commands in the
+chat's working directory. It uses the selected permission mode and runs on the
+host, so authorized builds can read linked dependencies and Git can update its
+metadata outside a worktree. Ask mode cannot use it. Native tools still handle
+interactive and background sessions. A command has a ten-minute maximum, streams
+output, and keeps its exit code. Stopping the turn stops the command.
+
+On Windows, the tool offers explicit PowerShell, Command Prompt and Git Bash
+shells. Agents receive the installed PowerShell version and instructions for
+choosing a shell: Windows PowerShell 5.1 cannot parse `&&`, and Bash heredocs need
+Bash. PowerShell scripts are passed as encoded text to preserve quotes, dollar
+signs and multiline content. Child processes get the bundled search tool and a
+standalone Claude installation on PATH when available. The process execution
+policy permits npm/npx wrappers unless an explicit policy was already supplied;
+this does not change the user's or machine's policy.
+
+The host tool also provides a route around native sandbox access failures and
+native runner startup failures. It does not disable a provider's sandbox or
+automatically replay a command whose outcome is uncertain. For package installs
+inside compound scripts, the agent sets `isolateDependencies: true` to detach a
+shared `node_modules` link before execution. A declined request leaves the link
+intact. Real test failures, missing files and search exit codes remain visible.
 
 ## Browser for agents
 

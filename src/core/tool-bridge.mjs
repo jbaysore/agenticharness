@@ -1,9 +1,10 @@
-// How long the history bridge waits for one tool call. A question or a mode
-// suggestion stays open until the person answers or the turn stops. A clock
-// here would close it while they are still reading or typing. Other calls
-// stay bounded so a stuck tool cannot hold the agent open.
+// Questions, mode suggestions, and command permission requests can wait for
+// the person until the turn stops. Command execution has its own deadline;
+// the bridge must not time out while its permission request is still open.
+// Other calls stay bounded so a stuck tool cannot hold the agent open.
 export function toolBridgeTimeoutMs(name) {
-  if (name === "ask_user" || name === "suggest_mode") return null;
+  if (name === "ask_user" || name === "suggest_mode" || name === "run_command")
+    return null;
   if (/^(?:browser(?:_|$)|land_changes)$/.test(name ?? ""))
     return 15 * 60 * 1000;
   return 15_000;

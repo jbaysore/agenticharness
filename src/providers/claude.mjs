@@ -428,6 +428,26 @@ export async function runClaude(
             ],
           })),
         ),
+      ...(ctx.tools ?? [])
+        .filter((t) => t.name === "run_command")
+        .map((t) =>
+          tool(
+            t.name,
+            t.description,
+            {
+              command: z.string().min(1).max(8000),
+              shell: z.enum(["powershell", "cmd", "bash"]).optional(),
+              cwd: z.string().optional(),
+              timeoutSeconds: z.number().int().min(1).max(600).optional(),
+              isolateDependencies: z.boolean().optional(),
+            },
+            async (args) => ({
+              content: [
+                { type: "text", text: JSON.stringify(await ctx.history(t.name, args)) },
+              ],
+            }),
+          ),
+        ),
       // One browser tool. Harness checks the action against Playwright's schema
       // and asks before any action that can change a page.
       ...((gateway) =>

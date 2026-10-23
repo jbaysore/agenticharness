@@ -11,6 +11,7 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { askUserTool } from "../src/core/questions.mjs";
+import { commandTool } from "../src/core/command-tool.mjs";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import {
@@ -73,6 +74,45 @@ function fakeClaude(ctx, during = async () => {}) {
   );
   return { run, seen };
 }
+
+test("Claude exposes explicit command shells through its real MCP tool schema", async () => {
+  const { run } = fakeClaude(
+    {
+      tools: [commandTool],
+      history: async (name, input) => {
+        assert.equal(name, "run_command");
+        assert.equal(input.shell, "cmd");
+        assert.equal(input.isolateDependencies, true);
+        return { exitCode: 7, output: "real failure retained" };
+      },
+    },
+    async (options) => {
+      const client = new Client({ name: "command-test", version: "1.0.0" }),
+        [clientTransport, serverTransport] =
+          InMemoryTransport.createLinkedPair(),
+        server = options.mcpServers.harness.instance;
+      try {
+        await server.connect(serverTransport);
+        await client.connect(clientTransport);
+        const tools = (await client.listTools()).tools;
+        assert.ok(tools.some((tool) => tool.name === "run_command"));
+        const result = await client.callTool({
+          name: "run_command",
+          arguments: {
+            command: "echo fixture",
+            shell: "cmd",
+            isolateDependencies: true,
+          },
+        });
+        assert.equal(JSON.parse(result.content[0].text).exitCode, 7);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+  await run;
+});
 
 test("a chat's mode is saved, reaches the agent, and goal is refused for Cursor", async () => {
   const store = new Store(":memory:"),
