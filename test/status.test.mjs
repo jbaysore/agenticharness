@@ -7,6 +7,9 @@ import {
   chatMarkerLabel,
   pinnedChats,
   providerStatusLabel,
+  cursorMonthlyReset,
+  cursorResetDay,
+  cursorResetLabel,
   resetCountdown,
   resetLabel,
   resetTimestamp,
@@ -198,17 +201,51 @@ test("the header shows the tightest usage window for each provider", () => {
       { name: "Weekly limit", short: "wk", remaining: 12, level: "low", resetsAt: null },
     ],
   });
-  assert.deepEqual(
+  const cursorNow = new Date(2026, 9, 23, 15, 26).getTime();
+  const cursorGlance = usageGlance({
+    id: "cursor",
+    connected: true,
+    usage: { authoritative: false, windows: [] },
+  }, cursorNow);
+  assert.equal(cursorGlance.remaining, null);
+  assert.equal(cursorGlance.level, "unknown");
+  assert.equal(cursorGlance.bars[0].dateOnly, true);
+  assert.equal(cursorGlance.bars[0].remaining, null);
+  assert.equal(cursorGlance.bars[0].resetsAt, cursorMonthlyReset(cursorNow));
+  const cursorReset = new Date(cursorGlance.bars[0].resetsAt);
+  assert.equal(cursorReset.getFullYear(), 2026);
+  assert.equal(cursorReset.getMonth(), 10);
+  assert.equal(cursorReset.getDate(), 14);
+  assert.equal(cursorReset.getHours(), 12);
+  assert.equal(cursorReset.getMinutes(), 0);
+  assert.equal(cursorResetDay(cursorGlance.bars[0].resetsAt), cursorReset.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  }));
+  assert.match(cursorResetLabel(cursorGlance.bars[0].resetsAt), /^Resets /);
+  const atNoon = new Date(2026, 10, 14, 12, 0, 0, 0).getTime();
+  const justBefore = new Date(cursorMonthlyReset(atNoon - 1));
+  assert.equal(justBefore.getMonth(), 10);
+  assert.equal(justBefore.getDate(), 14);
+  const nextMonth = new Date(cursorMonthlyReset(atNoon));
+  assert.equal(nextMonth.getFullYear(), 2026);
+  assert.equal(nextMonth.getMonth(), 11);
+  assert.equal(nextMonth.getDate(), 14);
+  assert.equal(nextMonth.getHours(), 12);
+  const nextYear = new Date(cursorMonthlyReset(new Date(2026, 11, 14, 12).getTime()));
+  assert.equal(nextYear.getFullYear(), 2027);
+  assert.equal(nextYear.getMonth(), 0);
+  assert.equal(nextYear.getDate(), 14);
+  assert.equal(nextYear.getHours(), 12);
+  assert.equal(
     usageGlance({
       id: "cursor",
       connected: true,
-      usage: { authoritative: false, windows: [] },
-    }),
-    {
-      remaining: null,
-      level: "unknown",
-      bars: [{ name: "Usage", short: "", remaining: null, level: "unknown", resetsAt: null }],
-    },
+      usage: {
+        windows: [{ bucket: "cursor", usedPercent: 10, windowMinutes: 43200 }],
+      },
+    }).bars[0].dateOnly,
+    undefined,
   );
   assert.equal(
     usageGlance({

@@ -148,9 +148,46 @@ function usageLevel(remaining) {
         ? "low"
         : "ok";
 }
+// This account's Cursor allowance is assumed to refresh at noon local time on
+// the 14th of each month. ACP does not report a percentage, so only the date
+// is shown.
+const CURSOR_RESET_DAY = 14;
+const CURSOR_RESET_HOUR = 12;
+export function cursorMonthlyReset(now = Date.now()) {
+  const current = new Date(now);
+  const reset = new Date(
+    current.getFullYear(),
+    current.getMonth(),
+    CURSOR_RESET_DAY,
+    CURSOR_RESET_HOUR,
+    0,
+    0,
+    0,
+  );
+  if (reset.getTime() <= now) reset.setMonth(reset.getMonth() + 1);
+  return reset.getTime();
+}
+export function cursorResetDay(at) {
+  return new Date(at).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+export function cursorResetLabel(at) {
+  return (
+    "Resets " +
+    new Date(at).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    })
+  );
+}
 // The tightest limit decides a provider's state. The header shows the 5-hour
 // and weekly limits side by side, or the tightest limit when neither exists.
-export function usageGlance(provider) {
+// Cursor has no percentage, so its header row is the next assumed reset.
+export function usageGlance(provider, now = Date.now()) {
   const windows = usageWindows(provider),
     unknown = provider?.usage?.verificationStatus === "unknown";
   const remaining = !unknown && windows.length
@@ -173,12 +210,20 @@ export function usageGlance(provider) {
       level: unknown ? "unknown" : usageLevel(w.remaining),
       resetsAt: w.resetsAt,
     }));
+  const assumedCursorReset = provider?.id === "cursor" && !windows.length;
   return {
     remaining,
     level,
     bars: bars.length
       ? bars
-      : [{ name: "Usage", short: "", remaining, level, resetsAt: null }],
+      : [{
+          name: assumedCursorReset ? "Monthly reset" : "Usage",
+          short: "",
+          remaining,
+          level,
+          resetsAt: assumedCursorReset ? cursorMonthlyReset(now) : null,
+          dateOnly: assumedCursorReset,
+        }],
   };
 }
 // Compact time until a reset for the top bar: "45m", "3h 40m", "4d 6h".

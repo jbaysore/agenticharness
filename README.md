@@ -113,7 +113,8 @@ endpoint and physical laptop/iPhone validation are pending. See [daily-use instr
   usage. Fast mode and direct API routes are disabled.
 - Cursor must use native login. Confirm **on-demand usage off** in its dashboard
   once. The app keeps that confirmation for the signed-in account. ACP supplies no
-  reliable quota meter. Auto is omitted from the picker. Models that offer Fast
+  reliable quota meter, so the header shows an assumed reset at noon local time
+  on the 14th of each month and does not show a percentage. Auto is omitted from the picker. Models that offer Fast
   are pinned to standard speed. A model offers effort levels once Harness has
   used it in a Cursor session.
 

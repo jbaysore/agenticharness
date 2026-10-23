@@ -3,6 +3,8 @@ import { Icon } from "./components.jsx";
 import { ClaudeResets } from "./claude-resets.jsx";
 import { serverClock } from "./clock.mjs";
 import {
+  cursorResetDay,
+  cursorResetLabel,
   providerStatusLabel,
   resetCountdown,
   resetLabel,
@@ -45,9 +47,7 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
       document.removeEventListener("keydown", key);
     };
   }, [open]);
-  const glances = providers
-    .filter((p) => p.id !== "cursor")
-    .map((p) => [p, usageGlance(p)]);
+  const glances = providers.map((p) => [p, usageGlance(p, now)]);
   if (!glances.length) return null;
   return (
     <div className="usage-glance" ref={root}>
@@ -55,7 +55,7 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
         className={"usage-glance-trigger " + (open ? "active" : "")}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Usage remaining: 5-hour and weekly limits"
+        title="Usage remaining and reset dates"
         onClick={() => setOpen(!open)}
       >
         {glances.map(([p, g]) => (
@@ -65,18 +65,30 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
             title={usageVerificationLabel(p) ?? undefined}
             aria-label={`${p.name}: ${usageVerificationLabel(p) ?? g.bars
               .map((b) =>
-                b.remaining === null
-                  ? "usage unknown"
-                  : `${b.remaining}% of ${b.name.toLowerCase()} left` +
-                    (b.resetsAt
-                      ? `, resets in ${resetCountdown(b.resetsAt, now)}`
-                      : ""),
+                b.dateOnly
+                  ? cursorResetLabel(b.resetsAt)
+                  : b.remaining === null
+                    ? "usage unknown"
+                    : `${b.remaining}% of ${b.name.toLowerCase()} left` +
+                      (b.resetsAt
+                        ? `, resets in ${resetCountdown(b.resetsAt, now)}`
+                        : ""),
               )
               .join(", ")}`}
           >
             <span className="usage-chip-name">
               {p.id === "claude" ? "Claude" : p.name}
             </span>
+            {g.bars.length === 1 && g.bars[0].dateOnly ? (
+              <span
+                className="usage-chip-date"
+                data-reset={g.bars[0].resetsAt}
+                title={`${cursorResetLabel(g.bars[0].resetsAt)}. Assumed noon local time on the 14th.`}
+              >
+                <Icon name="refresh" size={10} />
+                {cursorResetDay(g.bars[0].resetsAt)}
+              </span>
+            ) : (
             <span className="usage-chip-rows">
               {g.bars.map((b, i) => (
                 <span className={"usage-chip-row " + b.level} key={i}>
@@ -105,6 +117,7 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
                 </span>
               ))}
             </span>
+            )}
           </span>
         ))}
       </button>
@@ -149,6 +162,13 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
                       {w.resetsAt && <small>{resetLabel(w.resetsAt, now)}</small>}
                     </div>
                   ))
+                ) : p.id === "cursor" ? (
+                  <p
+                    className="cursor-reset"
+                    title="Assumed noon local time on the 14th of each month"
+                  >
+                    {cursorResetLabel(g.bars[0].resetsAt)}
+                  </p>
                 ) : (
                   <p className="muted small">
                     {p.connected

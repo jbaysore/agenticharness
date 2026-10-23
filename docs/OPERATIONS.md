@@ -286,7 +286,8 @@ extract or relay subscription tokens. Account/model probes do not submit prompts
   The confirmation stays with that account and does not expire. Confirm again only
   after signing in to a different Cursor account. ACP exposes no authoritative
   quota meter or paid-mode attestation, so the dashboard setting remains the
-  required protection. A model reply is not billing proof.
+  required protection. The header and Connections show an assumed reset at noon
+  local time on the 14th of each month. A model reply is not billing proof.
 
 Use **Refresh** in Connections & usage after a login or plan change. The app never
 automatically buys credits, supplies an inference API key, or retries a failed

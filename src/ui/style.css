@@ -2683,6 +2683,23 @@ small {
 .usage-chip-reset svg {
   flex-shrink: 0;
 }
+.usage-chip-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+.usage-chip-date svg {
+  flex-shrink: 0;
+}
+.cursor-reset {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
 /* Use the space available to the header, including when sidebars are open. */
 @container topbar (min-width: 940px) {
   .usage-chip {
@@ -3432,6 +3449,10 @@ small {
     display: flex;
     justify-content: space-between;
     width: 100%;
+    height: auto;
+    min-height: 54px;
+    flex-wrap: wrap;
+    row-gap: 4px;
     padding: 0;
   }
   .usage-chip {
@@ -3440,6 +3461,12 @@ small {
   .usage-chip + .usage-chip {
     margin-left: 12px;
     padding-left: 12px;
+  }
+  .usage-chip.cursor {
+    flex: 1 0 100%;
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
   }
   .usage-chip-rows {
     grid-template-columns: 1.7em 4.5ch 6.4em;

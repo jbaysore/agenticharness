@@ -4,6 +4,7 @@ import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHarness } from "../src/server.mjs";
 import { createClaudeUsageMonitor } from "../src/security/claude-usage.mjs";
+import { cursorMonthlyReset, cursorResetDay, cursorResetLabel } from "../src/ui/status.mjs";
 
 await mkdir(".local/screenshots", { recursive: true });
 const dataDir = await mkdtemp(resolve(".local/claude-usage-"));
@@ -101,10 +102,18 @@ try {
       "aria-label",
       /74%/,
     );
-    await expect(page.locator(".usage-chip")).toHaveCount(2);
+    await expect(page.locator(".usage-chip")).toHaveCount(3);
     await expect(page.locator(".usage-chip.claude .usage-chip-name")).toBeVisible();
     await expect(page.locator(".usage-chip.codex .usage-chip-name")).toBeVisible();
-    await expect(page.locator(".usage-chip.cursor")).toHaveCount(0);
+    const cursorResetAt = String(cursorMonthlyReset(Date.now()));
+    await expect(page.locator(".usage-chip.cursor .usage-chip-date")).toHaveAttribute(
+      "data-reset",
+      cursorResetAt,
+    );
+    await expect(page.locator(".usage-chip.cursor .usage-chip-date")).toHaveText(
+      cursorResetDay(Number(cursorResetAt)),
+    );
+    await expect(page.locator(".usage-chip.cursor .usage-chip-value")).toHaveCount(0);
     await expect(page.locator(".usage-chip.claude .usage-chip-value")).toHaveText([
       "74%", "73%",
     ]);
@@ -175,7 +184,9 @@ try {
       "href", "https://claude.ai/settings/usage",
     );
     await expect(popover.getByRole("button", { name: "Refresh usage", exact: true })).toBeVisible();
-    await expect(popover.locator(".usage-provider.cursor")).toHaveCount(0);
+    await expect(popover.locator(".usage-provider.cursor .cursor-reset")).toHaveText(
+      cursorResetLabel(Number(cursorResetAt)),
+    );
     await expect(
       page.locator(".usage-chip.claude .usage-chip-row.unknown"),
     ).toHaveCount(2);
@@ -207,6 +218,9 @@ try {
     await expect(connections.getByRole("link", { name: "Open Claude resets" })).toBeVisible();
     await expect(connections.getByRole("button", { name: "Refresh usage", exact: true })).toBeVisible();
     await expect(connections.getByText("Cursor", { exact: true })).toBeVisible();
+    await expect(connections.locator(".connection.cursor .cursor-reset")).toHaveText(
+      cursorResetLabel(Number(cursorResetAt)),
+    );
     await expect(connections.getByRole("status")).toHaveText(
       /Unknown · last confirmed at/,
     );

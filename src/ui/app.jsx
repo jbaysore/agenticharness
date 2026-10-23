@@ -5,6 +5,7 @@ import "@fontsource-variable/newsreader/opsz.css";
 import "@fontsource-variable/newsreader/opsz-italic.css";
 import "./style.css";
 import { api } from "./api.mjs";
+import { serverClock } from "./clock.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
 import { ChatRow } from "./chat-row.jsx";
@@ -23,6 +24,8 @@ import { useRestartProgress } from "./restart-progress.jsx";
 import {
   activeChats,
   attentionCount,
+  cursorMonthlyReset,
+  cursorResetLabel,
   pinnedChats,
   sidebarOrder,
   usageVerificationLabel,
@@ -1592,9 +1595,19 @@ function App() {
                     </div>
                   ))
                 ) : (
-                  <div className="unavailable">
-                    Quota information unavailable through this integration
-                  </div>
+                  <>
+                    {p.id === "cursor" && (
+                      <p
+                        className="cursor-reset"
+                        title="Assumed noon local time on the 14th of each month"
+                      >
+                        {cursorResetLabel(cursorMonthlyReset(serverClock.now()))}
+                      </p>
+                    )}
+                    <div className="unavailable">
+                      Quota information unavailable through this integration
+                    </div>
+                  </>
                 )}
                 {p.note && <p className="muted small">{p.note}</p>}
                 {p.id === "claude" && (
