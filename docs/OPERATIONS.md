@@ -9,8 +9,8 @@ when that shortcut is present. Pinning the window before the shortcut exists pin
 Edge instead. The installed app and its bundled
 runtime are under `%LOCALAPPDATA%\Programs\AgenticHarness\<version>`. Data is separate,
 under `%LOCALAPPDATA%\AgenticHarness`. Closing the app window leaves the host and
-ongoing work running. The host starts when you launch the app; it is not a Windows
-service and does not currently start automatically when you sign in.
+ongoing work running. The host starts when you launch the app, or through the
+optional Windows startup task described below.
 
 Verify installed-app launches through the actual Windows desktop shortcut.
 Packaged development tools can redirect `%LOCALAPPDATA%` into their own private
@@ -552,5 +552,50 @@ official distribution; refresh connections afterward.
 Advanced commands are optional: `node scripts/launch.mjs --stop` and
 `node scripts/launch.mjs --restart` provide graceful host control. Startup errors
 are under the data folder in `host-errors.log` and `launcher-errors.log`.
-The app does not fetch release updates or include a startup service, offline executor,
+The app does not fetch release updates or include an offline executor,
 or cross-machine copy of provider credentials.
+
+## Automatic startup
+
+After building the source checkout or extracting a complete release, open
+PowerShell as Administrator in the permanent app folder and run:
+
+```powershell
+.\scripts\install-boot-task.ps1
+```
+
+This registers and starts **Agentic Harness** in Task Scheduler. It uses the
+current Windows account with no stored password, starts 30 seconds after boot,
+and also triggers 15 seconds after that account signs in. Concurrent starts
+are ignored. The supervisor runs with normal user permissions, permits battery
+operation, has no execution time limit, and retries every 30 seconds if the
+launcher exits. Task Scheduler also retries a failed supervisor three times.
+The task opens no browser window; use the normal shortcut to open Harness.
+
+Harness's coding agents require an interactive Windows desktop. Before sign-in,
+the supervisor waits and retries the existing desktop handoff. The host and
+agents become available after you sign in, and stay on that desktop session.
+The task reuses a healthy host and follows Harness's safe self-restarts.
+It reads the existing configuration and data under
+`%LOCALAPPDATA%\AgenticHarness`; supervisor output is in `startup.log` there,
+alongside the host and launcher logs.
+
+Use a permanent folder, not a chat worktree or a temporary release folder.
+Optional `-Root`, `-NodePath`, and `-DataDir` arguments select explicit locations;
+the installer prefers the bundled Node runtime and otherwise resolves `node.exe`.
+`-NoStart` registers the task without starting it. Reinstalling updates only this
+task and saves its previous XML in the data folder. After moving the app or
+installing a release in a new version folder, rerun the installer there.
+
+To stop automatic startup and its supervisor, run these in an administrator
+PowerShell:
+
+```powershell
+Disable-ScheduledTask -TaskName 'Agentic Harness'
+Stop-ScheduledTask -TaskName 'Agentic Harness'
+```
+
+Stopping the task leaves its detached desktop host running. Once all chats and
+terminals are finished, use **Stop Harness.vbs** or
+`node scripts/launch.mjs --stop` to stop that host. To remove the startup task,
+run `Unregister-ScheduledTask -TaskName 'Agentic Harness' -Confirm:$false`.

@@ -15,6 +15,12 @@ installed and owns its credentials.
 The launcher opens an Edge app window and starts the local host if needed. Closing
 the window leaves work running. The host binds to `127.0.0.1:47831`.
 
+For automatic startup, run `scripts\install-boot-task.ps1` from an administrator
+PowerShell in the permanent app folder after building or extracting the app.
+The **Agentic Harness** scheduled task runs in the background after boot and
+waits for your signed-in Windows desktop, which the coding agents require.
+See [startup task setup and removal](docs/OPERATIONS.md#automatic-startup).
+
 When running from its source checkout, Harness can deliver its own committed
 changes and restart after every chat finishes and live terminals close. Agents
 can also queue a safe restart with `restart_harness`. An update is built and
