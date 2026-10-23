@@ -746,6 +746,7 @@ export function ChatPane({
         )}
         {!chat?.activeRun &&
           !chat?.usage_stopped_at &&
+          chat?.runs?.[0]?.id !== chat?.usage_dismissed_run_id &&
           chat?.runs?.[0]?.status === "failed" && (
           <div className="notice failed">
             <strong>Work stopped.</strong>{" "}

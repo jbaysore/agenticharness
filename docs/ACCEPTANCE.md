@@ -33,6 +33,11 @@ across reload after both a lost response and an unreceived request.
 
 - `npm test`: no paid or included inference. Unit/state fixtures plus actual local
   HTTP, filesystem and child-process tests.
+- `npm run test:usage-stop`: real headless Edge and isolated HTTP/SQLite with
+  simulated providers, no inference. Passed resumed Goal completion, genuine
+  quota stops, banner/sidebar dismissal, disconnected events, persistence after
+  reload and visibility of later failures. Store tests cover conservative repair
+  of saved replay failures and preservation of genuine or unverified stops.
 - `node scripts/acceptance.mjs`: **real included usage**, resets the disposable
   `.local/dogfood-project` fixture and performs the three-provider workflow.
 - `node scripts/native-acceptance.mjs`: **real included usage**, native continuation,

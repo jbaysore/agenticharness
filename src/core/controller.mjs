@@ -1351,13 +1351,6 @@ export class Controller extends EventEmitter {
         // A stopped/replaced runner cannot release a newer session's hold.
         if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id)
           return;
-        // Claude labels every billing stop usageLimited. A native Goal that
-        // actually reached its usage limit has no earlier, different reason.
-        if (
-          status === "usageLimited" &&
-          (!billingStop || isUsageExhausted(billingStop))
-        )
-          noteUsageStop("A provider usage limit has been reached.");
         const updated = this.store.setGoalState(
           chat.id,
           run.provider,
@@ -1486,6 +1479,17 @@ export class Controller extends EventEmitter {
     else {
       const goal = this.store.conversation(chat.id)?.sessions[run.provider]
         ?.goal;
+      // Resuming a native session can replay its previous usageLimited state
+      // before reactivating the Goal. Only its final state belongs to this
+      // turn; an explicit billing stop above still keeps its own reason.
+      // Claude also uses usageLimited for billing/setup stops, so preserve a
+      // more specific reason instead of calling those exhausted usage.
+      if (
+        goal?.runId === run.id &&
+        goal.status === "usageLimited" &&
+        (!billingStop || isUsageExhausted(billingStop))
+      )
+        noteUsageStop("A provider usage limit has been reached.");
       if (goal?.runId === run.id && !goalStopped(goal.status))
         this.store.setGoalState(chat.id, run.provider, run.id, "unknown");
     }

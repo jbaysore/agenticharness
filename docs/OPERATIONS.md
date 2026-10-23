@@ -96,6 +96,11 @@ a chat is archived, and the chat returns to **Pinned** when you unarchive it
 or send it a message. Archived chats sit behind **Show archived** in their
 project.
 
+When a turn stops because included usage runs out, its chat keeps a usage flag
+and reminder. **Dismiss** in the reminder or sidebar acknowledges that run;
+the same error stays hidden after reload, and later failures still appear.
+A resumed Goal's earlier usage-limit state does not mark a successful run failed.
+
 Codex, Claude Code and Cursor give new chats a short title silently at the start
 of their work. If an agent misses naming a chat, it is reminded on the next turn.
 An automatic title never replaces one you chose or an earlier automatic title.

@@ -132,6 +132,10 @@ export class Store {
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN usage_stopped_reason TEXT",
       );
+    if (!conversation.includes("usage_dismissed_run_id"))
+      this.db.exec(
+        "ALTER TABLE conversations ADD COLUMN usage_dismissed_run_id TEXT",
+      );
     // Run on a chat's rebased branch before it lands on the project's branch.
     if (!columns("projects").includes("check_command"))
       this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
@@ -142,10 +146,76 @@ export class Store {
     if (this.setting("default-history-scope") === null)
       this.setting("default-history-scope", "all");
     this.protectLegacyGoals();
+    this.repairReplayedGoalUsageStops();
   }
 
   close() {
     this.db.close();
+  }
+  repairReplayedGoalUsageStops() {
+    // Older hosts latched a resumed Codex Goal's historical usageLimited
+    // notification. Repair only runs whose saved events prove reactivation,
+    // completion and a healthy final meter, with no current billing/error stop.
+    const candidates = this.db
+      .prepare(
+        `SELECT r.*, c.sessions FROM runs r JOIN conversations c ON c.id=r.conversation_id
+          WHERE r.provider='codex' AND r.status='failed'
+          AND r.error='A provider usage limit has been reached.'`,
+      )
+      .all();
+    const evidence = this.db.prepare(
+      `SELECT type,payload FROM events WHERE run_id=? AND
+        (type IN ('chat','usage') OR (type='work' AND json_extract(payload,'$.kind') IN ('billing-stop','error')))
+        ORDER BY id`,
+    );
+    for (const run of candidates) {
+      const saved = JSON.parse(run.sessions).codex?.goal;
+      if (saved?.runId !== run.id || saved.status !== "complete") continue;
+      const events = evidence.all(run.id).map((e) => ({
+        type: e.type,
+        payload: JSON.parse(e.payload),
+      }));
+      if (events.some((e) => e.type === "work")) continue;
+      const states = events.flatMap((e, index) => {
+        const goal = e.type === "chat" && e.payload.sessions?.codex?.goal;
+        return goal?.runId === run.id ? [{ index, status: goal.status }] : [];
+      });
+      const final = states.at(-1);
+      if (
+        states[0]?.status !== "usageLimited" ||
+        !states.some((s) => s.status === "active") ||
+        final?.status !== "complete"
+      )
+        continue;
+      const usage = events
+        .slice(final.index + 1)
+        .findLast((e) => e.type === "usage")?.payload;
+      if (
+        usage?.authoritative !== true ||
+        usage.ordinaryUsageAllowed !== true ||
+        !usage.windows?.length ||
+        !usage.windows.every(
+          (w) => typeof w.usedPercent === "number" && w.usedPercent < 100,
+        )
+      )
+        continue;
+      const latest = this.db
+        .prepare(
+          "SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+        )
+        .get(run.conversation_id);
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db
+          .prepare("UPDATE runs SET status='completed',error=NULL WHERE id=?")
+          .run(run.id);
+        if (latest?.id === run.id) this.clearUsageStop(run.conversation_id);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
   now() {
     return new Date().toISOString();
@@ -315,7 +385,7 @@ export class Store {
     if (!text) throw new Error("A usage stop needs a reason");
     this.db
       .prepare(
-        "UPDATE conversations SET usage_stopped_at=?, usage_stopped_reason=? WHERE id=?",
+        "UPDATE conversations SET usage_stopped_at=?, usage_stopped_reason=?, usage_dismissed_run_id=NULL WHERE id=?",
       )
       .run(this.now(), text, id);
     return this.conversation(id);
@@ -323,9 +393,23 @@ export class Store {
   clearUsageStop(id) {
     this.db
       .prepare(
-        "UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL WHERE id=?",
+        "UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL, usage_dismissed_run_id=NULL WHERE id=?",
       )
       .run(id);
+    return this.conversation(id);
+  }
+  dismissUsageStop(id) {
+    // Acknowledging this stop also hides the same run's generic failure
+    // notice. Keep its recorded error and allow later failures to surface.
+    this.db
+      .prepare(
+        `UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL,
+          usage_dismissed_run_id=(SELECT id FROM runs WHERE conversation_id=?
+            AND status='failed' AND error=conversations.usage_stopped_reason
+            ORDER BY created_at DESC, rowid DESC LIMIT 1)
+          WHERE id=? AND usage_stopped_at IS NOT NULL`,
+      )
+      .run(id, id);
     return this.conversation(id);
   }
   createConversation({

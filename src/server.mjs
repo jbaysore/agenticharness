@@ -606,7 +606,7 @@ export async function createHarness({
             if (body.usageStopped !== undefined) {
               if (body.usageStopped !== false)
                 throw new Error("A usage flag can only be dismissed");
-              store.clearUsageStop(id);
+              store.dismissUsageStop(id);
             }
             if (Object.hasOwn(body, "permissions"))
               controller.setPermissions(id, body.permissions);

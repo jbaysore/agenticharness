@@ -430,6 +430,161 @@ test("a usage stop is remembered until it is dismissed, without reordering the c
   assert.equal(cleared.updated_at, before);
   db.close();
 });
+test("dismissing a usage stop acknowledges only that run and keeps its history", () => {
+  const db = new Store(":memory:"),
+    chat = db.createConversation({
+      projectId: db.addProject("P", "C:\\dismiss-usage").id,
+    });
+  try {
+    const run = db.createRun({
+      conversationId: chat.id,
+      actionId: "dismiss-usage-first",
+      provider: "codex",
+      model: "m",
+      text: "Continue",
+    });
+    db.setRun(run.id, "failed", null, "Included Codex quota is exhausted.");
+    db.setUsageStop(chat.id, "Included Codex quota is exhausted.");
+    const before = db.conversation(chat.id).updated_at;
+    for (let i = 0; i < 2; i++) {
+      const dismissed = db.dismissUsageStop(chat.id);
+      assert.equal(dismissed.usage_stopped_at, null);
+      assert.equal(dismissed.usage_stopped_reason, null);
+      assert.equal(dismissed.usage_dismissed_run_id, run.id);
+      assert.equal(dismissed.updated_at, before);
+      assert.equal(db.run(run.id).error, "Included Codex quota is exhausted.");
+    }
+    const next = db.createRun({
+      conversationId: chat.id,
+      actionId: "dismiss-usage-next",
+      provider: "codex",
+      model: "m",
+      text: "Try again",
+    });
+    // Dismissing an older reminder during startup cannot acknowledge the new run.
+    db.setUsageStop(chat.id, "Included Codex quota is exhausted.");
+    assert.equal(db.dismissUsageStop(chat.id).usage_dismissed_run_id, run.id);
+    db.setRun(next.id, "failed", null, "Provider unavailable");
+    db.dismissUsageStop(chat.id);
+    assert.notEqual(db.conversation(chat.id).usage_dismissed_run_id, next.id);
+    db.setUsageStop(chat.id, "Included Codex quota is exhausted.");
+    assert.equal(db.conversation(chat.id).usage_dismissed_run_id, null);
+  } finally {
+    db.close();
+  }
+});
+
+test("reopening repairs proven replayed Goal usage failures and preserves genuine or unverified stops", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-usage-repair-")),
+    path = join(dir, "workspace.sqlite"),
+    fixtures = [];
+  let db = new Store(path);
+  try {
+    const project = db.addProject("Usage repair", dir);
+    for (const kind of [
+      "replayed",
+      "dismissed",
+      "billing",
+      "error",
+      "exhausted",
+      "unverified",
+      "no-history",
+      "still-limited",
+      "newer-failure",
+    ]) {
+      const chat = db.createConversation({ projectId: project.id }),
+        run = db.createRun({
+          conversationId: chat.id,
+          actionId: "usage-repair-" + kind,
+          provider: "codex",
+          model: "m",
+          text: "Continue the goal",
+        });
+      for (const status of ["usageLimited", "active", "complete"]) {
+        const updated = db.setGoalState(chat.id, "codex", run.id, status);
+        if (kind !== "no-history")
+          db.appendEvent(chat.id, run.id, "chat", updated);
+      }
+      db.appendEvent(chat.id, run.id, "usage", {
+        authoritative: kind !== "unverified",
+        ordinaryUsageAllowed: true,
+        windows: [{ usedPercent: kind === "exhausted" ? 100 : 61 }],
+      });
+      if (["billing", "error"].includes(kind))
+        db.appendEvent(chat.id, run.id, "work", {
+          kind: kind === "billing" ? "billing-stop" : "error",
+          reason: "A provider usage limit has been reached.",
+        });
+      if (kind === "still-limited")
+        db.setGoalState(chat.id, "codex", run.id, "usageLimited");
+      db.setRun(
+        run.id,
+        "failed",
+        null,
+        "A provider usage limit has been reached.",
+      );
+      db.setUsageStop(chat.id, "A provider usage limit has been reached.");
+      if (kind === "dismissed") db.dismissUsageStop(chat.id);
+      if (kind === "newer-failure") {
+        const next = db.createRun({
+          conversationId: chat.id,
+          actionId: "usage-repair-newer-run",
+          provider: "codex",
+          model: "m",
+          text: "Another task",
+        });
+        db.setRun(
+          next.id,
+          "failed",
+          null,
+          "Included Codex quota is exhausted.",
+        );
+        db.setUsageStop(chat.id, "Included Codex quota is exhausted.");
+      }
+      fixtures.push({
+        kind,
+        chatId: chat.id,
+        runId: run.id,
+        before: db.conversation(chat.id),
+        endedAt: db.run(run.id).ended_at,
+      });
+    }
+    db.close();
+    db = new Store(path);
+    for (const f of fixtures) {
+      const repaired = ["replayed", "dismissed", "newer-failure"].includes(
+          f.kind,
+        ),
+        chat = db.conversation(f.chatId),
+        run = db.run(f.runId);
+      assert.equal(run.status, repaired ? "completed" : "failed", f.kind);
+      assert.equal(
+        run.error,
+        repaired ? null : "A provider usage limit has been reached.",
+        f.kind,
+      );
+      assert.equal(run.ended_at, f.endedAt, f.kind);
+      assert.equal(chat.updated_at, f.before.updated_at, f.kind);
+      if (["replayed", "dismissed"].includes(f.kind)) {
+        assert.equal(chat.usage_stopped_at, null, f.kind);
+        assert.equal(chat.usage_dismissed_run_id, null, f.kind);
+      } else {
+        assert.equal(chat.usage_stopped_at, f.before.usage_stopped_at, f.kind);
+        assert.equal(
+          chat.usage_stopped_reason,
+          f.before.usage_stopped_reason,
+          f.kind,
+        );
+      }
+    }
+    db.repairReplayedGoalUsageStops();
+    assert.equal(db.run(fixtures[0].runId).status, "completed");
+  } finally {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("marking read and archiving leave the conversation order alone", () => {
   const db = new Store(":memory:"),
     p = db.addProject("P", "C:\\p"),

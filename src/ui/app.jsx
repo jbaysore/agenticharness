@@ -670,6 +670,7 @@ function App() {
     setView((v) => openInFocused(v, null, projectId));
   async function dismissUsage(chatId) {
     await api("/api/chats/" + chatId, { usageStopped: false }, "PATCH");
+    await reload(chatId);
     await refresh();
   }
   async function archiveChat(c, archived) {

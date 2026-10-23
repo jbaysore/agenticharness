@@ -1055,6 +1055,64 @@ test("a mid-turn usage stop flags the chat until a later turn is working", async
   }
 });
 
+test("a replayed Goal usage limit does not turn a completed run into a usage failure", async (t) => {
+  for (const billingStop of [false, true])
+    await t.test(`current billing stop=${billingStop}`, async () => {
+      const store = new Store(":memory:"),
+        controller = new Controller(store, {}),
+        chat = store.createConversation({
+          projectId: store.addProject("Resumed goal", "C:\\resumed-goal").id,
+          mode: "goal",
+        });
+      controller.providers = [
+        { id: "codex", models: [{ id: "m", efforts: [] }] },
+      ];
+      store.setUsageStop(chat.id, "A provider usage limit has been reached.");
+      controller.runners.codex = async (ctx) => {
+        ctx.goalState("usageLimited");
+        ctx.goalState("active");
+        ctx.emit("nativeTurn", { id: "resumed-native-turn" });
+        ctx.emit("text", { nativeId: "final", text: "Goal complete." });
+        assert.equal(store.conversation(chat.id).usage_stopped_at, null);
+        ctx.goalState("complete");
+        if (billingStop)
+          ctx.emit("work", {
+            kind: "billing-stop",
+            reason: "Included Codex quota is exhausted.",
+          });
+        return { status: "completed" };
+      };
+      try {
+        const run = controller.send(chat.id, {
+          actionId: "resumed-goal-usage-replay-" + billingStop,
+          text: "Continue the previous goal",
+          provider: "codex",
+          model: "m",
+        });
+        await controller.active.get(chat.id).task;
+        assert.equal(
+          store.run(run.id).status,
+          billingStop ? "failed" : "completed",
+        );
+        assert.equal(
+          store.run(run.id).error,
+          billingStop ? "Included Codex quota is exhausted." : null,
+        );
+        assert.equal(
+          Boolean(store.conversation(chat.id).usage_stopped_at),
+          billingStop,
+        );
+        assert.equal(
+          store.conversation(chat.id).sessions.codex.goal.status,
+          "complete",
+        );
+      } finally {
+        await controller.close();
+        store.close();
+      }
+    });
+});
+
 test("provider usage is re-read after a limit window resets", async (t) => {
   const store = new Store(":memory:"),
     controller = new Controller(store, {});
