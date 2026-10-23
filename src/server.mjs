@@ -41,6 +41,7 @@ import { uploadAttachment, serveAttachment } from "./core/attachments.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
 import { openReviewer } from "./providers/workers.mjs";
 import { Terminals } from "./core/terminals.mjs";
+import { terminalStreams } from "./core/terminal-stream.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
 import { APP_VERSION } from "./core/version.mjs";
 import { SelfRestart, restartTool } from "./core/self-restart.mjs";
@@ -124,9 +125,10 @@ export async function createHarness({
   let inflightWrites = 0,
     ready = false;
   const clients = new Set();
-  const terminals = new Terminals((type, data) =>
-    controller?.event(null, null, type, data),
-  );
+  const terminals = new Terminals((type, data) => {
+    if (!["terminal-output", "terminal-closed"].includes(type))
+      controller?.event(null, null, type, data);
+  });
   const json = (res, status, value, headers = {}) => {
     res.writeHead(status, {
       "Content-Type": "application/json",
@@ -929,6 +931,30 @@ export async function createHarness({
   // first (its default is 5), the next request on it becomes a Cloudflare 502.
   server.keepAliveTimeout = 120_000;
   server.headersTimeout = 125_000;
+  const terminalSockets = terminalStreams(server, {
+    terminals,
+    authorize: async (req) => {
+      if (!req.headers.origin || !safeOrigin(req, localOrigin, publicOrigin))
+        return { status: 403 };
+      if (!ready || selfRestart?.gated) return { status: 503 };
+      let ownerExpiresAt = null;
+      if (publicOrigin && req.headers.host === new URL(publicOrigin).host) {
+        const assertion = req.headers["cf-access-jwt-assertion"];
+        if (!(await ownerSignedIn?.(assertion))) return { status: 403 };
+        // The assertion is already signature-verified. Enforce its expiry on
+        // input too, since a live stream can outlast the upgrade request.
+        ownerExpiresAt =
+          JSON.parse(
+            Buffer.from(assertion.split(".")[1], "base64url").toString("utf8"),
+          ).exp * 1000;
+      }
+      const allowed = () =>
+        ownerExpiresAt !== null
+          ? Date.now() < ownerExpiresAt
+          : onHost(req, localOrigin) || auth.authenticated(req);
+      return allowed() ? { allowed } : { status: 401 };
+    },
+  });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", resolve);
@@ -986,6 +1012,7 @@ export async function createHarness({
       clearTimeout(tunnelRetry);
       tunnelProcess?.kill();
       await controller.close();
+      await terminalSockets.close();
       await terminals.closeAll();
       for (const client of clients) client.end();
       server.closeIdleConnections();

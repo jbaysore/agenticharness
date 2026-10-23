@@ -2304,6 +2304,30 @@ small {
   border: 0;
   padding: 6px;
 }
+.terminal-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.terminal-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 3px 10px;
+  background: var(--bg-sunken);
+  font-size: 11px;
+}
+.terminal-tools > span {
+  flex: 1;
+  color: var(--text-3);
+}
+.terminal-tools > button {
+  padding: 3px 6px;
+}
 .terminal-container {
   padding: 10px 3px 3px 10px;
   flex: 1;

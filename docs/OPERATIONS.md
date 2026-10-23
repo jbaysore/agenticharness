@@ -430,6 +430,13 @@ reload. A terminal that nobody has run a command in is removed, not kept, when
 its pane is closed or replaced; once any tab has had a line submitted, it stays
 in the list until you end it.
 
+Select terminal text and use **Ctrl+C** or **Ctrl+Shift+C** to copy it. With no
+selection, **Ctrl+C** interrupts the running command. Paste with **Ctrl+V**,
+**Ctrl+Shift+V**, **Shift+Insert**, or the terminal's **Paste** button; **Copy**
+copies the selection. Input and output use a live connection so typing does
+not wait for a separate HTTP response for every key. Reconnecting restores the
+saved terminal output; input entered while disconnected is not replayed.
+
 Terminal starts PowerShell in the selected primary project. It continues when
 you change panels or disconnect the browser. Close terminals when finished. A
 host restart ends terminals; reopen one afterward. Live terminal streams and work

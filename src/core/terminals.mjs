@@ -11,8 +11,23 @@ export class Terminals {
   sessions = new Map();
   groups = new Map();
   opened = 0;
+  listeners = new Map();
   constructor(onEvent) {
     this.onEvent = onEvent;
+  }
+  subscribe(id, listener) {
+    if (!this.sessions.has(id)) throw new Error("Terminal has ended");
+    const listeners = this.listeners.get(id) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(id, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (!listeners.size) this.listeners.delete(id);
+    };
+  }
+  publish(type, data) {
+    for (const listener of this.listeners.get(data.id) ?? []) listener(type, data);
+    this.onEvent(type, data);
   }
   list({ output = true } = {}) {
     return [...this.sessions.values()].map(
@@ -78,11 +93,11 @@ export class Terminals {
     this.sessions.set(id, session);
     child.onData((data) => {
       session.output = (session.output + data).slice(-200000);
-      this.onEvent("terminal-output", { id, data });
+      this.publish("terminal-output", { id, data });
     });
     child.onExit(({ exitCode }) => {
       session.status = "exited";
-      this.onEvent("terminal-exit", { id, exitCode });
+      this.publish("terminal-exit", { id, exitCode });
       this.onEvent("terminals", {});
     });
     this.onEvent("terminals", {});
@@ -129,6 +144,7 @@ export class Terminals {
     const s = this.sessions.get(id);
     if (s) {
       this.sessions.delete(id);
+      this.publish("terminal-closed", { id });
       if (![...this.sessions.values()].some((o) => o.groupId === s.groupId))
         this.groups.delete(s.groupId);
       // Use the library's full cleanup, which disposes its output worker and

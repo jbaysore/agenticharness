@@ -8,7 +8,7 @@ import React, {
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { api } from "./api.mjs";
+import { connectTerminal } from "./terminal-stream.mjs";
 import { Icon } from "./components.jsx";
 import { SHELL_CHOICES, activeTab } from "./terminal-groups.mjs";
 
@@ -17,7 +17,10 @@ import { SHELL_CHOICES, activeTab } from "./terminal-groups.mjs";
 // follows the stream.
 export function TerminalView({ id, report, focus = false }) {
   const container = useRef(null),
-    handle = useRef(null);
+    handle = useRef(null),
+    clipboard = useRef(null),
+    [selected, setSelected] = useState(false),
+    [status, setStatus] = useState("Connecting…");
   useEffect(() => {
     if (!id || !container.current) return;
     const t = new Terminal({
@@ -53,54 +56,127 @@ export function TerminalView({ id, report, focus = false }) {
     t.loadAddon(fit);
     t.open(container.current);
     handle.current = t;
-    api("/api/terminals")
-      .then((all) => {
-        const s = all.find((s) => s.id === id);
-        if (!s) return;
-        t.write(s.output);
-        if (s.status === "exited") t.write("\r\n[Terminal has ended]\r\n");
-      })
-      .catch(report);
+    const copy = async () => {
+      if (!t.hasSelection()) return;
+      try {
+        if (navigator.clipboard?.writeText)
+          await navigator.clipboard.writeText(t.getSelection());
+        else if (!document.execCommand("copy"))
+          throw new Error("Copy was blocked");
+      } catch (error) {
+        report(error);
+      }
+      t.focus();
+    };
+    const paste = async () => {
+      try {
+        t.paste(await navigator.clipboard.readText());
+      } catch {
+        report(
+          new Error(
+            "Clipboard access was blocked. Use Ctrl+V or Shift+Insert to paste.",
+          ),
+        );
+      }
+      t.focus();
+    };
+    clipboard.current = { copy, paste };
+    const selection = t.onSelectionChange(() => setSelected(t.hasSelection()));
+    t.attachCustomKeyEventHandler((event) => {
+      const key = event.key.toLowerCase(),
+        command = event.ctrlKey || event.metaKey;
+      if (
+        !event.altKey &&
+        command &&
+        ((key === "c" && (event.shiftKey || t.hasSelection())) ||
+          (key === "insert" && t.hasSelection()))
+      ) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          copy();
+        }
+        return false;
+      }
+      // Let the browser deliver a native paste event; xterm then handles line
+      // endings and bracketed paste. Ctrl+C without selection still interrupts.
+      if (
+        !event.altKey &&
+        ((command && key === "v") || (event.shiftKey && key === "insert"))
+      )
+        return false;
+      return true;
+    });
+    const connection = connectTerminal(id, {
+      report,
+      onOpen: () => resize(),
+      onReconnect: () => setStatus("Reconnecting…"),
+      onMessage: (message) => {
+        if (message.type === "snapshot") {
+          t.reset();
+          t.write(message.output);
+          setStatus(message.status === "exited" ? "Ended" : "");
+          if (message.status === "exited")
+            t.write("\r\n[Terminal has ended]\r\n");
+        }
+        if (message.type === "output") t.write(message.data);
+        if (message.type === "exit") {
+          setStatus("Ended");
+          t.write(`\r\n[Terminal exited: ${message.exitCode}]\r\n`);
+        }
+        if (message.type === "error") {
+          setStatus("Disconnected");
+          report(new Error(message.error));
+        }
+      },
+    });
     const resize = () => {
       try {
         fit.fit();
-        api(`/api/terminals/${id}/resize`, {
-          cols: t.cols,
-          rows: t.rows,
-        }).catch(() => {});
+        connection.resize(t.cols, t.rows);
       } catch {}
     };
     const observer = new ResizeObserver(resize);
     observer.observe(container.current);
     resize();
-    let inputQueue = Promise.resolve();
-    const input = t.onData((data) => {
-      inputQueue = inputQueue
-        .then(() => api(`/api/terminals/${id}/input`, { data }))
-        .catch(report);
-    });
-    const output = (e) => {
-      if (e.detail.id === id) t.write(e.detail.data);
-    };
-    const exit = (e) => {
-      if (e.detail.id === id)
-        t.write(`\r\n[Terminal exited: ${e.detail.exitCode}]\r\n`);
-    };
-    window.addEventListener("terminal-output", output);
-    window.addEventListener("terminal-exit", exit);
+    const input = t.onData((data) => connection.input(data));
     return () => {
       observer.disconnect();
       input.dispose();
-      window.removeEventListener("terminal-output", output);
-      window.removeEventListener("terminal-exit", exit);
+      selection.dispose();
+      connection.dispose();
       t.dispose();
       handle.current = null;
+      clipboard.current = null;
     };
   }, [id]);
   useEffect(() => {
     if (focus) handle.current?.focus();
   }, [focus, id]);
-  return <div className="terminal-container" ref={container} />;
+  return (
+    <div className="terminal-view">
+      <div className="terminal-tools">
+        <span role="status">{status}</span>
+        <button
+          type="button"
+          disabled={!selected}
+          onClick={() => clipboard.current?.copy()}
+          aria-label="Copy terminal selection"
+          title="Copy selection (Ctrl+C or Ctrl+Shift+C)"
+        >
+          Copy
+        </button>
+        <button
+          type="button"
+          onClick={() => clipboard.current?.paste()}
+          aria-label="Paste into terminal"
+          title="Paste (Ctrl+V, Ctrl+Shift+V or Shift+Insert)"
+        >
+          Paste
+        </button>
+      </div>
+      <div className="terminal-container" ref={container} />
+    </div>
+  );
 }
 
 // A small menu for choosing which shell a new terminal or tab starts.

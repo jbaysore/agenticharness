@@ -23,10 +23,20 @@ app.controller.providers = [
 ];
 app.store.addProject("Main project", dir);
 const browser = await chromium.launch({ channel: "msedge", headless: true });
-const errors = [];
+const errors = [],
+  inputs = [];
+const write = app.terminals.write.bind(app.terminals);
+app.terminals.write = (id, data) => {
+  inputs.push({ id, data });
+  write(id, data);
+};
+let typingLatency;
 try {
   const page = await (
-    await browser.newContext({ viewport: { width: 1512, height: 982 } })
+    await browser.newContext({
+      viewport: { width: 1512, height: 982 },
+      permissions: ["clipboard-read", "clipboard-write"],
+    })
   ).newPage();
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(app.runtime.origin + "/#pair=" + app.auth.pairing());
@@ -78,6 +88,88 @@ try {
       { timeout: 15000 },
     )
     .toBeGreaterThanOrEqual(2);
+  // Delay the old per-key HTTP route. Typing must reach the shell and screen
+  // promptly without accumulating one request/response delay per character.
+  let httpInputs = 0;
+  await page.route("**/api/terminals/*/input", async (route) => {
+    httpInputs++;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.continue();
+  });
+  const textarea = page.locator(".xterm-helper-textarea"),
+    rows = page.locator(".terminal-pane .xterm-rows"),
+    started = performance.now();
+  await textarea.pressSequentially("echo FAST_INPUT_0123456789");
+  await expect(rows).toContainText("FAST_INPUT_0123456789", { timeout: 1000 });
+  typingLatency = Math.round(performance.now() - started);
+  expect(typingLatency).toBeLessThan(1000);
+  expect(httpInputs).toBe(0);
+  await textarea.press("Enter");
+  await page.unroute("**/api/terminals/*/input");
+
+  // Native paste shortcuts insert once. Copying a selection must not send ^C;
+  // Ctrl+C without a selection must still reach the shell as an interrupt.
+  for (const [shortcut, label] of [
+    ["Control+v", "PASTE_CTRL_V"],
+    ["Control+Shift+v", "PASTE_SHIFT_V"],
+    ["Shift+Insert", "PASTE_INSERT"],
+  ]) {
+    await page.evaluate(
+      (text) => navigator.clipboard.writeText(text),
+      `echo ${label}`,
+    );
+    await textarea.press(shortcut);
+    await expect(rows).toContainText(label);
+    await textarea.press("Enter");
+    await expect
+      .poll(
+        () =>
+          (
+            app.terminals
+              .list()
+              .find((t) => t.shell === "cmd")
+              ?.output.match(new RegExp(label, "g")) ?? []
+          ).length,
+      )
+      .toBe(2);
+  }
+  const copyLine = rows
+    .locator(":scope > div")
+    .filter({ hasText: "PASTE_INSERT" })
+    .last();
+  const copyBox = await copyLine.boundingBox();
+  expect(copyBox).toBeTruthy();
+  // xterm's screen receives pointer input above the rendered row elements.
+  await page.mouse.click(copyBox.x + 12, copyBox.y + copyBox.height / 2, {
+    clickCount: 3,
+  });
+  await expect(
+    page.getByRole("button", { name: "Copy terminal selection" }),
+  ).toBeEnabled();
+  const interrupts = () => inputs.filter((i) => i.data.includes("\x03")).length,
+    beforeCopy = interrupts();
+  for (const shortcut of ["Control+c", "Control+Shift+c"]) {
+    await page.evaluate(() => navigator.clipboard.writeText("copy sentinel"));
+    await textarea.press(shortcut);
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toContain("PASTE_INSERT");
+    expect(interrupts()).toBe(beforeCopy);
+  }
+  await page.evaluate(() => navigator.clipboard.writeText("button sentinel"));
+  await page.getByRole("button", { name: "Copy terminal selection" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("PASTE_INSERT");
+  await page.evaluate(() => navigator.clipboard.writeText("echo PASTE_BUTTON"));
+  await page.getByRole("button", { name: "Paste into terminal" }).click();
+  await expect(rows).toContainText("PASTE_BUTTON");
+  await textarea.press("Enter");
+  await expect(
+    page.getByRole("button", { name: "Copy terminal selection" }),
+  ).toBeDisabled();
+  await textarea.press("Control+c");
+  await expect.poll(interrupts).toBe(beforeCopy + 1);
   await page.screenshot({ path: ".local/screenshots/terminal-tabs.png" });
   await page.getByRole("tab", { name: "PowerShell 1" }).click();
   await expect(page.locator(".terminal-pane .xterm-rows")).toContainText(
@@ -185,7 +277,7 @@ try {
   ).toHaveAttribute("aria-expanded", "false");
   expect(errors).toEqual([]);
   console.log(
-    "Terminal pane checks passed: opens from the sidebar, runs a command, splits beside, reopens, ends.",
+    `Terminal pane checks passed: real PowerShell/Command Prompt, native clipboard shortcuts and buttons, Ctrl+C interrupt, ordered typing (${typingLatency} ms for a 25-character command, no per-key HTTP), splits, tabs, reload and cleanup.`,
   );
 } finally {
   await browser.close();

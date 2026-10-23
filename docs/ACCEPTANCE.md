@@ -33,6 +33,13 @@ across reload after both a lost response and an unreceived request.
 
 - `npm test`: no paid or included inference. Unit/state fixtures plus actual local
   HTTP, filesystem and child-process tests.
+- `npm run test:terminal`: real Edge and Windows ConPTY, no inference. Passed
+  PowerShell/Command Prompt execution, native copy/paste shortcuts, clipboard
+  buttons, Ctrl+C interruption, tab/pane lifecycle and replay after reload.
+  A 25-character command appeared in 62 ms with the old HTTP input endpoint
+  artificially delayed; no per-key HTTP requests were made. Transport tests
+  cover large Unicode pastes, ordering, reconnect without input replay,
+  authentication, revocation, assertion expiry and output without SQLite writes.
 - `npm run test:usage-stop`: real headless Edge and isolated HTTP/SQLite with
   simulated providers, no inference. Passed resumed Goal completion, genuine
   quota stops, banner/sidebar dismissal, disconnected events, persistence after
