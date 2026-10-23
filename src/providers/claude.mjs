@@ -262,13 +262,32 @@ export async function runClaude(
       ),
       tool(
         "project_notes",
-        "Read project decisions and evidence",
-        {},
-        async () => ({
+        historyTools.find((t) => t.name === "project_notes").description,
+        {
+          query: z.string().max(500).optional(),
+          limit: z.number().int().min(1).max(5).optional(),
+          includeStale: z.boolean().optional(),
+        },
+        async (args) => ({
           content: [
             {
               type: "text",
-              text: JSON.stringify(await ctx.history("project_notes", {})),
+              text: JSON.stringify(await ctx.history("project_notes", args)),
+            },
+          ],
+        }),
+      ),
+      tool(
+        "project_note_read",
+        historyTools.find((t) => t.name === "project_note_read").description,
+        { noteId: z.string().min(1) },
+        async (args) => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                await ctx.history("project_note_read", args),
+              ),
             },
           ],
         }),

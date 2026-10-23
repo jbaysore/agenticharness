@@ -101,6 +101,64 @@ test("a chat starting beside another in the same folder is told about it; an unr
   store.close();
 });
 
+for (const provider of ["codex", "claude", "cursor"])
+  test(`${provider}: relevant Project Log context is shared and unrelated turns add none`, async () => {
+    const store = new Store(":memory:"),
+      controller = new Controller(store, {}),
+      project = store.addProject("fixture", `C:\\project-log-${provider}`),
+      chat = store.createConversation({
+        projectId: project.id,
+        provider,
+        title: `Project Log ${provider}`,
+      }),
+      contexts = [];
+    controller.providers = [
+      { id: provider, models: [{ id: "test", efforts: [] }] },
+    ];
+    controller.runners[provider] = async (ctx) => {
+      contexts.push(ctx);
+      ctx.saveSession({ id: `session-${provider}` });
+      return { status: "completed" };
+    };
+    store.addNote({
+      projectId: project.id,
+      conversationId: chat.id,
+      content:
+        "Persist project decisions in SQLite FTS and cap injected Project Log context.",
+      evidence: ["harness://conversation/project-log-decision"],
+    });
+
+    const send = async (actionId, text) => {
+      controller.send(chat.id, {
+        actionId,
+        text,
+        provider,
+        model: "test",
+      });
+      await controller.active.get(chat.id).task;
+      return contexts.at(-1);
+    };
+    const relevant = await send(
+        `project-log-relevant-${provider}`,
+        "Implement SQLite FTS search for this project.",
+      ),
+      unrelated = await send(
+        `project-log-unrelated-${provider}`,
+        "Write a haiku about ocean tides.",
+      );
+    assert.match(relevant.addendum, /Relevant Project Log entries/);
+    assert.match(relevant.addendum, /SQLite FTS/);
+    assert.match(
+      relevant.addendum,
+      /harness:\/\/conversation\/project-log-decision/,
+    );
+    assert.match(relevant.instructions, /project_note_read/);
+    assert.doesNotMatch(unrelated.addendum, /Relevant Project Log entries/);
+    assert.doesNotMatch(unrelated.addendum, /project-log-decision/);
+    await controller.close();
+    store.close();
+  });
+
 test("cancelling pending approval expires it and unblocks the provider", async () => {
   const store = new Store(":memory:"),
     controller = new Controller(store, {}),
@@ -688,7 +746,9 @@ test("questions outside goal keep no deadline and still accept a late answer", a
     const store = new Store(":memory:"),
       controller = new Controller(store, {});
     controller.goalQuestionTimeoutMs = 30;
-    controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+    controller.providers = [
+      { id: "codex", models: [{ id: "m", efforts: [] }] },
+    ];
     const chat = store.createConversation({
       projectId: store.addProject("fixture", "C:\\question-wait").id,
       mode,
@@ -864,7 +924,10 @@ test("a mid-turn usage stop flags the chat until a later turn is working", async
   const store = new Store(":memory:"),
     controller = new Controller(store, {}),
     project = store.addProject("fixture", "C:\\usage-flag"),
-    chat = store.createConversation({ projectId: project.id, provider: "codex" });
+    chat = store.createConversation({
+      projectId: project.id,
+      provider: "codex",
+    });
   controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
   let mode = "lost";
   controller.runners.codex = async (ctx) => {
@@ -880,12 +943,14 @@ test("a mid-turn usage stop flags the chat until a later turn is working", async
       ctx.emit("text", { nativeId: "paid", text: "Partial" });
       ctx.emit("work", {
         kind: "billing-stop",
-        reason: "Paid Claude extra usage is enabled. Disable it before continuing.",
+        reason:
+          "Paid Claude extra usage is enabled. Disable it before continuing.",
       });
       ctx.goalState("usageLimited");
       return {
         status: "failed",
-        error: "Paid Claude extra usage is enabled. Disable it before continuing.",
+        error:
+          "Paid Claude extra usage is enabled. Disable it before continuing.",
       };
     }
     ctx.emit("text", { nativeId: mode, text: "Partial" });

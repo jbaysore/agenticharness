@@ -11,6 +11,7 @@ import {
   handoffContext,
   historyTools,
   promptDelivery,
+  projectLogContext,
   workspaceNotice,
   workspacePeers,
 } from "../src/core/history.mjs";
@@ -143,6 +144,114 @@ test("history tools enforce none/project/all scopes with source attribution", ()
   );
   db.close();
 });
+test("Project Log search ranks active matches and enforces project and conversation scope", () => {
+  const db = new Store(":memory:"),
+    a = db.addProject("A", "C:\\a"),
+    b = db.addProject("B", "C:\\b"),
+    ca = db.createConversation({ projectId: a.id, scope: "project" }),
+    ca2 = db.createConversation({ projectId: a.id, scope: "none" }),
+    cb = db.createConversation({ projectId: b.id });
+  const matching = db.addNote({
+      projectId: a.id,
+      conversationId: ca.id,
+      content: "Use SQLite FTS for local Project Log retrieval.",
+      evidence: ["harness://conversation/source-a"],
+    }),
+    lessRelevant = db.addNote({
+      projectId: a.id,
+      conversationId: ca.id,
+      content: "Use SQLite for an unrelated local cache.",
+      evidence: ["harness://conversation/source-b"],
+    }),
+    privateNote = db.addNote({
+      projectId: a.id,
+      conversationId: ca2.id,
+      content: "SQLite data only for this conversation.",
+      evidence: ["harness://conversation/private"],
+    }),
+    stale = db.addNote({
+      projectId: a.id,
+      conversationId: ca.id,
+      content: "Old SQLite Project Log retrieval choice.",
+      evidence: ["harness://conversation/stale"],
+    }),
+    otherProject = db.addNote({
+      projectId: b.id,
+      conversationId: cb.id,
+      content: "SQLite FTS for the Project Log in project B.",
+      evidence: ["harness://conversation/project-b"],
+    });
+  db.db.prepare("UPDATE notes SET stale=1 WHERE id=?").run(stale);
+
+  const results = historyCall(db, ca.id, "project_notes", {
+    query: "SQLite FTS project log",
+  });
+  assert.equal(results[0].id, matching);
+  assert.ok(results.some((note) => note.id === lessRelevant));
+  assert.ok(
+    results.every((note) => note.id !== stale && note.id !== otherProject),
+  );
+  assert.ok(
+    historyCall(db, ca.id, "project_notes", {
+      query: "SQLite Project Log",
+      includeStale: true,
+    }).some((note) => note.id === stale),
+  );
+  assert.deepEqual(
+    historyCall(db, ca2.id, "project_notes", {}).map((note) => note.id),
+    [privateNote],
+  );
+  assert.throws(
+    () => historyCall(db, ca2.id, "project_note_read", { noteId: matching }),
+    /outside the selected project or history scope/,
+  );
+  assert.throws(
+    () => historyCall(db, ca.id, "project_note_read", { noteId: otherProject }),
+    /outside the selected project or history scope/,
+  );
+  assert.equal(
+    historyCall(db, ca.id, "project_note_read", { noteId: matching }).content,
+    "Use SQLite FTS for local Project Log retrieval.",
+  );
+  assert.ok(historyTools.some((tool) => tool.name === "project_note_read"));
+  db.close();
+});
+test("Project Log index rebuilds existing notes and injected context stays within its budget", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "harness-project-log-")),
+    path = join(directory, "db.sqlite");
+  let db = new Store(path),
+    p = db.addProject("P", "C:\\p"),
+    c = db.createConversation({ projectId: p.id });
+  db.addNote({
+    projectId: p.id,
+    conversationId: c.id,
+    content: "SQLite FTS existing decision",
+    evidence: ["harness://conversation/source"],
+  });
+  db.setting("project-log-index-version", 0);
+  db.close();
+  db = new Store(path);
+  assert.equal(
+    db.searchProjectNotes("SQLite FTS", { projectId: p.id }).length,
+    1,
+  );
+  const context = projectLogContext([
+    {
+      content: "SQLite FTS decision. ".repeat(500),
+      evidence: ["harness://conversation/source"],
+    },
+    {
+      content: "Second project log entry.",
+      evidence: ["harness://conversation/second"],
+    },
+  ]);
+  assert.ok(context.length <= 2000);
+  assert.match(context, /Relevant Project Log entries/);
+  assert.match(context, /harness:\/\/conversation\/source/);
+  assert.doesNotMatch(context, /Second project log entry/);
+  db.close();
+  await rm(directory, { recursive: true, force: true });
+});
 test("search accepts punctuation safely and indexes updated streaming content", () => {
   const db = new Store(":memory:"),
     p = db.addProject("P", "C:\\p"),
@@ -158,7 +267,7 @@ test("search accepts punctuation safely and indexes updated streaming content", 
   assert.deepEqual(db.search('" * -'), []);
   db.close();
 });
-test("handoffs carry origin, evidence and review comments without treating native sessions as interchangeable", () => {
+test("handoffs carry transcript attribution without injecting unfiltered project notes", () => {
   const db = new Store(":memory:"),
     p = db.addProject("P", "C:\\p"),
     c = db.createConversation({ projectId: p.id });
@@ -179,7 +288,7 @@ test("handoffs carry origin, evidence and review comments without treating nativ
   const result = handoffContext(db, c, "claude");
   assert.match(result, /context handoff/);
   assert.match(result, /model-a/);
-  assert.match(result, /src\/db.mjs@abc/);
+  assert.doesNotMatch(result, /Use SQLite|src\/db.mjs@abc/);
   assert.match(result, /Validation passed/);
   db.close();
 });
@@ -304,9 +413,15 @@ test("a usage stop is remembered until it is dismissed, without reordering the c
     p = db.addProject("P", "C:\\usage-stop"),
     chat = db.createConversation({ projectId: p.id });
   const before = chat.updated_at;
-  const flagged = db.setUsageStop(chat.id, "Included Codex quota is exhausted.");
+  const flagged = db.setUsageStop(
+    chat.id,
+    "Included Codex quota is exhausted.",
+  );
   assert.ok(flagged.usage_stopped_at);
-  assert.equal(flagged.usage_stopped_reason, "Included Codex quota is exhausted.");
+  assert.equal(
+    flagged.usage_stopped_reason,
+    "Included Codex quota is exhausted.",
+  );
   assert.equal(flagged.updated_at, before);
   assert.throws(() => db.setUsageStop(chat.id, "  "), /reason/);
   const cleared = db.clearUsageStop(chat.id);

@@ -72,6 +72,7 @@ const ASK_HOST_TOOLS = new Set([
   "history_search",
   "history_read",
   "project_notes",
+  "project_note_read",
   "workspace_activity",
   "rename_chat",
   "suggest_mode",

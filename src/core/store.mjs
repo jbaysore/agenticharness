@@ -7,6 +7,11 @@ import { provisionalTitle } from "./history.mjs";
 import { blockingGoals, goalStatus, sessionGoals } from "./goals.mjs";
 
 const historyScopes = ["none", "project", "all"];
+const projectNoteStopWords = new Set(
+  "a an and are as at be but by can do for from has have how i in into is it may of on or our please should that the their this to was we were what when where which who will with you your agent agents harness log project use work".split(
+    " ",
+  ),
+);
 
 // A chat's newest run is its only possible active one: createRun refuses a second.
 const summary = `SELECT c.*, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
@@ -57,6 +62,10 @@ export class Store {
       CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,created_at);
       CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL, request TEXT NOT NULL, status TEXT NOT NULL, response TEXT, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), conversation_id TEXT REFERENCES conversations(id), content TEXT NOT NULL, evidence TEXT NOT NULL, stale INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+      CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(content, content='notes', content_rowid='rowid');
+      CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN INSERT INTO notes_fts(rowid,content) VALUES (new.rowid,new.content); END;
+      CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN INSERT INTO notes_fts(notes_fts,rowid,content) VALUES ('delete',old.rowid,old.content); END;
+      CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE OF content ON notes BEGIN INSERT INTO notes_fts(notes_fts,rowid,content) VALUES ('delete',old.rowid,old.content); INSERT INTO notes_fts(rowid,content) VALUES (new.rowid,new.content); END;
       CREATE TABLE IF NOT EXISTS comments(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), repository TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, body TEXT NOT NULL, revision TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT NOT NULL, file TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -126,6 +135,10 @@ export class Store {
     // Run on a chat's rebased branch before it lands on the project's branch.
     if (!columns("projects").includes("check_command"))
       this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
+    if (this.setting("project-log-index-version") !== 1) {
+      this.db.exec("INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')");
+      this.setting("project-log-index-version", 1);
+    }
     if (this.setting("default-history-scope") === null)
       this.setting("default-history-scope", "all");
     this.protectLegacyGoals();
@@ -296,7 +309,9 @@ export class Store {
   }
   // Leaves updated_at alone, so the reminder does not reorder the chat.
   setUsageStop(id, reason) {
-    const text = String(reason ?? "").trim().slice(0, 500);
+    const text = String(reason ?? "")
+      .trim()
+      .slice(0, 500);
     if (!text) throw new Error("A usage stop needs a reason");
     this.db
       .prepare(
@@ -865,6 +880,55 @@ export class Store {
         "SELECT * FROM notes WHERE project_id=? ORDER BY created_at DESC",
       )
       .all(projectId)
+      .map((n) => ({
+        ...n,
+        evidence: JSON.parse(n.evidence),
+        stale: !!n.stale,
+      }));
+  }
+  note(id) {
+    const row = this.db.prepare("SELECT * FROM notes WHERE id=?").get(id);
+    return row
+      ? { ...row, evidence: JSON.parse(row.evidence), stale: !!row.stale }
+      : null;
+  }
+  searchProjectNotes(
+    query,
+    { projectId, conversationId = null, includeStale = false, limit = 5 } = {},
+  ) {
+    const terms = [
+      ...new Set(
+        (String(query ?? "").match(/[\p{L}\p{N}_-]+/gu) ?? []).filter(
+          (term) =>
+            term.length > 1 && !projectNoteStopWords.has(term.toLowerCase()),
+        ),
+      ),
+    ].slice(0, 12);
+    if (!terms.length || !projectId) return [];
+    const match = terms
+      .map((term) => `"${term.replaceAll('"', '""')}"`)
+      .join(" OR ");
+    const boundedLimit = Math.max(
+      1,
+      Math.min(5, Math.floor(Number(limit) || 5)),
+    );
+    return this.db
+      .prepare(
+        `SELECT n.* FROM notes_fts
+        JOIN notes n ON n.rowid=notes_fts.rowid
+        WHERE notes_fts MATCH ? AND n.project_id=?
+          AND (? IS NULL OR n.conversation_id=?)
+          AND (?=1 OR n.stale=0)
+        ORDER BY bm25(notes_fts), n.created_at DESC LIMIT ?`,
+      )
+      .all(
+        match,
+        projectId,
+        conversationId,
+        conversationId,
+        includeStale ? 1 : 0,
+        boundedLimit,
+      )
       .map((n) => ({
         ...n,
         evidence: JSON.parse(n.evidence),

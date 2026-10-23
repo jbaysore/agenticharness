@@ -359,11 +359,16 @@ without it and the work log says why.
 All chat text, run outcomes, tool activity, review comments, artifacts and decisions
 are recorded in SQLite. Search conversations by words, filenames or decisions.
 Search results link to the source conversation and retain provider attribution.
-Agents can call `history_search`, `history_read`, `project_notes`, and
-`workspace_activity` on demand. `history_read` returns four messages at a time,
-each capped at 2,000 characters. Pass a query to get short windows around
-matches. Older text stays in the archive. `workspace_activity` lists the other
-chats working in the same folder.
+Agents can call `history_search`, `history_read`, `project_notes`,
+`project_note_read`, and `workspace_activity` on demand. Harness also searches
+the current project's Project Log for each request and includes up to three
+active matching entries, capped at about 500 estimated tokens. A `project_notes`
+query returns up to five concise matches; use `project_note_read` for a full
+entry. Stale entries stay out of automatic context and search unless requested.
+Both tools respect the conversation's history scope. `history_read` returns
+four messages at a time, each capped at 2,000 characters. Pass a query to get
+short windows around matches. Older text stays in the archive.
+`workspace_activity` lists the other chats working in the same folder.
 On a chat's first message the agent is asked to call `rename_chat` with a short
 summary title. It works once and never replaces a title you set yourself; you can
 still rename any chat from its menu.

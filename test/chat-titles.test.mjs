@@ -151,10 +151,18 @@ test("Claude exposes the silent title tool immediately and calls through the rea
             await server.connect(serverTransport);
             await client.connect(clientTransport);
             const { tools } = await client.listTools(),
-              rename = tools.find((t) => t.name === "rename_chat");
+              rename = tools.find((t) => t.name === "rename_chat"),
+              projectNotes = tools.find((t) => t.name === "project_notes"),
+              projectNoteRead = tools.find(
+                (t) => t.name === "project_note_read",
+              );
             assert.equal(rename._meta["anthropic/alwaysLoad"], true);
             assert.equal(rename.description, titleTool.description);
             assert.match(rename.description, /Never announce or mention/);
+            assert.match(projectNotes.description, /Project Log/);
+            assert.ok(projectNotes.inputSchema.properties.query);
+            assert.match(projectNoteRead.description, /full Project Log entry/);
+            assert.deepEqual(projectNoteRead.inputSchema.required, ["noteId"]);
             const answer = await options.canUseTool(
               "mcp__harness__rename_chat",
               { title: "Fix sidebar flicker" },
