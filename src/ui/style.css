@@ -2641,6 +2641,13 @@ small {
   font-weight: 550;
   white-space: nowrap;
 }
+.usage-stale {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
 /* Rows share fixed columns so the values and countdowns line up and the
    header doesn't shift as the numbers change. */
 .usage-chip-rows {

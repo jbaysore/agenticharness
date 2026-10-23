@@ -9,6 +9,7 @@ import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import {
   usageGlance,
+  usageReadingStale,
   usageWindows,
   usageVerificationLabel,
 } from "../src/ui/status.mjs";
@@ -76,9 +77,10 @@ test("native Claude meters show separate session and weekly header bars", () => 
     "Claude Code · Weekly limit",
   ]);
   provider.usage = monitor.update(null).usage;
+  assert.equal(provider.usage.verificationStatus, "unknown");
   assert.deepEqual(usageGlance(provider).bars.map((b) => [b.short, b.remaining]), [
-    ["5h", null],
-    ["wk", null],
+    ["5h", 74],
+    ["wk", 73],
   ]);
 });
 
@@ -238,24 +240,36 @@ test("an exhausted report keeps both header bars without a prior confirmation", 
   );
 });
 
-test("unknown usage labels its cached values and does not advertise them as current", () => {
-  const monitor = createClaudeUsageMonitor(auth);
+test("a missed reading keeps the last meter and marks it stale after five minutes", () => {
+  const monitor = createClaudeUsageMonitor(auth, () => "2026-10-21T20:38:36.000Z");
   monitor.update(reading());
   const provider = {
     id: "claude",
     connected: true,
     usage: monitor.update(null).usage,
   };
-  assert.equal(usageGlance(provider).level, "unknown");
-  assert.equal(usageGlance(provider).remaining, null);
-  assert.equal(usageGlance(provider).bars[0].remaining, null);
+  const confirmedAt = Date.parse(provider.usage.lastConfirmedAt);
+  assert.equal(usageGlance(provider).level, "ok");
+  assert.equal(usageGlance(provider).remaining, 74);
+  assert.equal(usageGlance(provider).bars[0].remaining, 74);
   assert.equal(usageWindows(provider)[0].remaining, 74);
+  assert.equal(usageReadingStale(provider, confirmedAt + 5 * 60 * 1000 - 1), false);
+  assert.equal(usageVerificationLabel(provider, confirmedAt + 60_000), null);
+  assert.equal(usageReadingStale(provider, confirmedAt + 5 * 60 * 1000), true);
   assert.match(
-    usageVerificationLabel(provider),
-    /Unknown · last confirmed at .*\d+:\d+:\d+/,
+    usageVerificationLabel(provider, confirmedAt + 5 * 60 * 1000),
+    /Stale · last confirmed at .*\d+:\d+:\d+/,
+  );
+  assert.equal(
+    usageVerificationLabel({
+      connected: true,
+      usage: { verificationStatus: "unknown" },
+    }),
+    "Unknown · no confirmed reading",
   );
   provider.usage = monitor.update(reading(28)).usage;
-  assert.equal(usageVerificationLabel(provider), null);
+  assert.equal(usageVerificationLabel(provider, confirmedAt + 10 * 60 * 1000), null);
+  assert.equal(usageReadingStale(provider, confirmedAt + 10 * 60 * 1000), false);
   assert.equal(usageGlance(provider).remaining, 72);
 });
 

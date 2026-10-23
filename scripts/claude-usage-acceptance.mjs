@@ -171,9 +171,17 @@ try {
     app.controller.providers[1].usage = initialCodex;
     app.controller.event(chat.id, null, "usage", { provider: "codex", ...initialCodex });
     publish({ rate_limits_available: true, rate_limits: {} });
+    await expect(page.locator(".usage-chip.claude .usage-chip-value")).toHaveText([
+      "74%", "73%",
+    ]);
+    await expect(page.locator(".usage-chip.claude .usage-stale")).toHaveCount(0);
     await expect(page.locator(".usage-chip.claude")).toHaveAttribute(
       "aria-label",
-      /Unknown.*last confirmed at/,
+      /74%/,
+    );
+    await expect(page.locator(".usage-chip.claude")).not.toHaveAttribute(
+      "aria-label",
+      /stale|Unknown/,
     );
     await page.locator(".usage-glance-trigger").click();
     const popover = page.getByRole("dialog", {
@@ -189,13 +197,23 @@ try {
     );
     await expect(
       page.locator(".usage-chip.claude .usage-chip-row.unknown"),
-    ).toHaveCount(2);
+    ).toHaveCount(0);
+    await expect(popover.getByRole("status")).toHaveCount(0);
+    await expect(popover.getByText("74% left", { exact: true })).toBeVisible();
+    const aged = {
+      ...app.controller.providers[0].usage,
+      lastConfirmedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    };
+    app.controller.providers[0].usage = aged;
+    app.controller.event(chat.id, null, "usage", { provider: "claude", ...aged });
+    await expect(page.locator(".usage-chip.claude .usage-stale")).toHaveText("stale");
+    await expect(page.locator(".usage-chip.claude .usage-chip-value")).toHaveText([
+      "74%", "73%",
+    ]);
     await expect(popover.getByRole("status")).toHaveText(
-      /Unknown · last confirmed at .*\d+:\d+:\d+/,
+      /Stale · last confirmed at .*\d+:\d+:\d+/,
     );
-    await expect(
-      popover.getByText("74% left (last confirmed)", { exact: true }),
-    ).toBeVisible();
+    await headerFits();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -205,9 +223,10 @@ try {
       path: `.local/screenshots/claude-usage-${label}.png`,
     });
     await page.reload();
+    await expect(page.locator(".usage-chip.claude .usage-stale")).toHaveText("stale");
     await expect(page.locator(".usage-chip.claude")).toHaveAttribute(
       "aria-label",
-      /Unknown.*last confirmed at/,
+      /74%.*stale/,
     );
     await page.locator(".usage-glance-trigger").click();
     await page.locator(".usage-popover-link").click();
@@ -222,10 +241,10 @@ try {
       cursorResetLabel(Number(cursorResetAt)),
     );
     await expect(connections.getByRole("status")).toHaveText(
-      /Unknown · last confirmed at/,
+      /Stale · last confirmed at/,
     );
     await expect(
-      connections.getByText("74% remaining (last confirmed)", { exact: true }),
+      connections.getByText("74% remaining", { exact: true }),
     ).toBeVisible();
     await connections.getByRole("button", { name: "Close dialog", exact: true }).click();
     publish(reading(28));
@@ -343,7 +362,7 @@ try {
   expect(refreshCalls).toBe(2);
   expect(errors).toEqual([]);
   console.log(
-    "Claude usage UI passed: six header widths, stable countdown columns, host clocks, unknown telemetry, reset links in both panels, external navigation from exhausted quota, refresh loading and quota recovery, and visible stop reason.",
+    "Claude usage UI passed: six header widths, stable countdown columns, host clocks, a missed reading that keeps its last meter and turns stale after five minutes, reset links in both panels, external navigation from exhausted quota, refresh loading and quota recovery, and visible stop reason.",
   );
 } finally {
   await browser?.close();

@@ -9,6 +9,7 @@ import {
   resetCountdown,
   resetLabel,
   usageGlance,
+  usageReadingStale,
   usageWindows,
   usageVerificationLabel,
 } from "./status.mjs";
@@ -58,12 +59,10 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
         title="Usage remaining and reset dates"
         onClick={() => setOpen(!open)}
       >
-        {glances.map(([p, g]) => (
-          <span
-            className={`usage-chip ${p.id} ${g.level}`}
-            key={p.id}
-            title={usageVerificationLabel(p) ?? undefined}
-            aria-label={`${p.name}: ${usageVerificationLabel(p) ?? g.bars
+        {glances.map(([p, g]) => {
+          const stale = usageReadingStale(p, now),
+            note = usageVerificationLabel(p, now),
+            described = g.bars
               .map((b) =>
                 b.dateOnly
                   ? cursorResetLabel(b.resetsAt)
@@ -74,10 +73,21 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
                         ? `, resets in ${resetCountdown(b.resetsAt, now)}`
                         : ""),
               )
-              .join(", ")}`}
-          >
+              .join(", ");
+          return (
+            <span
+              className={`usage-chip ${p.id} ${g.level}${stale ? " stale" : ""}`}
+              key={p.id}
+              title={note ?? undefined}
+              aria-label={`${p.name}: ${
+                g.bars.every((b) => b.remaining === null) && note
+                  ? note
+                  : described + (stale ? ", stale" : "")
+              }`}
+            >
             <span className="usage-chip-name">
               {p.id === "claude" ? "Claude" : p.name}
+              {stale && <span className="usage-stale">stale</span>}
             </span>
             {g.bars.length === 1 && g.bars[0].dateOnly ? (
               <span
@@ -119,7 +129,8 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
             </span>
             )}
           </span>
-        ))}
+          );
+        })}
       </button>
       {open && (
         <div
@@ -146,9 +157,9 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
                     </span>
                   )}
                 </header>
-                {usageVerificationLabel(p) && (
+                {usageVerificationLabel(p, now) && (
                   <p className="muted small" role="status" title={p.usage.lastConfirmedAt}>
-                    {usageVerificationLabel(p)}
+                    {usageVerificationLabel(p, now)}
                   </p>
                 )}
                 {windows.length ? (
@@ -156,7 +167,7 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
                     <div className="usage-meter" key={i}>
                       <div>
                         <span>{w.name}</span>
-                        <strong>{w.remaining}% left{p.usage?.verificationStatus === "unknown" && " (last confirmed)"}</strong>
+                        <strong>{w.remaining}% left</strong>
                       </div>
                       <progress max="100" value={w.remaining} />
                       {w.resetsAt && <small>{resetLabel(w.resetsAt, now)}</small>}

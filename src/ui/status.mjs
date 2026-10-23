@@ -1,5 +1,7 @@
 import { isUsageExhausted } from "../security/billing.mjs";
 
+export const USAGE_STALE_AFTER_MS = 5 * 60 * 1000;
+
 export function providerStatusLabel(provider) {
   if (isUsageExhausted(provider?.blockReason)) return "Out of usage";
   if (provider?.blockReason) return "Setup needed";
@@ -7,11 +9,23 @@ export function providerStatusLabel(provider) {
     return "Usage unknown";
   return provider?.connected ? "Connected" : "Checking…";
 }
-export function usageVerificationLabel(provider) {
+function confirmedAt(provider) {
+  const at = Date.parse(provider?.usage?.lastConfirmedAt ?? "");
+  return Number.isFinite(at) ? at : null;
+}
+// A missed read keeps its last meter. The mark appears only after that meter
+// has gone five minutes without a new reading.
+export function usageReadingStale(provider, now = Date.now()) {
+  if (provider?.usage?.verificationStatus !== "unknown") return false;
+  const at = confirmedAt(provider);
+  return at != null && now - at >= USAGE_STALE_AFTER_MS;
+}
+export function usageVerificationLabel(provider, now = Date.now()) {
   if (provider?.usage?.verificationStatus !== "unknown") return null;
-  const at = provider.usage.lastConfirmedAt;
-  if (!at) return "Unknown · no confirmed reading";
-  return "Unknown · last confirmed at " + new Date(at).toLocaleTimeString(undefined, {
+  const at = confirmedAt(provider);
+  if (at == null) return "Unknown · no confirmed reading";
+  if (!usageReadingStale(provider, now)) return null;
+  return "Stale · last confirmed at " + new Date(at).toLocaleTimeString(undefined, {
     hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
 }
@@ -187,10 +201,10 @@ export function cursorResetLabel(at) {
 // The tightest limit decides a provider's state. The header shows the 5-hour
 // and weekly limits side by side, or the tightest limit when neither exists.
 // Cursor has no percentage, so its header row is the next assumed reset.
+// A missed read keeps the last of those values instead of blanking the meter.
 export function usageGlance(provider, now = Date.now()) {
-  const windows = usageWindows(provider),
-    unknown = provider?.usage?.verificationStatus === "unknown";
-  const remaining = !unknown && windows.length
+  const windows = usageWindows(provider);
+  const remaining = windows.length
     ? Math.min(...windows.map((w) => w.remaining))
     : null;
   const level =
@@ -206,8 +220,8 @@ export function usageGlance(provider, now = Date.now()) {
     .map((w) => ({
       name: w.name,
       short: w.minutes < 1440 ? Math.round(w.minutes / 60) + "h" : "wk",
-      remaining: unknown ? null : w.remaining,
-      level: unknown ? "unknown" : usageLevel(w.remaining),
+      remaining: w.remaining,
+      level: usageLevel(w.remaining),
       resetsAt: w.resetsAt,
     }));
   const assumedCursorReset = provider?.id === "cursor" && !windows.length;

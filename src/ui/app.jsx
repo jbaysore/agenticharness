@@ -1538,7 +1538,9 @@ function App() {
             </button>
           </div>
           <div className="connections">
-            {state.providers.map((p) => (
+            {state.providers.map((p) => {
+              const usageLabel = usageVerificationLabel(p, serverClock.now());
+              return (
               <section className={"connection " + p.id} key={p.id}>
                 <header>
                   <span className={"provider-dot " + p.id} />
@@ -1551,9 +1553,9 @@ function App() {
                   {p.route} <span className="muted">· {p.plan}</span>
                 </p>
                 {p.blockReason && <p className="error-text">{p.blockReason}</p>}
-                {usageVerificationLabel(p) && (
+                {usageLabel && (
                   <p className="muted small" role="status" title={p.usage.lastConfirmedAt}>
-                    {usageVerificationLabel(p)}
+                    {usageLabel}
                   </p>
                 )}
                 {(p.usage?.windows ?? []).some(
@@ -1575,7 +1577,6 @@ function App() {
                         </span>
                         <strong>
                           {Math.max(0, 100 - w.usedPercent)}% remaining
-                          {p.usage?.verificationStatus === "unknown" && " (last confirmed)"}
                         </strong>
                       </div>
                       <progress
@@ -1651,7 +1652,8 @@ function App() {
                   </span>
                 </div>
               </section>
-            ))}
+              );
+            })}
           </div>
           <section className="history-settings">
             <h3>Conversation history</h3>
