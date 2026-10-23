@@ -683,6 +683,52 @@ test("a goal question waits briefly, then the agent chooses, and repeats do not 
   }
 });
 
+test("questions outside goal keep no deadline and still accept a late answer", async () => {
+  for (const mode of ["default", "ask", "plan"]) {
+    const store = new Store(":memory:"),
+      controller = new Controller(store, {});
+    controller.goalQuestionTimeoutMs = 30;
+    controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+    const chat = store.createConversation({
+      projectId: store.addProject("fixture", "C:\\question-wait").id,
+      mode,
+    });
+    let outcome;
+    controller.runners.codex = async (ctx) => {
+      outcome = await ctx.approve(question("Which approach?"));
+      return { status: "completed" };
+    };
+    try {
+      controller.send(chat.id, {
+        actionId: "question-waits-" + mode,
+        text: "Choose how to proceed",
+        provider: "codex",
+        model: "m",
+      });
+      const deadline = Date.now() + 3000;
+      while (!store.pendingApprovals(chat.id).length) {
+        assert.ok(Date.now() < deadline);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      const pending = store.pendingApprovals(chat.id)[0];
+      assert.equal(pending.request.deadline, undefined);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(store.approval(pending.id).status, "pending");
+      controller.answer(pending.id, {
+        allow: true,
+        answers: { q: "Keep it" },
+      });
+      await controller.active.get(chat.id).task;
+      assert.equal(outcome.timedOut, undefined);
+      assert.equal(outcome.answers.q, "Keep it");
+      assert.equal(store.conversation(chat.id).mode, mode);
+    } finally {
+      await controller.close();
+      store.close();
+    }
+  }
+});
+
 test("answering a goal question before the deadline uses that answer", async () => {
   const store = new Store(":memory:"),
     controller = new Controller(store, {});

@@ -79,6 +79,7 @@ continues. Override still allows those actions. A question stays open for 60
 seconds; if you do not answer, the agent chooses the path that best completes
 the objective. The same question does not wait again after it times out, and
 after three timeouts further questions are answered by the agent at once.
+In Default, Ask, and Plan a question stays open until you answer or stop the turn.
 Agents in Default, Ask, or Plan can suggest a mode change with a reason and,
 for Goal, a concrete objective. Every suggestion waits for your manual approval,
 including under Auto-review and Override. Approving resumes the current task in

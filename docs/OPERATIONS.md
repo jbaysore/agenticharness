@@ -301,7 +301,7 @@ In Goal, a review that asks you or cannot run is declined and the agent continue
 without asking. A plan still comes to you as one **Confirm and build** button,
 except in Goal, where a plan is carried out and the chat stays in Goal. Agents are told to ask only a managerial question,
 and to explain why they cannot decide it. In Goal that question waits 60 seconds
-and then the agent chooses.
+and then the agent chooses. In every other mode a question stays open until you send an answer or stop the turn. Reading it or typing an answer does not start a countdown.
 
 Requested commands, tool actions, plans and questions appear in the conversation
 when they need you. Open the action details before **Allow once**. Approvals are

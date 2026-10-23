@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { AsyncQueue } from "../src/core/queue.mjs";
 import { executable } from "../src/core/executables.mjs";
 import { subscriptionEnvironment } from "../src/security/environment.mjs";
+import { CLAUDE_SESSION_SETTINGS } from "../src/providers/claude.mjs";
 const cwd = resolve(".local/probe-project");
 await mkdir(cwd, { recursive: true });
 const input = new AsyncQueue();
@@ -15,7 +16,7 @@ const q = query({
     env: subscriptionEnvironment(),
     settingSources: [],
     strictMcpConfig: true,
-    settings: { forceLoginMethod: "claudeai", fastMode: false },
+    settings: CLAUDE_SESSION_SETTINGS,
     tools: [],
     permissionMode: "default",
     includePartialMessages: true,

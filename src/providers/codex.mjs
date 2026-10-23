@@ -322,6 +322,10 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
         return;
       }
       if (message.method === "item/tool/requestUserInput") {
+        // Codex marks questions outside Plan as non-blocking, and its terminal
+        // UI then submits an empty answer after about two minutes. Harness is
+        // the client for this request, so it waits for an explicit answer.
+        // Goal applies its own 60 second timer before that answer is returned.
         const answer = await ctx.approve({
           kind: "question",
           title: "The agent needs your input",

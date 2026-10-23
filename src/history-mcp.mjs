@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import { historyTools } from "./core/history.mjs";
+import { progressToken, toolBridgeTimeoutMs } from "./core/tool-bridge.mjs";
 const reply = (message) =>
   process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -40,35 +41,50 @@ input.on("line", async (line) => {
         },
       });
     } else if (m.method === "tools/call") {
-      const response = await fetch(
-        process.env.HARNESS_BRIDGE_URL + "/internal/history",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: "Bearer " + process.env.HARNESS_BRIDGE_TOKEN,
+      // Questions and mode suggestions have no deadline. A progress ping keeps
+      // a provider from treating the quiet call as idle while someone reads
+      // or types. Browser actions and landing keep a bounded wait.
+      const timeoutMs = toolBridgeTimeoutMs(m.params?.name);
+      const token = progressToken(m);
+      let progress = 0;
+      const beat =
+        token == null
+          ? null
+          : setInterval(() => {
+              progress += 1;
+              reply({
+                method: "notifications/progress",
+                params: { progressToken: token, progress },
+              });
+            }, 10_000);
+      try {
+        const response = await fetch(
+          process.env.HARNESS_BRIDGE_URL + "/internal/history",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer " + process.env.HARNESS_BRIDGE_TOKEN,
+            },
+            body: JSON.stringify(m.params),
+            ...(timeoutMs != null && {
+              signal: AbortSignal.timeout(timeoutMs),
+            }),
           },
-          body: JSON.stringify(m.params),
-          // Browser actions and mode suggestions may wait for user approval.
-          // Landing runs the project's check command.
-          signal: AbortSignal.timeout(
-            /^(?:browser(?:_|$)|land_changes|suggest_mode|ask_user)$/.test(
-              m.params?.name,
-            )
-              ? 15 * 60 * 1000
-              : 15000,
-          ),
-        },
-      );
-      const value = await response.json();
-      if (value?.mcp) return reply({ id: m.id, result: value.mcp });
-      reply({
-        id: m.id,
-        result: {
-          isError: !response.ok,
-          content: [{ type: "text", text: JSON.stringify(value) }],
-        },
-      });
+        );
+        const value = await response.json();
+        if (value?.mcp) reply({ id: m.id, result: value.mcp });
+        else
+          reply({
+            id: m.id,
+            result: {
+              isError: !response.ok,
+              content: [{ type: "text", text: JSON.stringify(value) }],
+            },
+          });
+      } finally {
+        if (beat) clearInterval(beat);
+      }
     } else
       reply({
         id: m.id,

@@ -30,6 +30,17 @@ import {
 export { checkClaudeBilling };
 const exec = promisify(execFile);
 
+// Claude's question timer and its five-minute remote-dialog deadline do not
+// see someone reading or typing in Harness. Only Goal's own 60 second timer
+// may close a question. CLAUDE_CODE_* variables are already left out of the
+// provider environment, so they cannot override this.
+export const CLAUDE_SESSION_SETTINGS = {
+  forceLoginMethod: "claudeai",
+  fastMode: false,
+  askUserQuestionTimeout: "never",
+  dialogExpiry: "never",
+};
+
 export function claudeOptions(cwd) {
   const path = executable("claude");
   if (!path) throw new Error("Claude Code is not installed");
@@ -39,7 +50,7 @@ export function claudeOptions(cwd) {
     env: subscriptionEnvironment(),
     settingSources: [],
     strictMcpConfig: true,
-    settings: { forceLoginMethod: "claudeai", fastMode: false },
+    settings: CLAUDE_SESSION_SETTINGS,
     permissionMode: "default",
     includePartialMessages: true,
     extraArgs: { "forward-subagent-text": null },
