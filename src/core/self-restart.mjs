@@ -100,7 +100,14 @@ export async function prepareRuntime({ source, revision, dataDir, signal }) {
       ["archive", "--format=tar", "--output=" + archive, revision],
       { timeout: 120000 },
     );
-    await run("tar", ["-xf", archive, "-C", root]);
+    // Git Bash's GNU tar reads "C:\..." as a remote host; use Windows' bsdtar.
+    const windowsTar = join(process.env.SystemRoot ?? "", "System32", "tar.exe");
+    await run(
+      process.platform === "win32" && existsSync(windowsTar)
+        ? windowsTar
+        : "tar",
+      ["-xf", archive, "-C", root],
+    );
     const npm = await npmCli();
     await run(process.execPath, [
       npm,
