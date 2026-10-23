@@ -7,6 +7,7 @@ import {
   chatMarkerLabel,
   pinnedChats,
   providerStatusLabel,
+  recentChats,
   cursorMonthlyReset,
   cursorResetDay,
   cursorResetLabel,
@@ -162,6 +163,27 @@ test("pinned chats lead their project and archived pins stay out of the pinned l
     sidebarOrder(conversations.filter((c) => c.archived_at)).map((c) => c.id),
     ["shelved"],
   );
+});
+
+test("recent chats follow activity time across projects and leave out archived ones", () => {
+  const chat = (id, updated_at, extra = {}) => ({ id, updated_at, ...extra });
+  assert.deepEqual(
+    recentChats([
+      chat("old", "2026-01-01T00:00:00.000Z", { project_id: "a" }),
+      chat("fresh", "2026-01-04T00:00:00.000Z", { project_id: "b" }),
+      chat("held", "2026-01-02T00:00:00.000Z", {
+        project_id: "a",
+        pinned_at: "2026-01-09T00:00:00.000Z",
+      }),
+      chat("shelved", "2026-01-08T00:00:00.000Z", {
+        project_id: "b",
+        archived_at: "2026-01-08T00:00:00.000Z",
+      }),
+      chat("undated", undefined, { project_id: "a" }),
+    ]).map((c) => c.id),
+    ["fresh", "held", "old", "undated"],
+  );
+  assert.deepEqual(recentChats([]), []);
 });
 
 test("the header shows the tightest usage window for each provider", () => {

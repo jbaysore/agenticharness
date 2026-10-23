@@ -63,6 +63,13 @@ export function sidebarOrder(conversations) {
     return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
   });
 }
+// Newest activity first, across every project. Pinning does not change
+// that activity time.
+export function recentChats(conversations) {
+  return conversations
+    .filter((c) => !c.archived_at)
+    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+}
 export function pinnedChats(conversations) {
   return sidebarOrder(conversations).filter(
     (c) => c.pinned_at && !c.archived_at,

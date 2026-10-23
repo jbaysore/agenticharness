@@ -27,6 +27,7 @@ import {
   cursorMonthlyReset,
   cursorResetLabel,
   pinnedChats,
+  recentChats,
   sidebarOrder,
   usageVerificationLabel,
   workspacePeers,
@@ -68,9 +69,17 @@ import {
 } from "./panes.mjs";
 
 const terminalsKey = "harness.terminals.open.v1";
+const projectsKey = "harness.projects.open.v1";
 function loadTerminalsOpen() {
   try {
     return localStorage.getItem(terminalsKey) !== "false";
+  } catch {
+    return true;
+  }
+}
+function loadProjectsOpen() {
+  try {
+    return localStorage.getItem(projectsKey) !== "false";
   } catch {
     return true;
   }
@@ -108,6 +117,7 @@ function App() {
     [archivedOpen, setArchivedOpen] = useState([]),
     [folderLimits, setFolderLimits] = useState({}),
     [terminalsOpen, setTerminalsOpen] = useState(loadTerminalsOpen),
+    [projectsOpen, setProjectsOpen] = useState(loadProjectsOpen),
     [windowVisible, setWindowVisible] = useState(
       () => document.visibilityState === "visible",
     );
@@ -308,6 +318,13 @@ function App() {
       // The section still opens and closes for this visit.
     }
   }, [terminalsOpen]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(projectsKey, String(projectsOpen));
+    } catch {
+      // The section still opens and closes for this visit.
+    }
+  }, [projectsOpen]);
   useEffect(() => {
     let ignore = false,
       retry;
@@ -658,6 +675,10 @@ function App() {
   // The taskbar shows how many chats are waiting while the window is in the background.
   const active = activeChats(state.conversations),
     pinned = pinnedChats(state.conversations),
+    recent = recentChats(state.conversations),
+    recentLimit = folderLimits.recents ?? INITIAL_CHAT_LIMIT,
+    projectNameOf = (c) =>
+      state.projects.find((p) => p.id === c.project_id)?.name,
     attention = attentionCount(state.conversations),
     foldersOpen = openFolderIds(expandedFolders, selectedProject);
   useEffect(() => {
@@ -685,11 +706,12 @@ function App() {
       });
     await refresh();
   }
-  const chatRow = (c, detail) => (
+  const chatRow = (c, detail, openLabel) => (
     <ChatRow
       key={c.id}
       chat={c}
       detail={detail}
+      openLabel={openLabel}
       placement={
         c.id === chat?.id ? "selected" : openIds.includes(c.id) ? "open" : ""
       }
@@ -710,6 +732,43 @@ function App() {
       onDismissUsage={() => action(() => dismissUsage(c.id))()}
     />
   );
+  const pagedChats = (items, key, limit, detailFor) => {
+    const page = folderPage(items.length, limit);
+    return (
+      <>
+        {items.slice(0, page.visible).map((c) => {
+          const name = detailFor?.(c);
+          return chatRow(c, name, name ? `${c.title}, ${name}` : undefined);
+        })}
+        {page.more > 0 && (
+          <button
+            className="folder-more"
+            onClick={() =>
+              setFolderLimits((limits) => ({
+                ...limits,
+                [key]: page.next,
+              }))
+            }
+          >
+            Show {page.more} more
+          </button>
+        )}
+        {limit > INITIAL_CHAT_LIMIT && (
+          <button
+            className="folder-more"
+            onClick={() =>
+              setFolderLimits((limits) => ({
+                ...limits,
+                [key]: INITIAL_CHAT_LIMIT,
+              }))
+            }
+          >
+            Show fewer
+          </button>
+        )}
+      </>
+    );
+  };
   async function newTerminal(beside = false, shell = "powershell") {
     const target = state.projects.find((p) => p.id === selectedProject);
     if (!target) {
@@ -1027,8 +1086,27 @@ function App() {
             </div>
           </>
         )}
+        <div
+          className={
+            "sidebar-lists" + (projectsOpen ? "" : " projects-collapsed")
+          }
+        >
         <div className="section-label">
-          Projects
+          <button
+            className="section-toggle"
+            aria-expanded={projectsOpen}
+            aria-controls="project-list"
+            title={projectsOpen ? "Collapse projects" : "Expand projects"}
+            onClick={() => setProjectsOpen((open) => !open)}
+          >
+            <span>
+              <Icon name="chevron" size={12} />
+              Projects
+            </span>
+            {!projectsOpen && state.projects.length > 0 && (
+              <small>{state.projects.length}</small>
+            )}
+          </button>
           <button
             className="icon-button"
             aria-label="Add project"
@@ -1037,7 +1115,7 @@ function App() {
             <Icon name="plus" size={15} />
           </button>
         </div>
-        <div className="project-list">
+        <div className="project-list" id="project-list" hidden={!projectsOpen}>
           {state.projects.map((p) => {
             const mine = state.conversations.filter(
                 (c) => c.project_id === p.id,
@@ -1049,40 +1127,6 @@ function App() {
             const chatLimit = folderLimits[p.id] ?? INITIAL_CHAT_LIMIT,
               archiveKey = p.id + ":archived",
               archiveLimit = folderLimits[archiveKey] ?? INITIAL_CHAT_LIMIT;
-            const listChats = (items, key, limit) => {
-              const page = folderPage(items.length, limit);
-              return (
-                <>
-                  {items.slice(0, page.visible).map((c) => chatRow(c))}
-                  {page.more > 0 && (
-                    <button
-                      className="folder-more"
-                      onClick={() =>
-                        setFolderLimits((limits) => ({
-                          ...limits,
-                          [key]: page.next,
-                        }))
-                      }
-                    >
-                      Show {page.more} more
-                    </button>
-                  )}
-                  {limit > INITIAL_CHAT_LIMIT && (
-                    <button
-                      className="folder-more"
-                      onClick={() =>
-                        setFolderLimits((limits) => ({
-                          ...limits,
-                          [key]: INITIAL_CHAT_LIMIT,
-                        }))
-                      }
-                    >
-                      Show fewer
-                    </button>
-                  )}
-                </>
-              );
-            };
             return (
               <div key={p.id} className="project">
                 <div
@@ -1134,7 +1178,7 @@ function App() {
                 </div>
                 {open && (
                   <div id={`project-${p.id}-chats`}>
-                    {listChats(openChats, p.id, chatLimit)}
+                    {pagedChats(openChats, p.id, chatLimit)}
                     {archived.length > 0 && (
                       <button
                         className="archived-toggle"
@@ -1153,7 +1197,7 @@ function App() {
                       </button>
                     )}
                     {showingArchived &&
-                      listChats(archived, archiveKey, archiveLimit)}
+                      pagedChats(archived, archiveKey, archiveLimit)}
                   </div>
                 )}
               </div>
@@ -1164,6 +1208,19 @@ function App() {
               Add a folder to begin. Your code stays on this computer.
             </p>
           )}
+        </div>
+        {recent.length > 0 && (
+          <>
+            <div className="section-label">Recents</div>
+            <div
+              className="recent-list active-list"
+              role="group"
+              aria-label="Recent chats"
+            >
+              {pagedChats(recent, "recents", recentLimit, projectNameOf)}
+            </div>
+          </>
+        )}
         </div>
         <div className="sidebar-bottom">
           <button

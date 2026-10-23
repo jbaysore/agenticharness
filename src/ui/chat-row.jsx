@@ -8,6 +8,7 @@ export function ChatRow({
   chat,
   placement = "",
   detail,
+  openLabel,
   canSplit,
   onOpen,
   onRename,
@@ -71,6 +72,7 @@ export function ChatRow({
     >
       <button
         className="chat-open"
+        aria-label={openLabel || undefined}
         onClick={(e) => onOpen(e.ctrlKey || e.metaKey)}
         onAuxClick={(e) => {
           if (e.button === 1) onOpen(true);
