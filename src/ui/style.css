@@ -511,6 +511,7 @@ small {
   font-size: 13px;
   color: var(--text-2);
   border-radius: 8px;
+  cursor: pointer;
 }
 .active-list .chat-row {
   width: 100%;

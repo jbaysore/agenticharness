@@ -58,6 +58,12 @@ export function ChatRow({
         (chat.pinned_at ? " pinned" : "") +
         (canSplit ? " can-split" : "")
       }
+      onClick={(e) => {
+        if (!e.target.closest("button")) onOpen(e.ctrlKey || e.metaKey);
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1 && !e.target.closest("button")) onOpen(true);
+      }}
       title={
         [label, chat.pinned_at && "Pinned"].filter(Boolean).join(" · ") ||
         undefined

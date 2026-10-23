@@ -297,7 +297,15 @@ export const TerminalSession = forwardRef(function TerminalSession(
 export function TerminalRow({ group, project, placement = "", onOpen, onEnd }) {
   const tabs = group.tabs.length;
   return (
-    <div className={"chat-row terminal-row " + placement}>
+    <div
+      className={"chat-row terminal-row " + placement}
+      onClick={(e) => {
+        if (!e.target.closest("button")) onOpen(e.ctrlKey || e.metaKey);
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1 && !e.target.closest("button")) onOpen(true);
+      }}
+    >
       <button
         className="chat-open"
         onClick={(e) => onOpen(e.ctrlKey || e.metaKey)}
