@@ -70,6 +70,7 @@ import { ActionReviewer } from "./reviewer.mjs";
 import { restartTool } from "./self-restart.mjs";
 import { blockingGoals, goalStopped } from "./goals.mjs";
 import { isUsageExhausted } from "../security/billing.mjs";
+import { usageWindows } from "../ui/status.mjs";
 import {
   createWorktree,
   landTool,
@@ -160,11 +161,41 @@ export class Controller extends EventEmitter {
             },
       );
       this.event(null, null, "providers", { providers: this.providers });
+      this.scheduleProviderRefresh();
       return this.providers;
     })().finally(() => {
       this.refreshing = null;
     });
     return this.refreshing;
+  }
+  // Provider usage is only read on demand, so a limit that has reset would keep
+  // showing as used. Re-read just after the next window resets, and keep
+  // retrying while a provider is still out of usage past its reset time.
+  scheduleProviderRefresh(now = Date.now()) {
+    clearTimeout(this.providerTimer);
+    const resets = [];
+    let overdue = false;
+    for (const p of this.providers) {
+      const windows = usageWindows(p);
+      // Out of usage with no reset still ahead: ask again soon.
+      if (isUsageExhausted(p.blockReason) && !windows.some((w) => w.resetsAt > now))
+        overdue = true;
+      for (const w of windows) {
+        if (w.remaining === 0 && !(w.resetsAt > now)) overdue = true;
+        if (w.resetsAt) resets.push(w.resetsAt);
+      }
+    }
+    const next = Math.min(...resets.filter((at) => at > now)),
+      delay = Math.min(
+        Number.isFinite(next) ? next - now + 5000 : Infinity,
+        overdue ? 60000 : Infinity,
+      );
+    if (!Number.isFinite(delay)) return;
+    this.providerTimer = setTimeout(
+      () => this.refreshProviders().catch(() => this.scheduleProviderRefresh()),
+      Math.min(delay, 2 ** 31 - 1),
+    );
+    this.providerTimer.unref?.();
   }
   // Effort levels Cursor has shown for a model, kept for its picker.
   learnCursorEfforts(configOptions) {
@@ -1646,6 +1677,7 @@ export class Controller extends EventEmitter {
     return { requested: !!active };
   }
   async close() {
+    clearTimeout(this.providerTimer);
     const active = [...this.active.values()];
     for (const work of active) {
       work.cancelled = true;

@@ -225,6 +225,17 @@ function App() {
     },
     [admit],
   );
+  // The "update complete" notice clears itself after a few seconds.
+  const [dismissedUpdate, setDismissedUpdate] = useState(null);
+  const finishedUpdate =
+    state.selfRestart?.status === "updated" ? state.selfRestart.id : null;
+  useEffect(() => {
+    if (!finishedUpdate) return;
+    const timer = setTimeout(() => setDismissedUpdate(finishedUpdate), 7000);
+    return () => clearTimeout(timer);
+  }, [finishedUpdate]);
+  const showRestartNotice =
+    state.selfRestart && (!finishedUpdate || dismissedUpdate !== finishedUpdate);
   const restartProgress = useRestartProgress({
     restart: state.selfRestart,
     ready: ready && !needsPair,
@@ -1262,7 +1273,7 @@ function App() {
             sent twice.
           </div>
         )}
-        {state.selfRestart && (
+        {showRestartNotice && (
           <div
             className="reconnect-banner self-restart-notice"
             role="status"

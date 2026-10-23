@@ -1054,3 +1054,39 @@ test("a mid-turn usage stop flags the chat until a later turn is working", async
     store.close();
   }
 });
+
+test("provider usage is re-read after a limit window resets", async (t) => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let refreshes = 0;
+  controller.refreshProviders = async () => {
+    refreshes++;
+  };
+  const now = Date.now();
+  controller.providers = [
+    {
+      id: "claude",
+      connected: true,
+      usage: {
+        windows: [
+          { bucket: "session", usedPercent: 100, resetsAt: now + 60000 },
+        ],
+      },
+    },
+  ];
+  controller.scheduleProviderRefresh(now);
+  t.mock.timers.tick(64000);
+  assert.equal(refreshes, 0);
+  t.mock.timers.tick(2000);
+  assert.equal(refreshes, 1);
+  // Still exhausted past its reset: retry every minute.
+  controller.scheduleProviderRefresh(now + 120000);
+  t.mock.timers.tick(60000);
+  assert.equal(refreshes, 2);
+  controller.providers = [];
+  controller.scheduleProviderRefresh(now);
+  t.mock.timers.tick(10 * 60000);
+  assert.equal(refreshes, 2);
+  store.close();
+});
