@@ -70,16 +70,10 @@ import {
 
 const terminalsKey = "harness.terminals.open.v1";
 const projectsKey = "harness.projects.open.v1";
-function loadTerminalsOpen() {
+const recentsKey = "harness.recents.open.v1";
+function loadSectionOpen(key) {
   try {
-    return localStorage.getItem(terminalsKey) !== "false";
-  } catch {
-    return true;
-  }
-}
-function loadProjectsOpen() {
-  try {
-    return localStorage.getItem(projectsKey) !== "false";
+    return localStorage.getItem(key) !== "false";
   } catch {
     return true;
   }
@@ -116,8 +110,13 @@ function App() {
     [expandedFolders, setExpandedFolders] = useState(loadExpandedFolders),
     [archivedOpen, setArchivedOpen] = useState([]),
     [folderLimits, setFolderLimits] = useState({}),
-    [terminalsOpen, setTerminalsOpen] = useState(loadTerminalsOpen),
-    [projectsOpen, setProjectsOpen] = useState(loadProjectsOpen),
+    [terminalsOpen, setTerminalsOpen] = useState(() =>
+      loadSectionOpen(terminalsKey),
+    ),
+    [projectsOpen, setProjectsOpen] = useState(() =>
+      loadSectionOpen(projectsKey),
+    ),
+    [recentsOpen, setRecentsOpen] = useState(() => loadSectionOpen(recentsKey)),
     [windowVisible, setWindowVisible] = useState(
       () => document.visibilityState === "visible",
     );
@@ -325,6 +324,13 @@ function App() {
       // The section still opens and closes for this visit.
     }
   }, [projectsOpen]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(recentsKey, String(recentsOpen));
+    } catch {
+      // The section still opens and closes for this visit.
+    }
+  }, [recentsOpen]);
   useEffect(() => {
     let ignore = false,
       retry;
@@ -1211,11 +1217,25 @@ function App() {
         </div>
         {recent.length > 0 && (
           <>
-            <div className="section-label">Recents</div>
+            <button
+              className="section-label section-toggle"
+              aria-expanded={recentsOpen}
+              aria-controls="recent-list"
+              title={recentsOpen ? "Collapse recents" : "Expand recents"}
+              onClick={() => setRecentsOpen((open) => !open)}
+            >
+              <span>
+                <Icon name="chevron" size={12} />
+                Recents
+              </span>
+              {!recentsOpen && <small>{recent.length}</small>}
+            </button>
             <div
               className="recent-list active-list"
+              id="recent-list"
               role="group"
               aria-label="Recent chats"
+              hidden={!recentsOpen}
             >
               {pagedChats(recent, "recents", recentLimit, projectNameOf)}
             </div>
