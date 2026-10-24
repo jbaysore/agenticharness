@@ -14,6 +14,8 @@ const defaults = {
   rightOpen: true,
 };
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const mobileQuery =
+  "(max-width: 700px), (max-height: 500px) and (pointer: coarse)";
 
 function readLayout() {
   try {
@@ -36,11 +38,39 @@ function readLayout() {
 export function useSidebarLayout(paneCount = 1) {
   const [layout, setLayout] = useState(readLayout);
   const [viewport, setViewport] = useState(() => window.innerWidth);
+  const [mobile, setMobile] = useState(() => matchMedia(mobileQuery).matches);
   useEffect(() => {
     const resize = () => setViewport(window.innerWidth);
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, []);
+  useEffect(() => {
+    const query = matchMedia(mobileQuery);
+    const change = () => setMobile(query.matches);
+    query.addEventListener("change", change);
+    return () => query.removeEventListener("change", change);
+  }, []);
+  useEffect(() => {
+    const visible = window.visualViewport;
+    if (!mobile || !visible) return;
+    const style = document.documentElement.style;
+    const resize = () => {
+      // The keyboard can shrink and pan the visible viewport without resizing
+      // the page. Follow it, while leaving pinch zoom under the user's control.
+      if (visible.scale !== 1) return;
+      style.setProperty("--phone-height", `${visible.height}px`);
+      style.setProperty("--phone-top", `${visible.offsetTop}px`);
+    };
+    resize();
+    visible.addEventListener("resize", resize);
+    visible.addEventListener("scroll", resize);
+    return () => {
+      visible.removeEventListener("resize", resize);
+      visible.removeEventListener("scroll", resize);
+      style.removeProperty("--phone-height");
+      style.removeProperty("--phone-top");
+    };
+  }, [mobile]);
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(layout));
@@ -49,7 +79,6 @@ export function useSidebarLayout(paneCount = 1) {
     }
   }, [layout]);
 
-  const mobile = viewport <= 700;
   const leftLimit = mobile
     ? Math.min(420, viewport - 32)
     : Math.min(420, viewport - MIN_PANE_WIDTH);

@@ -64,6 +64,13 @@ has its own collapse button. Desktop widths and visibility are remembered in
 this browser. On smaller screens the work panel opens over the conversation,
 and on phones the project sidebar does too. Escape dismisses these overlays.
 
+Phones show one chat at a time, including in landscape. Tap the usage strip for
+full limits and reset times, and the details button beside the mode picker for
+history and workspace information. Return adds a new line on phones; tap Send
+to submit (Ctrl+Enter or Command+Enter also sends). The composer and dialogs
+follow the visible space above the keyboard. The sidebar scrolls on short screens
+so its settings remain reachable.
+
 ## Working in several chats
 
 Each chat runs its own turn, so several can work at once. Up to four show at

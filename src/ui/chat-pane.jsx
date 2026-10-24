@@ -171,6 +171,7 @@ export function ChatPane({
   providers,
   focused,
   solo,
+  mobile = false,
   compact = false,
   headerDrag,
   dropTarget,
@@ -930,7 +931,8 @@ export function ChatPane({
               if (
                 e.key === "Enter" &&
                 !e.shiftKey &&
-                !e.nativeEvent.isComposing
+                !e.nativeEvent.isComposing &&
+                (!mobile || e.ctrlKey || e.metaKey)
               ) {
                 e.preventDefault();
                 send();
@@ -1037,7 +1039,7 @@ export function ChatPane({
               ))}
             </select>
           </label>
-          {compact && (chat || peers.length > 0) && (
+          {(compact || mobile) && (chat || peers.length > 0) && (
             <details
               className="composer-details"
               onKeyDown={(event) => {
@@ -1076,7 +1078,7 @@ export function ChatPane({
               </div>
             </details>
           )}
-          {!compact && peers.length > 0 && (
+          {!compact && !mobile && peers.length > 0 && (
             <span
               className="workspace-peers"
               title={
@@ -1088,7 +1090,7 @@ export function ChatPane({
               {workspacePeersLabel(peers)}
             </span>
           )}
-          {!compact && chat && (
+          {!compact && !mobile && chat && (
             <span
               className="history-scope"
               title="History access is fixed for this conversation. Set the default for new conversations in Connections & usage."

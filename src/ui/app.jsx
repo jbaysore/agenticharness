@@ -1428,6 +1428,7 @@ function App() {
                 providers={state.providers}
                 focused={p.key === current.key}
                 solo={view.panes.length === 1}
+                mobile={mobile}
                 compact={shown.length === 4}
                 headerDrag={
                   shown.length > 1 ? paneHeaderDrag(p.key) : undefined

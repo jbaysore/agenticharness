@@ -424,7 +424,9 @@ try {
   // Unused new chats disappear when closed; typed composer text stays as a draft.
   const newChatButton = page.locator("button.new-chat");
   const unusedRow = () =>
-    left.locator(".chat-row", { hasText: "New conversation" });
+    left.locator(`#project-${project.id}-chats .chat-row`, {
+      hasText: "New conversation",
+    });
   const unusedCount = () =>
     app.store.conversations().filter((c) => c.title === "New conversation")
       .length;

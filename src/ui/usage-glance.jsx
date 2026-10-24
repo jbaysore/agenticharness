@@ -99,6 +99,12 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
                 {cursorResetDay(g.bars[0].resetsAt)}
               </span>
             ) : (
+            <>
+            <span className="usage-chip-compact">
+              {g.remaining === null
+                ? g.level === "out" ? "0%" : "–"
+                : `${g.remaining}%`}
+            </span>
             <span className="usage-chip-rows">
               {g.bars.map((b, i) => (
                 <span className={"usage-chip-row " + b.level} key={i}>
@@ -127,6 +133,7 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
                 </span>
               ))}
             </span>
+            </>
             )}
           </span>
           );
