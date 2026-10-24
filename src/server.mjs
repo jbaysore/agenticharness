@@ -529,7 +529,10 @@ export async function createHarness({
           (match = path.match(/^\/api\/actions\/([-\w]{16,100})$/)) &&
           method === "GET"
         )
-          return json(res, 200, { run: store.runForAction(match[1]) ?? null });
+          return json(res, 200, {
+            run: store.runForAction(match[1]) ?? null,
+            input: store.inputForAction(match[1]) ?? null,
+          });
         if (
           (match = path.match(/^\/api\/projects\/([^/]+)\/check$/)) &&
           method === "PUT"

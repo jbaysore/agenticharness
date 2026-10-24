@@ -248,7 +248,9 @@ export function ChatPane({
     onSelection({ provider, model, effort, permissions });
   }, [provider, model, effort, permissions]);
   // A saved chat brings its own agent. An unconfirmed send is settled with the
-  // host before its text is restored, so it is never submitted twice.
+  // host before its text is restored, so it is never submitted twice. Once the
+  // host confirms it never took the message, the text is an ordinary draft and
+  // the chat no longer reopens by itself on every start.
   useEffect(() => {
     if (!chat) return;
     setProvider(chat.provider);
@@ -260,10 +262,10 @@ export function ChatPane({
     if (!pending || sending.current) return;
     let ignore = false;
     api("/api/actions/" + encodeURIComponent(pending.actionId))
-      .then(({ run }) => {
+      .then(({ run, input }) => {
         if (ignore || sending.current) return;
-        if (run) {
-          savePending(chat.id, null);
+        savePending(chat.id, null);
+        if (run || input) {
           setDraft("");
           setAttachments([]);
           return reload(chat.id);
@@ -277,7 +279,7 @@ export function ChatPane({
         if (pending.mode) setMode(pending.mode);
         report(
           new Error(
-            "Your unconfirmed message was restored. Sending it again uses the same action ID.",
+            "Your unsent message was restored. Harness never received it.",
           ),
         );
       })
@@ -502,8 +504,9 @@ export function ChatPane({
       return;
     setBusy(true);
     sending.current = true;
+    let c, body;
     try {
-      const c =
+      c =
         chat ??
         (await ensureChat({
           provider,
@@ -517,7 +520,7 @@ export function ChatPane({
         saveDraftAttachments(draftKey, []);
       }
       const prior = readPending(c.id);
-      const body =
+      body =
         prior &&
         prior.text === text &&
         JSON.stringify(prior.attachments ?? []) ===
@@ -548,6 +551,13 @@ export function ChatPane({
       await refresh();
     } catch (e) {
       report(e);
+      // A refused message stays in the composer but is no longer unconfirmed.
+      if (body && e.status >= 400 && e.status < 500 && !e.unreachable)
+        await api("/api/actions/" + encodeURIComponent(body.actionId))
+          .then(({ run, input }) => {
+            if (!run && !input) savePending(c.id, null);
+          })
+          .catch(() => {});
     } finally {
       sending.current = false;
       setBusy(false);
