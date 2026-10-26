@@ -20,6 +20,8 @@ export function BrowserPane({ report }) {
     [address, setAddress] = useState(""),
     [editing, setEditing] = useState(false),
     [hasFrame, setHasFrame] = useState(false),
+    [loading, setLoading] = useState(false),
+    [agent, setAgent] = useState(null),
     // A desktop page is small in the side panel; expanded, it covers the
     // workspace at close to its own size.
     [expanded, setExpanded] = useState(false),
@@ -46,9 +48,12 @@ export function BrowserPane({ report }) {
     const url = new URL("/api/browser/stream", location.href);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     let disposed = false,
+      paused = false,
       timer,
       delay = 500,
-      meta = null;
+      meta = null,
+      received = 0,
+      drawn = 0;
     const connect = () => {
       const ws = new WebSocket(url);
       ws.binaryType = "blob";
@@ -60,12 +65,16 @@ export function BrowserPane({ report }) {
       ws.onmessage = async (event) => {
         if (disposed) return;
         if (typeof event.data !== "string") {
-          const frame = meta;
+          const frame = meta,
+            // Frames decode in parallel; one that finishes after a newer
+            // frame was drawn is stale.
+            seq = ++received;
           meta = null;
           if (!frame || !canvas.current) return;
           const image = await createImageBitmap(event.data);
           const c = canvas.current;
-          if (!c) return image.close();
+          if (!c || seq < drawn) return image.close();
+          drawn = seq;
           if (c.width !== image.width || c.height !== image.height) {
             c.width = image.width;
             c.height = image.height;
@@ -80,19 +89,44 @@ export function BrowserPane({ report }) {
         if (message.type === "frame") meta = message;
         else if (message.type === "state") {
           setTabs(message.tabs);
+          setLoading(!!message.loading);
+          setAgent(message.agent ?? null);
           if (!message.tabs.some((tab) => tab.active)) setHasFrame(false);
+        } else if (message.type === "copied") {
+          if (message.text)
+            navigator.clipboard
+              ?.writeText(message.text)
+              .catch(() =>
+                report(new Error("The clipboard was not available to copy.")),
+              );
         } else if (message.type === "error") report(new Error(message.error));
       };
       ws.onclose = () => {
-        if (disposed) return;
+        if (disposed || paused) return;
         setStatus("Reconnecting…");
         timer = setTimeout(connect, delay);
         delay = Math.min(delay * 2, 5000);
       };
     };
-    connect();
+    // A hidden Harness tab stops the stream, which also stops Chrome's
+    // screencast, and picks it up again when shown.
+    const visibility = () => {
+      if (document.hidden && !paused) {
+        paused = true;
+        clearTimeout(timer);
+        socket.current?.close();
+      } else if (!document.hidden && paused) {
+        paused = false;
+        delay = 500;
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", visibility);
+    if (document.hidden) paused = true;
+    else connect();
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", visibility);
       clearTimeout(timer);
       socket.current?.close();
       socket.current = null;
@@ -171,6 +205,14 @@ export function BrowserPane({ report }) {
   const key = (action) => (e) => {
     if (isPaste(e) || e.key === "Process" || e.key === "Unidentified") return;
     e.preventDefault();
+    // Ctrl+C still reaches the page; the panel also copies its selection.
+    if (
+      action === "down" &&
+      (e.ctrlKey || e.metaKey) &&
+      !e.altKey &&
+      e.key.toLowerCase() === "c"
+    )
+      send({ type: "copy" });
     send({ type: "key", action, key: e.key });
   };
   const empty = !current;
@@ -278,6 +320,13 @@ export function BrowserPane({ report }) {
           </div>
         )}
         <div className="browser-view">
+          {loading && <div className="browser-progress" aria-hidden="true" />}
+          {agent && (
+            <div className="browser-agent" role="status">
+              <span className="working-dot" aria-hidden="true" />
+              Agent: {agent.replace(/^Browser: /, "")}
+            </div>
+          )}
           <canvas
             ref={canvas}
             tabIndex={0}

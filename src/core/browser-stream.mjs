@@ -43,19 +43,39 @@ export function browserStreams(server, { host, authorize }) {
           if (ws.readyState === WebSocket.OPEN)
             ws.send(JSON.stringify(message));
         };
+        // A slow connection skips frames rather than queueing them. The
+        // newest skipped one is sent once it catches up, since a page that
+        // has stopped changing sends no more.
+        let skipped = null,
+          retry = null;
         const viewer = {
           state: send,
-          // A slow connection skips frames rather than queueing them; the
-          // next one shows the page as it is now.
-          frame({ data, width, height }) {
+          frame(frame) {
             if (ws.readyState !== WebSocket.OPEN) return;
-            if (ws.bufferedAmount > 1024 * 1024) return;
-            ws.send(JSON.stringify({ type: "frame", width, height }));
-            ws.send(data, { binary: true });
+            if (ws.bufferedAmount > 1024 * 1024) {
+              skipped = frame;
+              retry ??= setTimeout(() => {
+                retry = null;
+                const next = skipped;
+                skipped = null;
+                if (next) viewer.frame(next);
+              }, 100);
+              return;
+            }
+            skipped = null;
+            ws.send(
+              JSON.stringify({
+                type: "frame",
+                width: frame.width,
+                height: frame.height,
+              }),
+            );
+            ws.send(frame.data, { binary: true });
           },
         };
         ws.on("close", () => {
           closed = true;
+          clearTimeout(retry);
           stop?.();
         });
         // Input applies in the order it was sent, so a mouse-up never
@@ -75,7 +95,10 @@ export function browserStreams(server, { host, authorize }) {
                 work.catch((error) =>
                   send({ type: "error", error: error.message }),
                 );
-              else await work;
+              else {
+                const reply = await work;
+                if (reply) send(reply);
+              }
             } catch (error) {
               send({ type: "error", error: error.message });
             }

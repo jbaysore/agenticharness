@@ -201,9 +201,14 @@ export class Browser {
           content: [{ type: "text", text: failure }],
         };
       await this.host?.start();
-      const result = await (
-        await this.connect()
-      ).call("tools/call", { name, arguments: args ?? {} }, 5 * 60 * 1000);
+      this.host?.working(browserTitle(name, args ?? {}));
+      const rpc = await this.connect().catch((error) => {
+        this.host?.working(null);
+        throw error;
+      });
+      const result = await rpc
+        .call("tools/call", { name, arguments: args ?? {} }, 5 * 60 * 1000)
+        .finally(() => this.host?.working(null));
       return capBrowserResult(
         name === "browser_take_screenshot"
           ? screenshotLinks(result, join(this.dir, "output"))

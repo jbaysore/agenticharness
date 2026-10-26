@@ -20,6 +20,7 @@ function fakeHost() {
     },
     async input(message) {
       if (message.type === "navigate") await new Promise(() => {});
+      if (message.type === "copy") return { type: "copied", text: "hello" };
       if (message.action === "down")
         await new Promise((resolve) => setTimeout(resolve, 50));
       seen.push(message.action ?? message.type);
@@ -78,6 +79,9 @@ test("the Browser panel's input reaches the page in order, past a slow load", as
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.deepEqual(messages[1], { type: "frame", width: 1280, height: 800 });
   assert.deepEqual([...messages[2]], [1, 2, 3]);
+  ws.send(JSON.stringify({ type: "copy" }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(messages.at(-1), { type: "copied", text: "hello" });
   ws.close();
   await harness.close();
 });

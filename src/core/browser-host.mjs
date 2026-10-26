@@ -36,6 +36,9 @@ export class BrowserHost extends EventEmitter {
     this.current = null;
     this.viewers = new Set();
     this.cast = null;
+    // Pages still loading, each with the timer that gives up on it.
+    this.loading = new WeakMap();
+    this.agentAction = null;
   }
   async endpoint() {
     this.port ??= await freePort();
@@ -84,13 +87,33 @@ export class BrowserHost extends EventEmitter {
   track(page, follow) {
     this.id(page);
     if (follow) this.show(page);
-    page.on("framenavigated", (frame) => {
-      if (frame === page.mainFrame()) {
-        if (this.current !== page) this.show(page);
-        else this.changed();
-      }
+    // Loading runs from the navigation request until the new page loads. A
+    // request that fails, or never becomes a page, stops it too.
+    const navigation = (request) =>
+      request.isNavigationRequest() && request.frame() === page.mainFrame();
+    const settle = () => {
+      clearTimeout(this.loading.get(page));
+      if (this.loading.delete(page)) this.changed();
+    };
+    page.on("request", (request) => {
+      if (!navigation(request)) return;
+      clearTimeout(this.loading.get(page));
+      this.loading.set(page, setTimeout(settle, 30000));
+      this.changed();
     });
-    page.on("load", () => this.changed());
+    page.on("requestfailed", (request) => {
+      if (navigation(request)) settle();
+    });
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+      // A same-document navigation is already loaded, so this settles at once.
+      page
+        .waitForLoadState("load")
+        .catch(() => {})
+        .finally(settle);
+      if (this.current !== page) this.show(page);
+      else this.changed();
+    });
     page.on("close", () => {
       if (this.current === page)
         this.show(this.context?.pages().at(-1) ?? null);
@@ -114,7 +137,18 @@ export class BrowserHost extends EventEmitter {
         active: page === this.current,
       })),
     );
-    return { type: "state", running: this.running, tabs };
+    return {
+      type: "state",
+      running: this.running,
+      tabs,
+      loading: !!this.current && this.loading.has(this.current),
+      agent: this.agentAction,
+    };
+  }
+  // What an agent is doing in the browser right now, for the panel to say.
+  working(action) {
+    this.agentAction = action;
+    this.changed();
   }
   changed() {
     clearTimeout(this.pendingState);
@@ -245,6 +279,27 @@ export class BrowserHost extends EventEmitter {
       case "text":
         await page.keyboard.insertText(String(message.text ?? ""));
         return;
+      case "copy":
+        // Headless Chrome has no clipboard of its own, so the panel copies
+        // the page's selection, including one inside a text field.
+        return {
+          type: "copied",
+          text: await page
+            .evaluate(() => {
+              const field = document.activeElement;
+              if (
+                field &&
+                typeof field.selectionStart === "number" &&
+                field.selectionEnd > field.selectionStart
+              )
+                return field.value.slice(
+                  field.selectionStart,
+                  field.selectionEnd,
+                );
+              return String(getSelection() ?? "");
+            })
+            .catch(() => ""),
+        };
     }
     throw new Error("Unknown browser message");
   }

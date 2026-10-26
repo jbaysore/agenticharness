@@ -148,6 +148,14 @@ function App() {
     if (docked) setLayout((current) => ({ ...current, rightOpen: open }));
     else setOverlayPanel(open);
   };
+  // An agent's browser action marks the Browser tab until it is looked at.
+  const [browserUnseen, setBrowserUnseen] = useState(false),
+    watchingBrowser = showPanel && panel === "browser",
+    watchingBrowserRef = useRef(watchingBrowser);
+  watchingBrowserRef.current = watchingBrowser;
+  useEffect(() => {
+    if (watchingBrowser) setBrowserUnseen(false);
+  }, [watchingBrowser]);
   const toggleSidebar = () => {
     if (mobile) setSidebar((open) => !open);
     else setLayout((current) => ({ ...current, leftOpen: !current.leftOpen }));
@@ -536,6 +544,12 @@ function App() {
           ),
         }));
       }
+      if (
+        e.type === "work" &&
+        e.payload?.kind === "browser-tool" &&
+        !watchingBrowserRef.current
+      )
+        setBrowserUnseen(true);
       if (!tracked.current.has(e.conversationId)) return;
       if (e.type === "text" && e.id > (floors.current[e.conversationId] ?? 0))
         setChats((all) => {
@@ -1341,12 +1355,21 @@ function App() {
           <button
             className={"icon-button " + (showPanel ? "active" : "")}
             aria-label="Toggle work panel"
-            title={showPanel ? "Collapse work panel" : "Show work panel"}
+            title={
+              showPanel
+                ? "Collapse work panel"
+                : browserUnseen
+                  ? "Show work panel · An agent is using the browser"
+                  : "Show work panel"
+            }
             aria-controls="work-panel"
             aria-expanded={showPanel}
             onClick={() => setShowPanel(!showPanel)}
           >
             <Icon name="panel" />
+            {browserUnseen && !showPanel && (
+              <span className="tab-dot" aria-hidden="true" />
+            )}
           </button>
         </header>
         {!online && (
@@ -1500,13 +1523,20 @@ function App() {
               ["browser", "globe", "Browser"],
             ].map(([id, icon, label]) => (
               <button
-                title={label}
+                title={
+                  id === "browser" && browserUnseen
+                    ? "Browser · An agent is using it"
+                    : label
+                }
                 key={id}
                 className={panel === id ? "active" : ""}
                 onClick={() => setPanel(id)}
               >
                 <Icon name={icon} size={16} />
                 <span>{label}</span>
+                {id === "browser" && browserUnseen && (
+                  <span className="tab-dot" aria-hidden="true" />
+                )}
               </button>
             ))}
             <button
