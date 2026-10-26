@@ -1403,6 +1403,18 @@ function App() {
                 {state.selfRestart.blockers.join(", ").toLowerCase()}.
               </span>
             )}
+            {["queued", "preparing", "waiting"].includes(
+              state.selfRestart.status,
+            ) &&
+              state.selfRestart.idleTerminals > 0 && (
+                <span>
+                  {" "}
+                  {state.selfRestart.idleTerminals === 1
+                    ? "1 idle terminal"
+                    : `${state.selfRestart.idleTerminals} idle terminals`}{" "}
+                  will close when it updates.
+                </span>
+              )}
             {state.selfRestart.error && (
               <details>
                 <summary>Update details</summary>

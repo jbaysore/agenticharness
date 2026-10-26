@@ -22,6 +22,7 @@ import { runCodex } from "../src/providers/codex.mjs";
 import { backup } from "node:sqlite";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
+import { Terminals } from "../src/core/terminals.mjs";
 import {
   SelfRestart,
   prepareRuntime,
@@ -69,7 +70,21 @@ async function fixture(options = {}) {
   await bump();
   const store = new Store(join(dataDir, "workspace.sqlite")),
     controller = new Controller(store, {});
-  const tabs = [],
+  // Shells stand in for live terminals; a busy one has a child process.
+  const children = [],
+    terminals = new Terminals(() => {}, { parents: async () => children }),
+    shell = ({ busy = false } = {}) => {
+      const s = {
+        id: randomUUID(),
+        status: "running",
+        process: { pid: 1000 + terminals.sessions.size },
+        createdAt: 0,
+        inputAt: 0,
+      };
+      terminals.sessions.set(s.id, s);
+      if (busy) children.push([5000 + s.process.pid, s.process.pid]);
+      return s;
+    },
     prepared = [],
     handoffs = [];
   let jobs = 0,
@@ -79,7 +94,7 @@ async function fixture(options = {}) {
     dataDir,
     store,
     controller,
-    terminals: { list: () => tabs },
+    terminals,
     runtime: { pid: process.pid },
     jobs: () => jobs,
     idleMs: 0,
@@ -109,7 +124,8 @@ async function fixture(options = {}) {
     coordinator,
     project,
     chat,
-    tabs,
+    terminals,
+    shell,
     prepared,
     handoffs,
     bump,
@@ -202,7 +218,7 @@ test("all chats, durable queues, approvals, terminals and host jobs block switch
       model: "fixture",
     });
     f.controller.active.set("another-project", {});
-    f.tabs.push({ status: "running" });
+    const busyShell = f.shell({ busy: true });
     f.jobs = 1;
     f.controller.tidying.set("cleanup", Promise.resolve());
     await f.coordinator.request(f.source, "default");
@@ -211,14 +227,14 @@ test("all chats, durable queues, approvals, terminals and host jobs block switch
       "Active chats",
       "Queued messages",
       "Pending approvals",
-      "Open terminals",
+      "Terminals running a command",
       "Host work finishing",
     ]);
     assert.equal(f.handoffs.length, 0);
     f.controller.active.clear();
     f.store.deleteQueued(queued.id);
     f.store.resolveApproval(approval.id, { allow: false });
-    f.tabs[0].status = "exited";
+    busyShell.status = "exited";
     f.jobs = 0;
     f.controller.tidying.clear();
     await f.coordinator.tick();
@@ -1041,4 +1057,61 @@ test("concurrent launchers serialize on the host lock and reclaim a dead owner",
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("an idle terminal does not hold an update, and one typed into does until checked", async () => {
+  const f = await fixture();
+  try {
+    const idle = f.shell();
+    await f.coordinator.request(f.source, "default");
+    // Input after the last process check may have started a command.
+    await f.terminals.checkRunning();
+    idle.inputAt = Date.now();
+    await f.coordinator.tick();
+    assert.deepEqual(f.coordinator.status().blockers, [
+      "Terminals running a command",
+    ]);
+    assert.equal(f.handoffs.length, 0);
+    // The next check finds no command running under it.
+    f.terminals.checkedAt = 0;
+    await f.coordinator.tick();
+    assert.equal(f.handoffs.length, 1);
+    assert.equal(f.terminals.idle().length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a terminal's shell is busy while a command it started is running", async () => {
+  const children = [],
+    terminals = new Terminals(() => {}, { parents: async () => children });
+  const add = (pid) => {
+    const s = {
+      id: String(pid),
+      status: "running",
+      process: { pid },
+      createdAt: 0,
+      inputAt: 0,
+    };
+    terminals.sessions.set(s.id, s);
+    return s;
+  };
+  add(10);
+  add(20);
+  children.push([99, 20]);
+  await terminals.checkRunning();
+  assert.deepEqual(
+    terminals.busy().map((s) => s.id),
+    ["20"],
+  );
+  assert.deepEqual(
+    terminals.idle().map((s) => s.id),
+    ["10"],
+  );
+  // When the process table cannot be read, every live shell counts as busy.
+  terminals.parents = async () => {
+    throw new Error("unavailable");
+  };
+  await terminals.checkRunning();
+  assert.equal(terminals.busy().length, 2);
 });

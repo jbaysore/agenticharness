@@ -1,6 +1,40 @@
 import * as pty from "node-pty";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { subscriptionEnvironment } from "../security/environment.mjs";
+
+// Every process's parent, from the operating system's process table.
+export function processParents() {
+  const [command, args] =
+    process.platform === "win32"
+      ? [
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
+          ],
+        ]
+      : ["ps", ["-A", "-o", "pid=,ppid="]];
+  return new Promise((resolve, reject) =>
+    execFile(
+      command,
+      args,
+      { windowsHide: true, timeout: 20000, maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout) =>
+        error
+          ? reject(error)
+          : resolve(
+              stdout
+                .trim()
+                .split(/\r?\n/)
+                .map((line) => line.trim().split(/\s+/).map(Number))
+                .filter(([pid, ppid]) => pid > 0 && ppid > 0),
+            ),
+    ),
+  );
+}
 export const SHELLS = {
   powershell: { label: "PowerShell", command: "powershell.exe" },
   cmd: { label: "Command Prompt", command: "cmd.exe" },
@@ -12,8 +46,63 @@ export class Terminals {
   groups = new Map();
   opened = 0;
   listeners = new Map();
-  constructor(onEvent) {
+  // Shells that had a command running at the last check, and when it began.
+  running = new Set();
+  checkedAt = 0;
+  constructor(
+    onEvent,
+    { parents = processParents, locked = () => false } = {},
+  ) {
     this.onEvent = onEvent;
+    this.parents = parents;
+    // While Harness hands over to a new version, typing would start work that
+    // the handover then ends.
+    this.locked = locked;
+  }
+  // A shell is busy while a command it started is still running, which shows
+  // as a child process. One sitting at its prompt has none.
+  async checkRunning({ maxAge = 0 } = {}) {
+    if (Date.now() - this.checkedAt < maxAge) return;
+    const live = [...this.sessions.values()].filter(
+      (s) => s.status === "running",
+    );
+    const started = Date.now();
+    if (!live.length) {
+      this.running = new Set();
+      this.checkedAt = started;
+      return;
+    }
+    let parents;
+    try {
+      parents = new Set((await this.parents()).map(([, ppid]) => ppid));
+    } catch {
+      // Without the process table, every live shell counts as busy.
+      parents = new Set(live.map((s) => s.process.pid));
+    }
+    this.running = new Set(
+      live.filter((s) => parents.has(s.process.pid)).map((s) => s.id),
+    );
+    this.checkedAt = started;
+  }
+  // Shells that may be running a command: busy at the last check, typed into
+  // since, or never checked. An idle shell is left for the update to close.
+  busy() {
+    return [...this.sessions.values()].filter(
+      (s) => s.status === "running" && this.mayBeBusy(s),
+    );
+  }
+  // Live shells at their prompt, which an update closes.
+  idle() {
+    return [...this.sessions.values()].filter(
+      (s) => s.status === "running" && !this.mayBeBusy(s),
+    );
+  }
+  mayBeBusy(s) {
+    return (
+      this.running.has(s.id) ||
+      s.inputAt >= this.checkedAt ||
+      s.createdAt >= this.checkedAt
+    );
   }
   subscribe(id, listener) {
     if (!this.sessions.has(id)) throw new Error("Terminal has ended");
@@ -88,6 +177,8 @@ export class Terminals {
       status: "running",
       // Set once a line has been submitted, so an untouched terminal can be dropped.
       used: false,
+      createdAt: Date.now(),
+      inputAt: 0,
       process: child,
     };
     this.sessions.set(id, session);
@@ -117,6 +208,9 @@ export class Terminals {
     if (!s || s.status !== "running") throw new Error("Terminal has ended");
     if (typeof data !== "string" || data.length > 10000)
       throw new Error("Invalid terminal input");
+    if (this.locked())
+      throw new Error("Harness is updating. Type again once it is back.");
+    s.inputAt = Date.now();
     if (/[\r\n]/.test(data)) s.used = true;
     s.process.write(data);
   }

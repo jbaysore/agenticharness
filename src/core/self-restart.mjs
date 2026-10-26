@@ -21,7 +21,7 @@ const pending = new Set(["queued", "preparing", "waiting"]);
 export const restartTool = {
   name: "restart_harness",
   description:
-    "Queue a safe Harness self restart. Only available when working on Harness itself in Default or Goal mode. Returns immediately; finish this turn normally and report that the restart is queued. Harness waits for all chats, unfinished or unconfirmed Goals, queued messages, approvals and live terminals, prepares and checks the committed version, and restores the previous runtime if startup fails. A continuing Goal can postpone the update indefinitely; never stop a Goal just to apply it. Repeated calls return the pending request. Never claim a queued restart has completed.",
+    "Queue a safe Harness self restart. Only available when working on Harness itself in Default or Goal mode. Returns immediately; finish this turn normally and report that the restart is queued. Harness waits for all chats, unfinished or unconfirmed Goals, queued messages, approvals and terminals running a command (idle shells are closed), prepares and checks the committed version, and restores the previous runtime if startup fails. A continuing Goal can postpone the update indefinitely; never stop a Goal just to apply it. Repeated calls return the pending request. Never claim a queued restart has completed.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
 };
 export async function repositoryIdentity(path) {
@@ -237,6 +237,7 @@ export class SelfRestart {
           status: request.status,
           blockers: request.blockers ?? [],
           error: request.error ?? null,
+          idleTerminals: this.terminals.idle().length,
         }
       : null;
   }
@@ -323,10 +324,9 @@ export class SelfRestart {
         .get()
     )
       reasons.push("Pending approvals");
-    if (
-      this.terminals.list({ output: false }).some((t) => t.status === "running")
-    )
-      reasons.push("Open terminals");
+    // A shell sitting at its prompt does not hold the update; it is closed.
+    if (this.terminals.busy().length)
+      reasons.push("Terminals running a command");
     if (
       this.controller.refreshing ||
       this.controller.tidying.size ||
@@ -397,6 +397,8 @@ export class SelfRestart {
     };
     const sourceBlock = await this.sourceReady(target);
     if (sourceBlock) return wait([sourceBlock]);
+    // Reading the process table takes a moment, so it is not done every tick.
+    await this.terminals.checkRunning({ maxAge: 5000 });
     if (!this.prepared) {
       request.status = "preparing";
       request.blockers = this.blockers();

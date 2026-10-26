@@ -127,10 +127,13 @@ export async function createHarness({
   let inflightWrites = 0,
     ready = false;
   const clients = new Set();
-  const terminals = new Terminals((type, data) => {
-    if (!["terminal-output", "terminal-closed"].includes(type))
-      controller?.event(null, null, type, data);
-  });
+  const terminals = new Terminals(
+    (type, data) => {
+      if (!["terminal-output", "terminal-closed"].includes(type))
+        controller?.event(null, null, type, data);
+    },
+    { locked: () => !!selfRestart?.gated },
+  );
   const json = (res, status, value, headers = {}) => {
     res.writeHead(status, {
       "Content-Type": "application/json",
