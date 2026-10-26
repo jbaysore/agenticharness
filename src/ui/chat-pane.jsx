@@ -27,7 +27,13 @@ import {
   providerStatusLabel,
   workspacePeersLabel,
 } from "./status.mjs";
-import { elapsed, greeting, providerName, workingLine } from "./voice.mjs";
+import {
+  elapsed,
+  greeting,
+  providerName,
+  turnTiming,
+  workingLine,
+} from "./voice.mjs";
 import { StepSummary } from "./steps.jsx";
 import { interleave } from "../core/steps.mjs";
 import { blockingGoals } from "../core/goals.mjs";
@@ -48,6 +54,7 @@ function Conversation({ chat, onOpenWork }) {
     else turns.push({ replies: [m] });
   }
   let lastModel = null;
+  const runs = new Map((chat.runs ?? []).map((run) => [run.id, run]));
   return turns.map(({ user, replies }) => {
     if (user) return <UserTurn key={user.id} message={user} />;
     const first = replies[0],
@@ -58,7 +65,8 @@ function Conversation({ chat, onOpenWork }) {
         replies,
         first.run_id ? chat.steps?.[first.run_id] : [],
       ),
-      lastWork = parts.findLastIndex((part) => part.steps.length);
+      lastWork = parts.findLastIndex((part) => part.steps.length),
+      timing = active ? null : turnTiming(runs.get(first.run_id));
     return (
       <article
         className={"message assistant " + (first.provider ?? "")}
@@ -69,6 +77,11 @@ function Conversation({ chat, onOpenWork }) {
           <span className={"provider-dot " + first.provider} />
           <strong>{providerName(first.provider)}</strong>
           {model && <span>{model}</span>}
+          {timing && (
+            <time className="turn-timing" title={timing.title}>
+              {timing.label}
+            </time>
+          )}
           <a
             href={`/?chat=${chat.id}#${first.id}`}
             title="Link to this message"

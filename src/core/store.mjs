@@ -1100,7 +1100,7 @@ export class Store {
         .all(id),
       runs: this.db
         .prepare(
-          "SELECT * FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30",
+          "SELECT * FROM runs WHERE conversation_id=? ORDER BY created_at DESC",
         )
         .all(id),
       steps: this.steps(id),

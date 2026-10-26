@@ -24,3 +24,23 @@ export function elapsed(since, now = Date.now()) {
   if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
+
+// How long a finished turn took and when it ended, for the hover on its
+// byline. The time drops the date while it is still today.
+export function turnTiming(run, now = new Date()) {
+  if (!run?.ended_at || !run.created_at) return null;
+  const ended = new Date(run.ended_at),
+    took = elapsed(run.created_at, ended.getTime()),
+    verb =
+      run.status === "completed"
+        ? "Worked for"
+        : run.status === "failed"
+          ? "Failed after"
+          : "Stopped after",
+    time = ended.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+    sameDay = ended.toDateString() === now.toDateString();
+  return {
+    label: `${verb} ${took} · ${sameDay ? time : `${ended.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`}`,
+    title: ended.toLocaleString(),
+  };
+}

@@ -1066,7 +1066,17 @@ small {
   opacity: 0;
   transition: opacity var(--dur-fast);
 }
+.message-byline .turn-timing {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--dur-fast);
+  font-variant-numeric: tabular-nums;
+}
+.message-byline .turn-timing + a {
+  margin-left: 0;
+}
 .message:hover .message-byline a,
+.message:hover .message-byline .turn-timing,
 .message-byline a:focus-visible {
   opacity: 1;
 }
