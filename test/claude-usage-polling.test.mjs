@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createClaudeUsageTracker } from "../src/security/claude-usage.mjs";
 import { inspectClaude, usageOf } from "../src/providers/claude.mjs";
+import { Store } from "../src/core/store.mjs";
+import { Controller } from "../src/core/controller.mjs";
 
 const auth = {
   loggedIn: true,
@@ -240,4 +242,112 @@ test("native usage errors reach the shared backoff instead of being discarded", 
     }),
     (actual) => actual === error,
   );
+});
+
+function idleProvider(t, responses) {
+  t.mock.timers.enable({
+    apis: ["Date", "setTimeout"],
+    now: Date.parse("2026-10-22T13:00:00Z"),
+  });
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {}),
+    usageForAccount = createClaudeUsageTracker();
+  let reads = 0,
+    pending;
+  controller.refreshProviders = () => {
+    pending = inspectClaude(process.cwd(), {
+      readAuth: async () => ({ ...auth }),
+      baseOptions: () => ({}),
+      usageForAccount,
+      readUsage: async () => {
+        const response = responses[reads++];
+        if (response instanceof Error) throw response;
+        return response;
+      },
+      queryFn: () => ({
+        supportedModels: async () => [{ value: "opus", displayName: "Opus" }],
+        close() {},
+      }),
+    }).then((provider) => {
+      controller.providers = [provider];
+      controller.scheduleProviderRefresh();
+    });
+    return pending;
+  };
+  t.after(async () => {
+    await controller.close();
+    store.close();
+  });
+  return {
+    controller,
+    get provider() {
+      return controller.providers[0];
+    },
+    get reads() {
+      return reads;
+    },
+    async advance(ms) {
+      t.mock.timers.tick(ms);
+      await pending;
+    },
+  };
+}
+
+for (const previouslyVerified of [false, true]) {
+  test(`idle Claude verification retries automatically after ${previouslyVerified ? "a stale reading" : "a failed startup check"}`, async (t) => {
+    const f = idleProvider(t, [
+      ...(previouslyVerified ? [reading()] : []),
+      incomplete,
+      new Error("temporary lookup failure"),
+      null,
+      reading(31),
+    ]);
+    if (previouslyVerified) {
+      await f.controller.refreshProviders();
+      await f.advance(60_000);
+    }
+    await f.controller.refreshProviders();
+    assert.equal(f.provider.connected, true);
+    assert.equal(
+      f.provider.usage.verificationStatus,
+      previouslyVerified ? "unknown" : "blocked",
+    );
+    assert.equal(Boolean(f.provider.blockReason), !previouslyVerified);
+
+    for (const delay of [300_000, 600_000, 900_000]) {
+      const before = f.reads;
+      await f.advance(delay - 1);
+      assert.equal(f.reads, before, "must respect the usage monitor's backoff");
+      await f.advance(1);
+      assert.equal(f.reads, before + 1, "must retry without user activity");
+    }
+    assert.equal(f.provider.blockReason, null);
+    assert.equal(f.provider.usage.verificationStatus, "confirmed");
+    assert.equal(f.provider.usage.windows[0].usedPercent, 31);
+    const recoveredReads = f.reads;
+    await f.advance(30 * 60_000);
+    assert.equal(
+      f.reads,
+      recoveredReads,
+      "successful verification ends failure retries",
+    );
+  });
+}
+
+test("idle retries honor Retry-After and keep a confirmed paid-usage boundary blocked", async (t) => {
+  const error = Object.assign(new Error("temporary rate limit"), {
+    status: 429,
+    headers: { "retry-after": "1200" },
+  });
+  const f = idleProvider(t, [
+    error,
+    { rate_limits: { extra_usage: { is_enabled: true } } },
+  ]);
+  await f.controller.refreshProviders();
+  await f.advance(1_199_999);
+  assert.equal(f.reads, 1);
+  await f.advance(1);
+  assert.equal(f.reads, 2);
+  assert.match(f.provider.blockReason, /Paid Claude extra usage is enabled/);
+  assert.equal(f.provider.usage.verificationStatus, "blocked");
 });

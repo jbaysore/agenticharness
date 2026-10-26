@@ -171,17 +171,25 @@ export class Controller extends EventEmitter {
     });
     return this.refreshing;
   }
-  // Provider usage is only read on demand, so a limit that has reset would keep
-  // showing as used. Re-read just after the next window resets, and keep
-  // retrying while a provider is still out of usage past its reset time.
+  // Provider usage is only read on demand. Retry failed lookups at the monitor's
+  // backoff deadline even while idle, and re-read quota windows after reset.
   scheduleProviderRefresh(now = Date.now()) {
     clearTimeout(this.providerTimer);
-    const resets = [];
+    const resets = [],
+      retries = [];
     let overdue = false;
     for (const p of this.providers) {
+      if (p.usage?.lookupProblem) {
+        const retryAt = Date.parse(p.usage.nextCheckAt);
+        if (Number.isFinite(retryAt))
+          retries.push(Math.max(1000, retryAt - now));
+      }
       const windows = usageWindows(p);
       // Out of usage with no reset still ahead: ask again soon.
-      if (isUsageExhausted(p.blockReason) && !windows.some((w) => w.resetsAt > now))
+      if (
+        isUsageExhausted(p.blockReason) &&
+        !windows.some((w) => w.resetsAt > now)
+      )
         overdue = true;
       for (const w of windows) {
         if (w.remaining === 0 && !(w.resetsAt > now)) overdue = true;
@@ -190,6 +198,7 @@ export class Controller extends EventEmitter {
     }
     const next = Math.min(...resets.filter((at) => at > now)),
       delay = Math.min(
+        ...retries,
         Number.isFinite(next) ? next - now + 5000 : Infinity,
         overdue ? 60000 : Infinity,
       );
