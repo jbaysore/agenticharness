@@ -196,9 +196,10 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     finished = true;
     resolveDone({ status: completedTurn.status, error: completedTurn.error });
   };
-  const updateGoal = (status) => {
+  const updateGoal = (status, objective) => {
     const next = normalizeGoalStatus(status);
-    if (next !== reportedGoalStatus) ctx.goalState?.(next);
+    if (next !== reportedGoalStatus || objective)
+      ctx.goalState?.(next, objective);
     reportedGoalStatus = next;
     goalStatus = next;
     finishCompleted();
@@ -391,7 +392,10 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     }
     if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
       goalVersion++;
-      updateGoal(method === "thread/goal/cleared" ? "cleared" : p.goal?.status);
+      updateGoal(
+        method === "thread/goal/cleared" ? "cleared" : p.goal?.status,
+        p.goal?.objective,
+      );
       ctx.emit("work", {
         kind: "goal",
         provider: "codex",
@@ -502,7 +506,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       try {
         const { goal: saved } = await rpc.call("thread/goal/get", { threadId });
         if (version === goalVersion)
-          updateGoal(saved ? saved.status : "cleared");
+          updateGoal(saved ? saved.status : "cleared", saved?.objective);
       } catch {
         // Reading a saved Goal can resolve a legacy hold; a failed read cannot.
         if (version === goalVersion) updateGoal("unknown");
@@ -524,13 +528,18 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       const version = goalVersion;
       const { goal: set } = await rpc.call("thread/goal/set", {
         threadId,
-        // A permission continuation paused this same native Goal. Reactivate
-        // it without replacing its objective or resetting its budget.
-        ...(!ctx.continuing && { objective: ctx.goalObjective ?? ctx.text }),
+        // A permission continuation or a resume reactivates this same paused
+        // native Goal without replacing its objective or resetting its budget.
+        // A resumed Goal that Codex no longer has is set again from Harness's copy.
+        ...(!ctx.continuing &&
+          (!ctx.resumeGoal ||
+            (goalStatus === "cleared" && ctx.goalObjective)) && {
+            objective: ctx.goalObjective ?? ctx.text,
+          }),
         status: "active",
         origin: "user",
       });
-      if (version === goalVersion) updateGoal(set.status);
+      if (version === goalVersion) updateGoal(set.status, set.objective);
       started = await soon;
     }
     if (!started) {
@@ -565,7 +574,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
         status: "active",
         origin: "user",
       });
-      if (version === goalVersion) updateGoal(set.status);
+      if (version === goalVersion) updateGoal(set.status, set.objective);
     }
     timer = setInterval(async () => {
       if (polling || finished || rpc.closed) return;

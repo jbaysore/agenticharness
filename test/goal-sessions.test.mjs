@@ -10,6 +10,7 @@ import { Controller } from "../src/core/controller.mjs";
 import { AsyncQueue } from "../src/core/queue.mjs";
 import { runCodex } from "../src/providers/codex.mjs";
 import { runClaude } from "../src/providers/claude.mjs";
+import { claudeContent } from "../src/providers/attachments.mjs";
 
 const deferred = () => Promise.withResolvers();
 const flush = async () => {
@@ -517,4 +518,135 @@ test("a runner ending without confirming its Goal leaves a durable unknown hold"
         store.close();
       }
     });
+});
+
+test("a stopped Goal pauses with its objective and resumes without retyping it", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  const chat = store.createConversation({
+    projectId: store.addProject("Fixture", process.cwd()).id,
+    mode: "goal",
+  });
+  controller.providers = [
+    { id: "codex", models: [{ id: "fixture", efforts: [] }] },
+  ];
+  const turns = [],
+    ready = [deferred(), deferred()];
+  controller.runners.codex = async (ctx) => {
+    const i = turns.push(ctx) - 1;
+    ctx.saveSession({ id: "pausable-goal" });
+    ctx.goalState("active");
+    ready[i].resolve();
+    await new Promise((resolve) =>
+      ctx.signal.addEventListener("abort", resolve, { once: true }),
+    );
+    return { status: "cancelled" };
+  };
+  const goal = () => store.conversation(chat.id).sessions.codex.goal;
+  try {
+    assert.throws(
+      () =>
+        controller.send(chat.id, {
+          actionId: "goal-resume-before-any-goal",
+          provider: "codex",
+          model: "fixture",
+          resumeGoal: true,
+        }),
+      /no paused Goal/,
+    );
+    controller.send(chat.id, {
+      actionId: "goal-to-pause-fixture",
+      text: "Ship the release notes",
+      provider: "codex",
+      model: "fixture",
+    });
+    let task = controller.active.get(chat.id).task;
+    await ready[0].promise;
+    controller.cancel(chat.id);
+    await task;
+    assert.equal(goal().status, "paused");
+    assert.equal(goal().objective, "Ship the release notes");
+    assert.equal(store.restartBlockingGoals().length, 0);
+
+    // The paused Goal survives a mode change and resumes in Goal mode.
+    controller.setMode(chat.id, "default");
+    controller.send(chat.id, {
+      actionId: "goal-resume-fixture",
+      provider: "codex",
+      model: "fixture",
+      resumeGoal: true,
+    });
+    task = controller.active.get(chat.id).task;
+    await ready[1].promise;
+    assert.equal(store.conversation(chat.id).mode, "goal");
+    assert.equal(turns[1].mode, "goal");
+    assert.equal(turns[1].resumeGoal, true);
+    assert.equal(turns[1].continuing, false);
+    assert.equal(turns[1].goalObjective, "Ship the release notes");
+    assert.match(turns[1].text, /Resume the paused goal/);
+    assert.equal(goal().objective, "Ship the release notes");
+    assert.throws(
+      () =>
+        controller.send(chat.id, {
+          actionId: "goal-resume-while-running",
+          provider: "codex",
+          model: "fixture",
+          resumeGoal: true,
+        }),
+      /no paused Goal/,
+    );
+    controller.cancel(chat.id);
+    await task;
+    assert.equal(goal().status, "paused");
+    assert.equal(goal().objective, "Ship the release notes");
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+test("Codex resumes a paused native Goal without replacing its objective", async () => {
+  const f = codexFixture(
+    { continuing: false, resumeGoal: true, goalObjective: "Saved objective" },
+    "paused",
+  );
+  try {
+    await f.started;
+    const set = f.calls.find((c) => c.method === "thread/goal/set");
+    assert.equal(set.params.status, "active");
+    assert.equal(Object.hasOwn(set.params, "objective"), false);
+  } finally {
+    f.abort.abort();
+    f.rpc.close();
+    await f.run.catch(() => {});
+  }
+});
+
+test("Codex sets a resumed Goal again when its native copy is gone", async () => {
+  const f = codexFixture(
+    { continuing: false, resumeGoal: true, goalObjective: "Saved objective" },
+    null,
+  );
+  try {
+    await f.started;
+    const set = f.calls.find((c) => c.method === "thread/goal/set");
+    assert.equal(set.params.objective, "Saved objective");
+  } finally {
+    f.abort.abort();
+    f.rpc.close();
+    await f.run.catch(() => {});
+  }
+});
+
+test("Claude resumes a paused Goal by setting its saved objective again", async () => {
+  assert.equal(
+    await claudeContent({
+      mode: "goal",
+      resumeGoal: true,
+      continuing: false,
+      goalObjective: "Saved objective",
+      text: "Resume the paused goal.",
+    }),
+    "/goal Saved objective",
+  );
 });

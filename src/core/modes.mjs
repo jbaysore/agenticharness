@@ -32,6 +32,10 @@ export const MODE_SUGGESTION_INSTRUCTIONS = `You may call suggest_mode when anot
 // Goal stays on until the objective is met. The agent is not offered a way out.
 export const GOAL_INSTRUCTIONS = `Goal mode: stay in Goal until the objective is met. Do not suggest another mode and do not enter plan mode. You may ask a question when only the user can decide. Harness shows it for 60 seconds. If nobody answers, choose the path that best completes the objective and continue, and do not ask that question again. A permission request that needs the user is declined so you can continue without it.`;
 
+// The message a resumed Goal's turn starts with when the user adds none.
+export const GOAL_RESUME_TEXT =
+  "Resume the paused goal. Pick up from this session's saved progress and do not repeat completed work.";
+
 export const GOAL_QUESTION_TIMEOUT_MS = 60_000;
 export const GOAL_QUESTION_LIMIT = 3;
 export const GOAL_QUESTION_TIMEOUT =

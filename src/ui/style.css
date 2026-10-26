@@ -1867,6 +1867,15 @@ small {
   text-decoration: underline;
   cursor: pointer;
 }
+.notice.goal-paused .goal-objective {
+  display: -webkit-box;
+  margin: 4px 0;
+  color: var(--text);
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: pre-wrap;
+}
 .reconnect-banner {
   border-radius: 0;
   border-left: 0;

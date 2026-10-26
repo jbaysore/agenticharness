@@ -36,7 +36,7 @@ import {
 } from "./voice.mjs";
 import { StepSummary } from "./steps.jsx";
 import { interleave } from "../core/steps.mjs";
-import { blockingGoals } from "../core/goals.mjs";
+import { blockingGoals, resumableGoals } from "../core/goals.mjs";
 
 // A turn's byline names the agent once, and the model only when it changed.
 // Below it the turn reads in order: short progress updates, each followed by
@@ -577,6 +577,42 @@ export function ChatPane({
       setBusy(false);
     }
   }
+  // Resuming reactivates the paused Goal with its saved objective, on the
+  // agent that owns it. The composer's draft is left alone.
+  async function resumeGoal(goal) {
+    if (!chat || busy || sending.current || chat.activeRun) return;
+    const sameAgent = goal.provider === provider;
+    const agentModel = sameAgent
+      ? model
+      : (chat.runs?.find((r) => r.provider === goal.provider)?.model ??
+        providers
+          .find((p) => p.id === goal.provider)
+          ?.models.find((m) => !m.disabled)?.id);
+    if (!agentModel) {
+      report(new Error(`Connect ${providerName(goal.provider)} to resume.`));
+      return;
+    }
+    setBusy(true);
+    sending.current = true;
+    try {
+      await api(`/api/chats/${chat.id}/messages`, {
+        actionId: crypto.randomUUID(),
+        provider: goal.provider,
+        model: agentModel,
+        effort: sameAgent ? effort || null : null,
+        permissions,
+        mode: "goal",
+        resumeGoal: true,
+      });
+      await reload(chat.id);
+      await refresh();
+    } catch (e) {
+      report(e);
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
+  }
   useImperativeHandle(ref, () => ({
     send,
     focus: () => input.current?.focus(),
@@ -600,6 +636,13 @@ export function ChatPane({
   };
   const title = chat?.title ?? "New conversation",
     marker = chatMarker(chat);
+  // A paused Goal is offered for resuming while the chat is still in Goal
+  // mode, or while its turn is the latest one.
+  const pausedGoals = resumableGoals(chat).filter(
+    (goal) =>
+      goal.provider !== "cursor" &&
+      (chat.mode === "goal" || chat.runs?.[0]?.id === goal.runId),
+  );
   const finishedPlan = chat?.runs?.[0];
   const planReady =
     chat &&
@@ -784,6 +827,30 @@ export function ChatPane({
             waiting. Send a message to continue, or use Stop work to stop it.
           </div>
         )}
+        {!chat?.activeRun &&
+          pausedGoals.map((goal) => (
+            <div className="notice goal-paused" key={goal.provider}>
+              <strong>
+                {goal.status === "usageLimited"
+                  ? "Goal stopped at a usage limit."
+                  : "Goal paused."}
+              </strong>{" "}
+              {goal.objective && (
+                <span className="goal-objective" title={goal.objective}>
+                  {goal.objective}
+                </span>
+              )}{" "}
+              Resume picks up where {providerName(goal.provider)} left off.
+              <button
+                type="button"
+                className="notice-dismiss"
+                disabled={busy || modeBusy || permissionsBusy}
+                onClick={() => resumeGoal(goal)}
+              >
+                Resume goal
+              </button>
+            </div>
+          ))}
         {/* A finished plan that was not confirmed in the turn uses the same
             card. Confirming leaves plan mode and builds. Keep planning hides
             it for that run, including after Cursor declines its plan. */}
@@ -984,6 +1051,11 @@ export function ChatPane({
                 type="button"
                 className="send-button stopping"
                 aria-label="Stop work"
+                title={
+                  mode === "goal"
+                    ? "Pause the goal. You can resume it later."
+                    : "Stop work"
+                }
                 onClick={act(() => api(`/api/chats/${chat.id}/cancel`, {}))}
               >
                 <Icon name="stop" size={16} />

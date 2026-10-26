@@ -36,6 +36,7 @@ import {
   GOAL_QUESTION_LIMIT,
   GOAL_QUESTION_TIMEOUT,
   GOAL_QUESTION_TIMEOUT_MS,
+  GOAL_RESUME_TEXT,
   MODE_SUGGESTION_INSTRUCTIONS,
   askHostAllowed,
   checkMode,
@@ -70,7 +71,7 @@ import {
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
 import { restartTool } from "./self-restart.mjs";
-import { blockingGoals, goalStopped } from "./goals.mjs";
+import { blockingGoals, goalStopped, resumableGoals } from "./goals.mjs";
 import { isUsageExhausted } from "../security/billing.mjs";
 import { usageWindows } from "../ui/status.mjs";
 import {
@@ -235,6 +236,11 @@ export class Controller extends EventEmitter {
     if (prepared.duplicate) return prepared.duplicate;
     this.selfRestart?.assertAdmission();
     const active = this.active.get(chatId);
+    if (
+      prepared.resumeGoal &&
+      (active || this.store.queuedInputs(chatId).length)
+    )
+      throw new Error("Resume the Goal after this chat's current work ends");
     // A running turn keeps the message until it finishes, unless /steer
     // redirects that turn. A stopped turn still drains its queue afterward.
     if (active && !releasing) {
@@ -261,10 +267,21 @@ export class Controller extends EventEmitter {
       permissions,
       mode,
       parsed = false,
+      resumeGoal = false,
     },
   ) {
     const chat = this.store.conversation(chatId);
     if (!chat) throw new Error("Conversation not found");
+    // Resuming reactivates the saved Goal; the message only marks the turn.
+    if (resumeGoal) {
+      if (!resumableGoals(chat).some((g) => g.provider === provider))
+        throw new Error(
+          "This agent has no paused Goal to resume. Send the objective as a new Goal.",
+        );
+      mode = "goal";
+      parsed = true;
+      if (typeof text !== "string" || !text.trim()) text = GOAL_RESUME_TEXT;
+    }
     if (typeof text !== "string" || text.length > 250000)
       throw new Error("Enter a message under 250,000 characters");
     if (typeof actionId !== "string" || !/^[-\w]{16,100}$/.test(actionId))
@@ -327,6 +344,7 @@ export class Controller extends EventEmitter {
       effort: effort || null,
       permissions,
       mode,
+      resumeGoal: Boolean(resumeGoal),
     };
   }
   startTurn(prepared) {
@@ -343,7 +361,12 @@ export class Controller extends EventEmitter {
       attachments: prepared.files.map(attachmentInfo),
     });
     const abort = new AbortController();
-    this.active.set(chatId, { run, abort, pendingSteers: [] });
+    this.active.set(chatId, {
+      run,
+      abort,
+      pendingSteers: [],
+      resumeGoal: prepared.resumeGoal,
+    });
     const entry = this.active.get(chatId);
     entry.flushSteer = () => this.flushSteers(chatId);
     if (chat.archived_at) this.store.setArchived(chatId, false);
@@ -716,11 +739,26 @@ export class Controller extends EventEmitter {
       this.releaseQueue(chat.id);
       return;
     }
+    const resumeGoal =
+      chat.mode === "goal" && Boolean(this.active.get(chat.id)?.resumeGoal);
+    const savedGoal = chat.sessions[run.provider]?.goal;
     if (
       chat.mode === "goal" ||
       blockingGoals(chat).some((g) => g.provider === run.provider)
     )
-      this.store.setGoalState(chat.id, run.provider, run.id, "starting");
+      this.store.setGoalState(
+        chat.id,
+        run.provider,
+        run.id,
+        "starting",
+        // A new Goal message replaces the objective; resuming or continuing
+        // keeps the saved one until the provider reports its own.
+        modeChange?.mode === "goal" && chat.mode === "goal"
+          ? modeChange.objective
+          : chat.mode === "goal" && !resumeGoal && !continuing
+            ? text
+            : undefined,
+      );
     let actualModel =
       this.providers
         .find((p) => p.id === run.provider)
@@ -1327,7 +1365,12 @@ export class Controller extends EventEmitter {
       mode: chat.mode,
       continuing,
       startGoal,
-      goalObjective: startGoal ? modeChange.objective : undefined,
+      resumeGoal,
+      goalObjective: startGoal
+        ? modeChange.objective
+        : resumeGoal
+          ? savedGoal?.objective
+          : undefined,
       // An approved plan ends plan mode, so the chat goes on to build it.
       planApproved: () => {
         effectiveMode = "default";
@@ -1370,7 +1413,7 @@ export class Controller extends EventEmitter {
       billingConfirmation: this.store.setting("cursor-billing"),
       learnEfforts: (options) => this.learnCursorEfforts(options),
       saveSession: (incoming) => writeSession(incoming),
-      goalState: (status) => {
+      goalState: (status, objective) => {
         // A stopped/replaced runner cannot release a newer session's hold.
         if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id)
           return;
@@ -1379,6 +1422,9 @@ export class Controller extends EventEmitter {
           run.provider,
           run.id,
           status,
+          typeof objective === "string" && objective.trim()
+            ? objective
+            : undefined,
         );
         this.event(chat.id, run.id, "chat", updated);
       },
@@ -1699,7 +1745,7 @@ export class Controller extends EventEmitter {
       this.event(chatId, null, "chat", this.store.conversation(chatId));
       this.event(chatId, null, "work", {
         kind: "cancellation",
-        text: "Goal stopped at your request.",
+        text: "Goal paused at your request. Resume it any time.",
       });
       return { requested: true };
     }

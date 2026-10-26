@@ -34,3 +34,15 @@ export function sessionGoals(chat) {
 export function blockingGoals(chat) {
   return sessionGoals(chat).filter((goal) => !goalStopped(goal.status));
 }
+
+// A Goal the user paused, or one a usage limit stopped, can pick up where it
+// left off. Codex keeps the objective natively; Claude needs the saved one.
+const resumable = new Set(["paused", "usageLimited"]);
+
+export function resumableGoals(chat) {
+  return sessionGoals(chat).filter(
+    (goal) =>
+      resumable.has(goal.status) &&
+      (goal.provider === "codex" || Boolean(goal.objective)),
+  );
+}

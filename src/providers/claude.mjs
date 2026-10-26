@@ -626,7 +626,7 @@ export async function runClaude(
         pendingResult = null;
       if (event.type === "active_goal") {
         goalStatus = event.value ? "active" : "complete";
-        ctx.goalState?.(goalStatus);
+        ctx.goalState?.(goalStatus, event.value?.condition);
         ctx.emit("work", {
           kind: "goal",
           provider: "claude",

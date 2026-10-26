@@ -337,15 +337,26 @@ export class Store {
         ),
       );
   }
-  setGoalState(id, provider, runId, status) {
+  // The objective is kept so a paused Goal can resume without retyping it.
+  // Leave it undefined to keep the saved one; null forgets it.
+  setGoalState(id, provider, runId, status, objective) {
     const chat = this.conversation(id);
     if (!chat) return;
     const previous = chat.sessions[provider];
     const session = typeof previous === "string" ? { id: previous } : previous;
+    const kept =
+      objective === undefined ? session?.goal?.objective : objective || null;
     return this.updateConversation(id, {
       sessions: {
         ...chat.sessions,
-        [provider]: { ...session, goal: { runId, status: goalStatus(status) } },
+        [provider]: {
+          ...session,
+          goal: {
+            runId,
+            status: goalStatus(status),
+            ...(kept && { objective: kept }),
+          },
+        },
       },
     });
   }
