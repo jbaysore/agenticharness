@@ -2365,14 +2365,17 @@ small {
   padding: 3px 6px;
 }
 .terminal-container {
-  padding: 10px 3px 3px 10px;
   flex: 1;
   min-height: 0;
   min-width: 0;
   background: var(--bg-sunken);
 }
+/* The padding sits on .xterm, not its container: the fit addon subtracts the
+   terminal element's padding but counts all of its parent's height, so padding
+   there gave xterm a row more than fits and hid the prompt under the edge. */
 .terminal-container .xterm {
   height: 100%;
+  padding: 10px 3px 3px 10px;
 }
 .terminal-tabs {
   display: flex;
