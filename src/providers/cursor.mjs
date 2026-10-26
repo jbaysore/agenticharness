@@ -334,6 +334,14 @@ export function cursorQuestionOutcome(questions, answer) {
   };
 }
 
+// Cursor reports a dropped backend stream as reply text and still ends the
+// turn normally. It marks the error retriable, so Harness continues the turn.
+export const cursorStreamDropped = (text) =>
+  /\bError: RetriableError: [^\n]*$/.test(text.trimEnd());
+const streamRetries = 2;
+const continuePrompt =
+  "Continue where you left off. Your last response was cut off by a dropped connection.";
+
 export async function runCursor(ctx, deps = {}) {
   // Starting Cursor while its status is checked saves a second; nothing is
   // sent to a session until the account is confirmed.
@@ -360,7 +368,9 @@ export async function runCursor(ctx, deps = {}) {
   let sessionId,
     live = false,
     accepting = false,
-    killTimer;
+    killTimer,
+    promptText = "",
+    retries = 0;
   const pending = [];
   const nativeTasks = new Set();
   // Plan mode asks once. Accepting builds after this prompt; a later plan in
@@ -480,7 +490,10 @@ export async function runCursor(ctx, deps = {}) {
     const update = p?.update;
     if (method === "session/update" && update) {
       const nativeId = messageId(update);
-      if (nativeId) ctx.emit("text", { nativeId, delta: update.content.text });
+      if (nativeId) {
+        promptText += update.content.text;
+        ctx.emit("text", { nativeId, delta: update.content.text });
+      }
       if (
         ["tool_call", "tool_call_update", "plan", "usage_update"].includes(
           update.sessionUpdate,
@@ -568,8 +581,22 @@ export async function runCursor(ctx, deps = {}) {
     if (pending.length && !ctx.signal.aborted)
       rpc.notify("session/cancel", { sessionId });
     let result = await first;
+    const retryDropped = () => {
+      // A queued steer already continues the turn.
+      if (
+        pending.length ||
+        retries >= streamRetries ||
+        result.stopReason !== "end_turn" ||
+        !cursorStreamDropped(promptText)
+      )
+        return;
+      retries++;
+      pending.push({ text: continuePrompt });
+    };
+    retryDropped();
     while (pending.length && !ctx.signal.aborted) {
       const item = pending.shift();
+      promptText = "";
       if (item.mode)
         await rpc.call("session/set_mode", {
           sessionId,
@@ -592,15 +619,23 @@ export async function runCursor(ctx, deps = {}) {
         },
         timeout,
       );
+      retryDropped();
     }
-    const error = result.stopReason === "end_turn" ? null : result.stopReason;
+    // Retries spent and the stream still dropped: the turn did not finish.
+    const dropped =
+      result.stopReason === "end_turn" && cursorStreamDropped(promptText);
+    const error = dropped
+      ? "Cursor's connection dropped and automatic retries did not recover it. Send a message to continue."
+      : result.stopReason === "end_turn"
+        ? null
+        : result.stopReason;
     if (isUsageExhausted(error))
       ctx.emit("work", { kind: "billing-stop", reason: error });
     return {
       status:
         ctx.signal.aborted || result.stopReason === "cancelled"
           ? "cancelled"
-          : result.stopReason === "end_turn"
+          : result.stopReason === "end_turn" && !dropped
             ? "completed"
             : "failed",
       error,

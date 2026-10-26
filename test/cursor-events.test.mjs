@@ -9,8 +9,10 @@ import {
   cursorModels,
   cursorQuestionOutcome,
   cursorSpeedFollowUp,
+  cursorStreamDropped,
   cursorWorkKind,
   isHarnessTool,
+  runCursor,
 } from "../src/providers/cursor.mjs";
 
 test("Harness's own history and browser tools skip Cursor's prompt; other requests do not", () => {
@@ -371,4 +373,97 @@ test("Cursor effort is set only when it differs, and must be confirmed", async (
   );
   // A model without effort levels ignores the setting.
   await configureCursorEffort(rpc("low"), "s", current.slice(0, 2), "low");
+});
+
+const dropText =
+  "\n\nError: RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)";
+
+test("Cursor's retriable stream error is recognised only at the end of a reply", () => {
+  assert.equal(cursorStreamDropped("Working on it." + dropText), true);
+  assert.equal(cursorStreamDropped(dropText + "\n"), true);
+  assert.equal(cursorStreamDropped("All done."), false);
+  assert.equal(
+    cursorStreamDropped("Earlier I saw" + dropText + "\n\nThen it recovered."),
+    false,
+  );
+});
+
+// Each prompt replies with the next text in `replies`, then ends the turn.
+async function runDropping(replies) {
+  const calls = [],
+    notified = [];
+  let onNotification;
+  const rpc = {
+    closed: false,
+    promptCapabilities: {},
+    on(event, fn) {
+      if (event === "notification") onNotification = fn;
+    },
+    notify(method) {
+      notified.push(method);
+    },
+    close() {
+      this.closed = true;
+    },
+    async call(method, params) {
+      calls.push({ method, params });
+      if (method === "session/new")
+        return {
+          sessionId: "session-1",
+          models: { availableModels: [{ modelId: "m", name: "Fixture" }] },
+          configOptions: [{ id: "model", currentValue: "m" }],
+        };
+      if (method !== "session/prompt") return {};
+      const text = replies.shift() ?? "Done.";
+      onNotification({
+        method: "session/update",
+        params: {
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text },
+          },
+        },
+      });
+      return { stopReason: "end_turn" };
+    },
+  };
+  const result = await runCursor(
+    {
+      project: { path: process.cwd() },
+      signal: new AbortController().signal,
+      emit() {},
+      saveSession() {},
+      text: "Build it",
+      model: "m",
+      mode: "default",
+      billingConfirmation: { fingerprint: "fixture", disabled: true },
+      approve: async () => ({ allow: true }),
+    },
+    {
+      cursorAuth: async () => ({ connected: true, fingerprint: "fixture" }),
+      openCursor: async () => rpc,
+    },
+  );
+  const prompts = calls
+    .filter((call) => call.method === "session/prompt")
+    .map((call) => call.params.prompt.map((block) => block.text).join("\n"));
+  return { result, prompts, notified };
+}
+
+test("a dropped Cursor stream continues the same turn automatically", async () => {
+  const { result, prompts, notified } = await runDropping([
+    "Editing the sidebar." + dropText,
+    "Finished the sidebar.",
+  ]);
+  assert.equal(result.status, "completed");
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /^Continue where you left off/);
+  assert.deepEqual(notified, []);
+});
+
+test("a Cursor stream that keeps dropping stops after two retries and fails", async () => {
+  const { result, prompts } = await runDropping([dropText, dropText, dropText]);
+  assert.equal(prompts.length, 3);
+  assert.equal(result.status, "failed");
+  assert.match(result.error, /connection dropped/);
 });
