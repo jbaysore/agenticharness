@@ -37,6 +37,7 @@ import { landTool } from "./core/worktrees.mjs";
 import { askUserTool } from "./core/questions.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
+import { browserStreams } from "./core/browser-stream.mjs";
 import { uploadAttachment, serveAttachment } from "./core/attachments.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
 import { openReviewer } from "./providers/workers.mjs";
@@ -942,29 +943,36 @@ export async function createHarness({
   // first (its default is 5), the next request on it becomes a Cloudflare 502.
   server.keepAliveTimeout = 120_000;
   server.headersTimeout = 125_000;
+  // Terminals and the Browser panel stream over WebSockets with the same access.
+  const authorizeStream = async (req) => {
+    if (!req.headers.origin || !safeOrigin(req, localOrigin, publicOrigin))
+      return { status: 403 };
+    if (!ready || selfRestart?.gated) return { status: 503 };
+    let ownerExpiresAt = null;
+    if (publicOrigin && req.headers.host === new URL(publicOrigin).host) {
+      const assertion = req.headers["cf-access-jwt-assertion"];
+      if (!(await ownerSignedIn?.(assertion))) return { status: 403 };
+      // The assertion is already signature-verified. Enforce its expiry on
+      // input too, since a live stream can outlast the upgrade request.
+      ownerExpiresAt =
+        JSON.parse(
+          Buffer.from(assertion.split(".")[1], "base64url").toString("utf8"),
+        ).exp * 1000;
+    }
+    const allowed = () =>
+      ownerExpiresAt !== null
+        ? Date.now() < ownerExpiresAt
+        : onHost(req, localOrigin) || auth.authenticated(req);
+    return allowed() ? { allowed } : { status: 401 };
+  };
+  const browser = startProviders ? new Browser(dataDir) : null;
   const terminalSockets = terminalStreams(server, {
     terminals,
-    authorize: async (req) => {
-      if (!req.headers.origin || !safeOrigin(req, localOrigin, publicOrigin))
-        return { status: 403 };
-      if (!ready || selfRestart?.gated) return { status: 503 };
-      let ownerExpiresAt = null;
-      if (publicOrigin && req.headers.host === new URL(publicOrigin).host) {
-        const assertion = req.headers["cf-access-jwt-assertion"];
-        if (!(await ownerSignedIn?.(assertion))) return { status: 403 };
-        // The assertion is already signature-verified. Enforce its expiry on
-        // input too, since a live stream can outlast the upgrade request.
-        ownerExpiresAt =
-          JSON.parse(
-            Buffer.from(assertion.split(".")[1], "base64url").toString("utf8"),
-          ).exp * 1000;
-      }
-      const allowed = () =>
-        ownerExpiresAt !== null
-          ? Date.now() < ownerExpiresAt
-          : onHost(req, localOrigin) || auth.authenticated(req);
-      return allowed() ? { allowed } : { status: 401 };
-    },
+    authorize: authorizeStream,
+  });
+  const browserSockets = browserStreams(server, {
+    host: browser?.host,
+    authorize: authorizeStream,
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -976,7 +984,7 @@ export async function createHarness({
     dataDir,
     probePath: join(dataDir, "connection-probe"),
     bridgeUrl: localOrigin,
-    browser: startProviders ? new Browser(dataDir) : null,
+    browser,
     worktreeRoot: join(dataDir, "worktrees"),
     openReviewer,
   });
@@ -1024,6 +1032,7 @@ export async function createHarness({
       tunnelProcess?.kill();
       await controller.close();
       await terminalSockets.close();
+      await browserSockets.close();
       await terminals.closeAll();
       for (const client of clients) client.end();
       server.closeIdleConnections();

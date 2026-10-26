@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { RpcProcess } from "./rpc.mjs";
 import { screenshotLinks } from "./browser-images.mjs";
+import { BrowserHost } from "./browser-host.mjs";
 
 const cli = join(
   dirname(
@@ -120,27 +121,31 @@ export const browserTitle = (name, input = {}) => {
 
 // One Chrome, driven through Playwright MCP and shared by every chat. Harness
 // owns it, so a page survives between turns, sign-ins persist in its own
-// profile, and every agent's browser actions pass the same approval.
+// profile, and every agent's browser actions pass the same approval. Chrome
+// runs without a window; the Browser panel shows it.
 export class Browser {
-  constructor(dataDir, { command = process.execPath, args } = {}) {
+  constructor(dataDir, { command = process.execPath, args, host } = {}) {
     this.dir = join(dataDir, "browser");
     this.command = command;
-    this.args = args ?? [
-      cli,
-      "--browser",
-      "chrome",
-      "--user-data-dir",
-      join(this.dir, "profile"),
-      "--output-dir",
-      join(this.dir, "output"),
-    ];
+    this.args = args;
+    this.host =
+      host ?? (args ? null : new BrowserHost(join(this.dir, "profile")));
+    // If Chrome goes away, MCP's connection to it is stale; start both again.
+    this.host?.on("closed", () => this.close({ host: false }));
     this.queue = Promise.resolve();
   }
   async connect() {
     if (this.rpc && !this.rpc.closed) return this.rpc;
     this.starting ??= (async () => {
       await mkdir(this.dir, { recursive: true });
-      const rpc = new RpcProcess(this.command, this.args, { cwd: this.dir });
+      const args = this.args ?? [
+        cli,
+        "--cdp-endpoint",
+        await this.host.endpoint(),
+        "--output-dir",
+        join(this.dir, "output"),
+      ];
+      const rpc = new RpcProcess(this.command, args, { cwd: this.dir });
       // Playwright MCP may ask for workspace roots; it has none.
       rpc.on("request", (m) =>
         m.method === "roots/list"
@@ -195,6 +200,7 @@ export class Browser {
           isError: true,
           content: [{ type: "text", text: failure }],
         };
+      await this.host?.start();
       const result = await (
         await this.connect()
       ).call("tools/call", { name, arguments: args ?? {} }, 5 * 60 * 1000);
@@ -207,9 +213,10 @@ export class Browser {
     this.queue = next.catch(() => {});
     return next;
   }
-  close() {
+  close({ host = true } = {}) {
     this.rpc?.close();
     this.rpc = null;
+    if (host) this.host?.close();
   }
 }
 // An MCP result as plain text, for channels that carry text only.

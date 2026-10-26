@@ -45,6 +45,12 @@ const paths = {
   refresh: "M20 10a8 8 0 1 0-1 7M20 4v6h-6",
   check: "m5 12 4 4 10-10",
   link: "m9 15 6-6M7 14l-2 2a3 3 0 0 0 4 4l4-4M11 8l4-4a3 3 0 0 1 4 4l-2 2",
+  globe:
+    "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-9 9h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9Z",
+  back: "M19 12H5m6-6-6 6 6 6",
+  forward: "M5 12h14m-6-6 6 6-6 6",
+  expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7",
+  collapse: "M19 11h-6V5M5 13h6v6M13 11l7-7M11 13l-7 7",
 };
 export function Icon({ name, size = 18 }) {
   return (

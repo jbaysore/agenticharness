@@ -16,6 +16,7 @@ import {
   TerminalView,
 } from "./terminal-session.jsx";
 import { terminalGroups } from "./terminal-groups.mjs";
+import { BrowserPane } from "./browser-pane.jsx";
 import { RulesModal } from "./rules-modal.jsx";
 import { SkillsModal } from "./skills-modal.jsx";
 import { UsageGlance } from "./usage-glance.jsx";
@@ -1496,6 +1497,7 @@ function App() {
               ["activity", "activity", "Work"],
               ["files", "file", "Files"],
               ["terminal", "terminal", "Terminal"],
+              ["browser", "globe", "Browser"],
             ].map(([id, icon, label]) => (
               <button
                 title={label}
@@ -1518,7 +1520,9 @@ function App() {
               <Icon name="close" size={16} />
             </button>
           </header>
-          {project ? (
+          {panel === "browser" ? (
+            <BrowserPane report={report} />
+          ) : project ? (
             <WorkspacePanel
               panel={panel}
               project={project}

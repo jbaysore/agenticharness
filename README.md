@@ -55,8 +55,11 @@ this too has only been checked with simulated providers.
 **Skills** are named instructions you write in the app. A message invokes one
 with its slash command, and that message includes the full text for Codex,
 Claude Code and Cursor.
-Every chat can also drive a shared Chrome on the host through Playwright MCP;
-in **Auto-review** the automatic reviewer approves each action that can change a
+Every chat can also drive a shared Chrome on the host through Playwright MCP.
+Chrome runs without a window of its own: the **Browser** tab in the work panel
+shows its pages live, follows the page an agent opens, and lets you click, type
+and navigate in it yourself; **Expand** shows it over the workspace at close to
+full size. Sign-ins persist in its profile. In **Auto-review** the automatic reviewer approves each action that can change a
 page, and in **Manual** each one asks you; read-only actions never ask.
 New conversations default to **Auto-review**. The permission picker saves each
 selection immediately, including during a turn. Harness pauses the agent and

@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { BROWSER_STREAM_PATH } from "./browser-stream.mjs";
 
 // Each terminal gets an ordered bidirectional stream. Output already lives in
 // its bounded in-memory replay buffer; typing never waits for HTTP or SQLite.
@@ -9,6 +10,9 @@ export function terminalStreams(server, { terminals, authorize }) {
     perMessageDeflate: false,
   });
   const upgrade = async (req, socket, head) => {
+    // The Browser panel's stream has its own handler.
+    if (new URL(req.url, "http://localhost").pathname === BROWSER_STREAM_PATH)
+      return;
     socket.on("error", () => {});
     const reject = (status, message) => {
       if (!socket.destroyed)

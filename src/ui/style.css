@@ -1925,7 +1925,7 @@ small {
 .panel-close {
   margin-left: auto;
 }
-@container (max-width: 370px) {
+@container (max-width: 480px) {
   .panel-tabs > button:not(.panel-close) {
     flex: 1;
     justify-content: center;
@@ -2473,6 +2473,109 @@ small {
 }
 .terminal-pane .terminal-container {
   flex: 1;
+}
+.browser-slot,
+.browser-slot > .browser-mount {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.browser-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.browser-panel.expanded {
+  position: fixed;
+  inset: 16px;
+  z-index: 35;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px #0008;
+}
+.browser-panel.expanded .browser-view canvas {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.browser-toolbar .icon-button {
+  width: 28px;
+  height: 28px;
+}
+.browser-toolbar form {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+}
+.browser-toolbar input {
+  width: 100%;
+  padding: 5px 9px;
+  font-size: 12px;
+  border-radius: 7px;
+}
+.browser-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.browser-tab {
+  display: flex;
+  align-items: center;
+  max-width: 180px;
+  flex-shrink: 0;
+  border-radius: 7px 7px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.browser-tab:hover {
+  background: var(--hover);
+}
+.browser-tab.active {
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+.browser-tab > button:first-child {
+  padding: 5px 4px 5px 9px;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browser-tab .icon-button {
+  width: 20px;
+  height: 20px;
+}
+.browser-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-sunken);
+}
+.browser-view canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  outline: none;
+}
+.browser-view canvas.hidden {
+  display: none;
+}
+.browser-view canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 .terminal-row .chat-open svg {
   flex-shrink: 0;
