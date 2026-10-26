@@ -63,6 +63,8 @@ export function checkMode(mode, provider) {
     throw new Error("Choose the default, ask, plan or goal mode");
   if (mode === "goal" && provider === "cursor")
     throw new Error("Cursor has no goal mode. Choose Codex or Claude Code.");
+  if (mode === "goal" && provider === "openrouter")
+    throw new Error("OpenRouter supports Default, Ask and Plan. Choose Codex or Claude Code for Goal mode.");
 }
 
 export const ASK_INSTRUCTIONS = `Ask mode: this turn is read-only. Answer questions and explain how the project works. You may read and search files, and you may use read-only history and browser tools. Creating, editing, or deleting files, running commands, landing commits, and changing a page are unavailable. You may suggest a mode change with suggest_mode; stay in Ask mode unless the user approves it.`;

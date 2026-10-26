@@ -68,6 +68,7 @@ export class Store {
       CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE OF content ON notes BEGIN INSERT INTO notes_fts(notes_fts,rowid,content) VALUES ('delete',old.rowid,old.content); INSERT INTO notes_fts(rowid,content) VALUES (new.rowid,new.content); END;
       CREATE TABLE IF NOT EXISTS comments(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), repository TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, body TEXT NOT NULL, revision TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS openrouter_sessions(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE, state TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), project_id TEXT NOT NULL REFERENCES projects(id), repository TEXT NOT NULL, file TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS runs_conversation ON runs(conversation_id,created_at);
       CREATE INDEX IF NOT EXISTS approvals_conversation ON approvals(conversation_id,status);
@@ -484,6 +485,7 @@ export class Store {
   moveConversation(id, projectId) {
     if (!this.conversation(id)) throw new Error("Conversation not found");
     if (!this.project(projectId)) throw new Error("Project not found");
+    this.db.prepare("DELETE FROM openrouter_sessions WHERE conversation_id=?").run(id);
     this.db
       .prepare(
         "UPDATE conversations SET project_id=?,sessions='{}',worktree=NULL,updated_at=? WHERE id=?",

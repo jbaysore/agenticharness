@@ -41,6 +41,7 @@ import { browserStreams } from "./core/browser-stream.mjs";
 import { uploadAttachment, serveAttachment } from "./core/attachments.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
 import { openReviewer } from "./providers/workers.mjs";
+import { OpenRouter } from "./providers/openrouter.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { terminalStreams } from "./core/terminal-stream.mjs";
 import { commandTool } from "./core/command-tool.mjs";
@@ -93,6 +94,7 @@ export async function createHarness({
   selfRestart: enableSelfRestart = startProviders,
   exitOnRestart = false,
   seedProject = process.env.HARNESS_INITIAL_PROJECT,
+  openrouterOptions = {},
 } = {}) {
   if (publicOrigin) {
     const url = new URL(publicOrigin);
@@ -118,6 +120,7 @@ export async function createHarness({
     .catch(() => null);
   await mkdir(join(dataDir, "connection-probe"), { recursive: true });
   const store = new Store(join(dataDir, "workspace.sqlite"));
+  const openrouter = new OpenRouter(store, dataDir, openrouterOptions);
   if (seedProject)
     store.addProject(basename(seedProject), await projectPath(seedProject));
   const auth = new Authentication(store),
@@ -461,6 +464,21 @@ export async function createHarness({
           return json(res, 200, {
             providers: await controller.refreshProviders(),
           });
+        if (path === "/api/providers/openrouter") {
+          if (method === "GET") return json(res, 200, await openrouter.settings());
+          if (method === "PUT") {
+            // Credentials and external-data consent are setup choices made in
+            // the authenticated UI; this route is not offered as a model tool.
+            const settings = await openrouter.configure(await readJson(req));
+            await controller.refreshOpenRouter();
+            return json(res, 200, settings);
+          }
+        }
+        if (path === "/api/providers/openrouter/catalog" && method === "POST") {
+          await openrouter.catalogRefresh();
+          await controller.refreshOpenRouter();
+          return json(res, 200, await openrouter.settings());
+        }
         if (path === "/api/providers/cursor/confirm" && method === "POST") {
           const body = await readJson(req);
           if (body.disabled !== true)
@@ -990,7 +1008,9 @@ export async function createHarness({
     browser,
     worktreeRoot: join(dataDir, "worktrees"),
     openReviewer,
+    openrouter,
   });
+  controller.providers = [await openrouter.inspect()];
   controller.tidyAll();
   controller.on("event", (event) => {
     const data = `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;

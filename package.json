@@ -17,6 +17,7 @@
     "test:terminal": "npm run build && node scripts/terminal-acceptance.mjs",
     "test:scroll": "npm run build && node scripts/scroll-acceptance.mjs",
     "test:models": "npm run build && node scripts/model-picker-acceptance.mjs",
+    "test:openrouter": "npm run build && node scripts/openrouter-acceptance.mjs",
     "test:history": "npm run build && node scripts/history-settings-acceptance.mjs",
     "test:self-restart": "npm run build && node scripts/self-restart-acceptance.mjs",
     "test:permissions": "npm run build && node scripts/permissions-acceptance.mjs",

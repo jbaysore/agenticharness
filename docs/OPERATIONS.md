@@ -71,6 +71,53 @@ to submit (Ctrl+Enter or Command+Enter also sends). The composer and dialogs
 follow the visible space above the keyboard. The sidebar scrolls on short screens
 so its settings remain reachable.
 
+## OpenRouter
+
+Open **Connections & usage → OpenRouter connection & model approvals**. This
+connection starts disabled, with no models approved and no stored API key.
+
+1. Choose **Refresh model catalog**. This reads public model metadata without
+   calling a model. Only free text models advertising tool calling are eligible.
+2. Select each exact model ID you accept. Review its catalog identity as well as
+   its display name. New catalog entries are never approved automatically.
+3. Enter an OpenRouter API key. It is protected with Windows DPAPI for your
+   Windows account, in `secrets/openrouter.dpapi` under Harness's data directory.
+   JSON exports and SQLite backups exclude the key; reconnect after restoring
+   data on another Windows account. Harness does not use environment API keys.
+4. Read and select the data-sharing consent, then **Enable OpenRouter** and
+   **Save approvals & connection**. Prompts, permitted project-file content and
+   supported attachments may be sent to OpenRouter and its hosting providers.
+5. Choose OpenRouter and an approved model in the chat composer.
+
+The model allowlist is independent of tool permissions and applies even in
+Override. Ask permits reading/searching but no commands or project changes.
+Plan holds changes until **Confirm and build**. Default uses the usual command
+and file-edit permission review. Upstream references remain read-only. Existing
+Codex/Claude subscription integrations perform automatic permission reviews;
+OpenRouter cannot be selected as a reviewer or delegated worker.
+
+Changing settings stops active OpenRouter turns and checks queued messages
+against the latest approvals. A request already sent to OpenRouter cannot be
+recalled. Revoked, unavailable, repriced or identity-changed models are blocked;
+review a changed model before approving it again. An empty allowlist blocks all
+OpenRouter inference. Uncheck **Enable OpenRouter** to disconnect, or select
+**Remove stored key when saving** to delete the credential.
+
+This version allows only zero-priced `:free` entries and sends zero-price limits
+on every request. It does not use automatic routers, cross-model fallback,
+paid plugins or credits. OpenRouter may choose a different host for the same
+approved model. Free-model capacity and daily limits come from OpenRouter.
+Rate-limit errors stop the turn without automatic retries or model substitutions.
+
+Each turn is capped at 20 model requests and 8,192 output tokens per request
+(lower when the selected model requires it). UTF-8 text attachments are limited
+to 256 KB and supported images to 4 MB. Other formats require an explicitly
+converted text/image attachment; Harness does not call paid file parsers.
+Transcripts and completed tool exchanges are saved locally. Interrupted tools
+are reported as uncertain to the next turn and are never automatically replayed.
+Context is bounded without silent trimming; use a new chat and bounded handoff
+when the selected model's context fills. Goal mode is unavailable.
+
 ## Working in several chats
 
 Each chat runs its own turn, so several can work at once. Up to four show at

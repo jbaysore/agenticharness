@@ -1,7 +1,7 @@
 // Everything Harness says in its own voice lives here, so the tone stays consistent.
 export const OWNER = "Josh";
 
-const names = { codex: "Codex", claude: "Claude Code", cursor: "Cursor" };
+const names = { codex: "Codex", claude: "Claude Code", cursor: "Cursor", openrouter: "OpenRouter" };
 export const providerName = (id) => names[id] ?? id ?? "Agent";
 
 export function greeting(date = new Date()) {

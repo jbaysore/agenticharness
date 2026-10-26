@@ -1,4 +1,4 @@
-# Subscription integration evidence
+# Provider integration evidence
 
 Checked 2026-10-06 against the installed versions listed in PLAN.md. Recheck on
 provider upgrades and account/plan changes. These are local personal integrations.
@@ -10,6 +10,19 @@ provider upgrades and account/plan changes. These are local personal integration
 | Cursor / Cursor plan      | Official `agent acp`, JSON-RPC over stdio                       | Official browser login and account dashboard with on-demand usage disabled                                                                     | Advertise parameterized model selection, then force `fast=false` when that option exists. Omit Auto and keep exploded fast-only presets unavailable. Do not fabricate quota percentages or infer coverage from a model response. ACP itself does not document a billing-mode attestation. |
 
 ## Sources
+
+OpenRouter was added 2026-10-26 as a separate free-only API route. Exact model
+approvals, external-data consent, fresh pricing and catalog identity are checked
+at the server boundary. Credentials use Windows DPAPI and are excluded from
+database backups and exports. Protocol, HTTP, permission and boundary tests use
+simulated responses; headless Edge covers setup, the model picker, a real host
+file-tool exchange, revocation and mobile layout. Windows DPAPI round-trip tests
+use a fixture key. No live inference or real account connection has been tested.
+
+- [OpenRouter model catalog](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)
+- [OpenRouter model fallbacks](https://openrouter.ai/docs/guides/routing/model-fallbacks)
+- [OpenRouter provider price ceilings](https://openrouter.ai/docs/guides/routing/provider-selection#max-price)
+- [OpenRouter client tools](https://openrouter.ai/docs/guides/features/tool-calling)
 
 - [Codex app-server](https://learn.chatgpt.com/docs/app-server): authentication,
   models, effort, approvals, native sessions, streamed events, account limits.

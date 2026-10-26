@@ -4,6 +4,7 @@ import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectCodex, runCodex } from "../providers/codex.mjs";
 import { inspectClaude, runClaude } from "../providers/claude.mjs";
+import { runOpenRouter } from "../providers/openrouter-runner.mjs";
 import {
   inspectCursor,
   learnCursorEfforts,
@@ -101,6 +102,7 @@ export class Controller extends EventEmitter {
       worktreeRoot = null,
       dataDir,
       openReviewer: openReviewerOption = null,
+      openrouter = null,
     },
   ) {
     super();
@@ -108,6 +110,7 @@ export class Controller extends EventEmitter {
     this.probePath = probePath;
     this.dataDir = dataDir;
     this.bridgeUrl = bridgeUrl;
+    this.openrouter = openrouter;
     this.providers = [];
     this.active = new Map();
     this.approvalWaiters = new Map();
@@ -123,6 +126,18 @@ export class Controller extends EventEmitter {
     // Worktree removals in progress, by chat, so a new turn waits for them.
     this.tidying = new Map();
     this.runners = { codex: runCodex, claude: runClaude, cursor: runCursor };
+    if (openrouter) {
+      this.runners.openrouter = (ctx) => runOpenRouter({ ...ctx, openrouter });
+      this.openrouterChanged = () => {
+        for (const [chatId, work] of this.active) {
+          if (work.run.provider !== "openrouter") continue;
+          this.event(chatId, work.run.id, "work", { kind: "policy-stop", item: { title: "OpenRouter settings changed", description: "The turn stopped. Send a message to continue under the current allowlist and data-sharing consent." } });
+          this.cancel(chatId);
+        }
+        this.refreshOpenRouter().catch(() => {});
+      };
+      openrouter.on("change", this.openrouterChanged);
+    }
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
     this.openReviewer = openReviewerOption;
     this.workerTimeoutMs = 5 * 60 * 1000;
@@ -151,6 +166,11 @@ export class Controller extends EventEmitter {
       ];
       const ids = ["codex", "claude", "cursor"],
         names = ["Codex", "Claude Code", "Cursor"];
+      if (this.openrouter) {
+        functions.push(() => this.openrouter.inspect({ refresh: true }));
+        ids.push("openrouter");
+        names.push("OpenRouter");
+      }
       const settled = await Promise.allSettled(functions.map((fn) => fn()));
       this.providers = settled.map((r, i) =>
         r.status === "fulfilled"
@@ -171,6 +191,12 @@ export class Controller extends EventEmitter {
       this.refreshing = null;
     });
     return this.refreshing;
+  }
+  async refreshOpenRouter() {
+    if (!this.openrouter) return;
+    const provider = await this.openrouter.inspect();
+    this.providers = [...this.providers.filter((p) => p.id !== "openrouter"), provider];
+    this.event(null, null, "providers", { providers: this.providers });
   }
   // Provider usage is only read on demand. Retry failed lookups at the monitor's
   // backoff deadline even while idle, and re-read quota windows after reset.
@@ -286,7 +312,7 @@ export class Controller extends EventEmitter {
       throw new Error("Enter a message under 250,000 characters");
     if (typeof actionId !== "string" || !/^[-\w]{16,100}$/.test(actionId))
       throw new Error("A stable action ID is required");
-    if (!["codex", "claude", "cursor"].includes(provider))
+    if (!["codex", "claude", "cursor", "openrouter"].includes(provider))
       throw new Error("Unknown agent");
     permissions ??= chat.permissions;
     if (!PERMISSION_MODES.includes(permissions))
@@ -330,6 +356,7 @@ export class Controller extends EventEmitter {
     const selectedModel = selected.models.find((m) => m.id === model);
     if (!selectedModel || selectedModel.disabled)
       throw new Error("Select an available model");
+    if (provider === "openrouter") this.openrouter?.check(model);
     if (effort && !selectedModel.efforts.includes(effort))
       throw new Error("The selected model does not expose that effort setting");
     return {
@@ -1753,6 +1780,8 @@ export class Controller extends EventEmitter {
   }
   async close() {
     clearTimeout(this.providerTimer);
+    this.openrouter?.off("change", this.openrouterChanged);
+    this.openrouter?.close();
     const active = [...this.active.values()];
     for (const work of active) {
       work.cancelled = true;

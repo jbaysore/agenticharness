@@ -171,7 +171,7 @@ const chatModes = [
   [
     "goal",
     "Goal",
-    "Your message becomes a goal. The agent keeps working, turn after turn, until it is met. Not available for Cursor.",
+    "Your message becomes a goal. The agent keeps working, turn after turn, until it is met. Available for Codex and Claude Code.",
   ],
 ];
 
@@ -309,7 +309,7 @@ export function ChatPane({
     if (chat && !modeBusy) setMode(chat.mode ?? "default");
   }, [chat?.id, chat?.mode, modeBusy]);
   useEffect(() => {
-    if (provider === "cursor" && mode === "goal") setMode("default");
+    if (["cursor", "openrouter"].includes(provider) && mode === "goal") setMode("default");
   }, [provider, mode]);
   useEffect(() => {
     setKeptPlans(new Set());
@@ -379,7 +379,7 @@ export function ChatPane({
   // /ask, /plan, /goal and /default switch the chat's mode, as the mode menu does.
   // During a turn they stay in the draft, so they apply to the queued message.
   const modeCommands = MODE_COMMANDS.filter(
-    (entry) => !(provider === "cursor" && entry.mode === "goal"),
+    (entry) => !(["cursor", "openrouter"].includes(provider) && entry.mode === "goal"),
   ).map((entry) => ({
     ...entry,
     description: chatModes.find(([id]) => id === entry.mode)[2],
@@ -495,9 +495,9 @@ export function ChatPane({
     if (!hasBody) {
       if (prepared.delivery || !prepared.mode) return;
       if (busy || modeBusy || chat?.activeRun) return;
-      if (provider === "cursor" && prepared.mode === "goal") {
+      if (["cursor", "openrouter"].includes(provider) && prepared.mode === "goal") {
         report(
-          new Error("Cursor has no goal mode. Choose Codex or Claude Code."),
+          new Error("Choose Codex or Claude Code for Goal mode."),
         );
         return;
       }
@@ -1077,6 +1077,8 @@ export function ChatPane({
                 (!draft.trim() && !attachments.length) ||
                 !project ||
                 !model ||
+                !selectedModel ||
+                selectedModel.disabled ||
                 (selectedModel?.efforts?.length && !effort) ||
                 !!connected?.blockReason
               }
@@ -1117,7 +1119,7 @@ export function ChatPane({
                 <option
                   key={id}
                   value={id}
-                  disabled={id === "goal" && provider === "cursor"}
+                  disabled={id === "goal" && ["cursor", "openrouter"].includes(provider)}
                 >
                   {label}
                 </option>

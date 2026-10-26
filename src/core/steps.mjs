@@ -222,6 +222,13 @@ export function applyWork(steps, p, after = null) {
       if (!steps.some((s) => s.id === id)) return steps;
       step = { id, status: finished(p.item.status) ?? "ok" };
     }
+  } else if (p.provider === "openrouter" && p.toolCallId) {
+    step = {
+      id: "openrouter:" + p.toolCallId,
+      verb: ({ read_file: "read", edit_file: "edit", list_files: "search", search_files: "search", run_command: "run", browser: "browse" })[p.toolName] ?? "other",
+      status: finished(p.status) ?? "running",
+      ...(p.target ? { target: short(p.target) } : {}),
+    };
   } else if (p.provider === "cursor" && p.item?.toolCallId) {
     step = cursorStep(p, steps.find((s) => s.id === "cursor:" + p.item.toolCallId));
   }

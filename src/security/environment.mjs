@@ -70,7 +70,7 @@ export function subscriptionEnvironment(
 ) {
   const env = {};
   const blocked =
-    /^(OPENAI_|CODEX_(?!HOME$)|ANTHROPIC_|CLAUDE_CODE_|CURSOR_|AWS_|AZURE_|GOOGLE_|VERTEX_|BEDROCK_|NODE_OPTIONS$)/i;
+    /^(OPENAI_|OPENROUTER_|CODEX_(?!HOME$)|ANTHROPIC_|CLAUDE_CODE_|CURSOR_|AWS_|AZURE_|GOOGLE_|VERTEX_|BEDROCK_|NODE_OPTIONS$)/i;
   for (const [key, value] of Object.entries(source)) {
     if (!blocked.test(key) && value !== undefined) env[key] = value;
   }

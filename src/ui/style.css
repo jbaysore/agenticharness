@@ -53,6 +53,19 @@
   --agent: var(--cursor);
   --agent-ink: var(--cursor-ink);
 }
+.openrouter {
+  --agent: #29a890;
+  --agent-ink: #75cfba;
+}
+.openrouter-setup { margin-top: 24px; border-top: 1px solid var(--line, #30343b); padding-top: 20px; }
+.openrouter-setup fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 14px; }
+.openrouter-setup label:not(.openrouter-model):not(.openrouter-check) { display: grid; gap: 6px; }
+.openrouter-check, .openrouter-model { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; }
+.openrouter-check input, .openrouter-model input { flex: 0 0 auto; width: auto; margin-top: 4px; }
+.openrouter-catalog-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.openrouter-model-list { max-height: 280px; overflow: auto; display: grid; gap: 12px; padding: 8px 4px; }
+.openrouter-model span { min-width: 0; display: grid; gap: 2px; }
+.openrouter-model code, .openrouter-model small { overflow-wrap: anywhere; font-size: 11px; }
 ::selection {
   background: color-mix(in srgb, var(--agent) 38%, transparent);
 }
@@ -933,6 +946,9 @@ small {
   gap: 12px;
   max-width: 560px;
   margin: 0 auto;
+}
+.provider-cards:has(> :nth-child(4)) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .provider-card-slot {
   display: flex;

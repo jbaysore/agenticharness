@@ -21,6 +21,7 @@ import { RulesModal } from "./rules-modal.jsx";
 import { SkillsModal } from "./skills-modal.jsx";
 import { UsageGlance } from "./usage-glance.jsx";
 import { ClaudeResets } from "./claude-resets.jsx";
+import { OpenRouterSettings } from "./openrouter-settings.jsx";
 import { useRestartProgress } from "./restart-progress.jsx";
 import {
   activeChats,
@@ -1651,7 +1652,7 @@ function App() {
       {modal === "connections" && (
         <Modal title="Connections & usage" wide onClose={() => setModal(null)}>
           <div className="modal-intro">
-            <p>Each agent uses its own subscription and native sign-in.</p>
+            <p>Codex, Claude Code and Cursor use native subscription sign-in. OpenRouter uses a separate, approved free-model connection.</p>
             <button
               className="secondary"
               disabled={busy}
@@ -1682,7 +1683,9 @@ function App() {
                     {usageLabel}
                   </p>
                 )}
-                {(p.usage?.windows ?? []).some(
+                {p.id === "openrouter" && p.usage?.requestsRemaining != null ? (
+                  <p>{p.usage.requestsRemaining} of {p.usage.requestsLimit} free-model requests remaining today.</p>
+                ) : (p.usage?.windows ?? []).some(
                   (w) => typeof w.usedPercent === "number",
                 ) ? (
                   p.usage.windows
@@ -1765,20 +1768,24 @@ function App() {
                   </div>
                 )}
                 <div className="capability-list">
-                  <span>Native sessions</span>
+                  <span>{p.capabilities?.nativeResume === false ? "Harness transcript" : "Native sessions"}</span>
                   {p.capabilities?.nativeSubagents && (
                     <span>Native subagents</span>
                   )}
                   <span>
                     {p.capabilities?.effort
                       ? "Effort controls"
-                      : "Fixed effort presets"}
+                      : p.id === "openrouter" ? "Model defaults" : "Fixed effort presets"}
                   </span>
                 </div>
               </section>
               );
             })}
           </div>
+          <OpenRouterSettings onChanged={async () => {
+            const next = await api("/api/state");
+            setState((prior) => ({ ...prior, providers: next.providers }));
+          }} />
           <section className="history-settings">
             <h3>Conversation history</h3>
             <label>

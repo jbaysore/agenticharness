@@ -180,6 +180,8 @@ export function UsageGlance({ providers, onOpenConnections, onRefresh, refreshin
                       {w.resetsAt && <small>{resetLabel(w.resetsAt, now)}</small>}
                     </div>
                   ))
+                ) : p.id === "openrouter" && p.usage?.requestsRemaining != null ? (
+                  <p>{p.usage.requestsRemaining} of {p.usage.requestsLimit} free requests remaining today</p>
                 ) : p.id === "cursor" ? (
                   <p
                     className="cursor-reset"

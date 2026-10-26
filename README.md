@@ -1,7 +1,8 @@
 # Agentic Harness
 
 A personal Windows coding workspace for Codex, Claude Code and Cursor, using
-their native subscription sign-ins. Chats and project history live on this PC.
+their native subscription sign-ins. An optional OpenRouter connection runs only
+explicitly approved free models. Chats and project history live on this PC.
 
 ## Open the app
 
@@ -111,6 +112,16 @@ endpoint and physical laptop/iPhone validation are pending. See [daily-use instr
 
 ## Subscription controls
 
+OpenRouter is a separate, opt-in API route. In **Connections & usage**, refresh
+its model catalog, approve exact free model IDs, add a key and authorize external
+data sharing before enabling it. The default allowlist is empty. The server
+checks approval, model identity and zero pricing before every request; paid
+models, router aliases, cross-model fallback and paid plugins are disabled.
+The API key is encrypted with Windows DPAPI outside the history database.
+OpenRouter supports Default, Ask and Plan with Harness-owned transcripts and
+permission-controlled tools. Goal, automatic worker delegation and use as an
+automatic reviewer are unavailable. See [OpenRouter setup](docs/OPERATIONS.md#openrouter).
+
 - Codex must report ChatGPT login, included usage available and no paid credits.
 - Claude Code must report Claude sign-in, current quota and user-disabled extra
   usage. Fast mode and direct API routes are disabled.
@@ -138,7 +149,8 @@ usage panel or **Connections & usage**. Redeem it on Claude's account usage page
 then return to Harness and choose **Refresh usage**. Claude controls reset
 eligibility and confirmation; Harness does not redeem resets itself.
 Unknown or exhausted quota stops Codex. Cursor's account-level disabled on-demand setting is the
-billing boundary. The app never supplies an inference API key or buys credits.
+billing boundary. Subscription providers never receive inference API keys.
+Harness never buys credits or enables paid OpenRouter usage.
 
 ## Development
 
@@ -150,6 +162,8 @@ double-click **Launch Harness.vbs**. `npm run package` creates the Windows zip.
 included usage and edits an ignored fixture. Ordinary tests use no inference.
 `npm run test:attachments` checks paste, upload, drop, draft recovery and send
 retries in a headless browser with a simulated agent and no inference.
+`npm run test:openrouter` checks OpenRouter consent, model approvals, tool use,
+revocation and mobile setup in headless Edge, using simulated API responses.
 
 All repository changes go directly to `main`, following [AGENTS.md](AGENTS.md).
 
