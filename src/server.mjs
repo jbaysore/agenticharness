@@ -458,6 +458,11 @@ export async function createHarness({
             return json(res, 200, removed);
           }
         }
+        if (path === "/api/self-restart/retry" && method === "POST") {
+          if (!selfRestart)
+            return json(res, 409, { error: "Self restart is unavailable" });
+          return json(res, 200, { selfRestart: await selfRestart.retry() });
+        }
         if (path === "/api/providers/refresh" && method === "POST")
           return json(res, 200, {
             providers: await controller.refreshProviders(),

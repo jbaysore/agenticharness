@@ -247,7 +247,8 @@ function App() {
     },
     [admit],
   );
-  // The "update complete" notice clears itself after a few seconds.
+  // The "update complete" notice clears itself after a few seconds; a failed
+  // update stays until it is retried or dismissed.
   const [dismissedUpdate, setDismissedUpdate] = useState(null);
   const finishedUpdate =
     state.selfRestart?.status === "updated" ? state.selfRestart.id : null;
@@ -257,7 +258,7 @@ function App() {
     return () => clearTimeout(timer);
   }, [finishedUpdate]);
   const showRestartNotice =
-    state.selfRestart && (!finishedUpdate || dismissedUpdate !== finishedUpdate);
+    state.selfRestart && dismissedUpdate !== state.selfRestart.id;
   const restartProgress = useRestartProgress({
     restart: state.selfRestart,
     ready: ready && !needsPair,
@@ -1416,6 +1417,25 @@ function App() {
                   will close when it updates.
                 </span>
               )}
+            {state.selfRestart.status === "failed" && (
+              <span className="self-restart-actions">
+                <button
+                  className="secondary"
+                  onClick={action(async () => {
+                    const r = await api("/api/self-restart/retry", {});
+                    setState((s) => ({ ...s, selfRestart: r.selfRestart }));
+                  })}
+                >
+                  Try again
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => setDismissedUpdate(state.selfRestart.id)}
+                >
+                  Dismiss
+                </button>
+              </span>
+            )}
             {state.selfRestart.error && (
               <details>
                 <summary>Update details</summary>

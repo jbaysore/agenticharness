@@ -1901,6 +1901,12 @@ small {
 .self-restart-notice {
   flex: 0 0 auto;
 }
+.self-restart-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 10px;
+  vertical-align: middle;
+}
 .self-restart-notice pre {
   max-height: 160px;
   overflow: auto;

@@ -129,7 +129,8 @@ try {
         "This host does not support graceful shutdown. Close active work before updating it.",
       );
     const deadline = Date.now() + 30000;
-    while (await running()) {
+    // The port closes before the host process exits; stopped means both.
+    while ((await running()) || processAlive(runtime.pid)) {
       if (Date.now() > deadline)
         throw new Error(
           "Host is still stopping. Try again after active work stops.",

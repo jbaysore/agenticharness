@@ -1,4 +1,12 @@
-import { mkdir, readFile, realpath, mkdtemp, rm, open } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  mkdtemp,
+  rm,
+  open,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fork, execFile } from "node:child_process";
@@ -89,8 +97,11 @@ export async function prepareRuntime({ source, revision, dataDir, signal }) {
         maxBuffer: 8 * 1024 * 1024,
       });
     } catch (error) {
+      const output = error.stderr || error.stdout || error.message;
+      // A test run's useful part is its failure summary, not the passing tests.
+      const failures = output.lastIndexOf("✖ failing tests:");
       throw new Error(
-        (error.stderr || error.stdout || error.message).slice(-6000),
+        (failures >= 0 ? output.slice(failures) : output).slice(-6000),
       );
     }
   };
@@ -216,6 +227,7 @@ export class SelfRestart {
     } else {
       this.state.active = { root: this.root, revision: this.revision };
       await this.save();
+      await this.prune();
     }
     this.timer = setInterval(() => this.tick(), 1000);
     this.timer.unref();
@@ -263,6 +275,47 @@ export class SelfRestart {
     } catch {
       return false;
     }
+  }
+  // A failed update is never retried automatically; the user can ask again.
+  async retry() {
+    if (this.state.request?.status !== "failed") return this.status();
+    const head = (await git(this.source.path, ["rev-parse", "HEAD"])).trim();
+    if (head === this.revision) {
+      this.state.request = null;
+      await this.save();
+      this.publish();
+      return null;
+    }
+    return this.request(this.source.path, "default");
+  }
+  // Runtimes and database snapshots from finished handoffs are not reused.
+  // Only call this while no preparation is running, so the listing cannot
+  // include a runtime that is still being built.
+  async prune() {
+    const keep = [
+      this.root,
+      this.state.active?.root,
+      this.state.previous?.root,
+      this.state.handoff?.candidate?.root,
+    ].filter(Boolean);
+    const runtimes = join(this.dataDir, "self-runtimes");
+    const stale = (await readdir(runtimes).catch(() => []))
+      .map((name) => join(runtimes, name))
+      .filter((path) => !keep.some((root) => samePath(root, path)));
+    const snapshot = this.state.handoff?.snapshot;
+    for (const name of await readdir(this.dataDir).catch(() => []))
+      if (/^self-restart-[\w-]+\.sqlite$/.test(name)) {
+        const path = join(this.dataDir, name);
+        if (!snapshot || !samePath(snapshot, path)) stale.push(path);
+      }
+    // Removal can take a while and is retried at the next start if it fails.
+    this.pruning = Promise.all(
+      stale.map((path) =>
+        rm(path, { recursive: true, force: true, maxRetries: 3 }).catch(
+          (error) => console.error("Self restart cleanup: " + error.message),
+        ),
+      ),
+    );
   }
   async request(projectPath, mode, { automatic = false, commit } = {}) {
     if (this.stopped || !(await this.eligible(projectPath, mode)))
@@ -513,6 +566,7 @@ export class SelfRestart {
     this.gated = false;
     delete process.env.HARNESS_RESTART_REQUEST;
     this.publish();
+    await this.prune();
   }
   async close() {
     this.stopped = true;

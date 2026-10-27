@@ -36,7 +36,7 @@ async function fixture(port = 0) {
   ).href;
   await writeFile(
     join(root, "src", "server.mjs"),
-    `import { createHarness } from ${JSON.stringify(server)};\nawait createHarness({ startProviders: false });\n`,
+    `import { createHarness } from ${JSON.stringify(server)};\nawait createHarness({ startProviders: false, exitOnRestart: true });\n`,
   );
   const launch = (...args) =>
     exec(

@@ -6,6 +6,7 @@ import {
   mkdir,
   writeFile,
   readFile,
+  readdir,
   rm,
   realpath,
   cp,
@@ -606,6 +607,69 @@ test("preparation and helper failures retain admission and do not automatically 
     } finally {
       await f.close();
     }
+  }
+});
+
+test("a failed update can be retried on request, or cleared when nothing is newer", async () => {
+  const f = await fixture({
+    prepare: async () => {
+      throw new Error("fixture prepare failed");
+    },
+  });
+  try {
+    const commit = await f.bump();
+    await f.coordinator.request(f.source, "default", {
+      automatic: true,
+      commit,
+    });
+    await f.coordinator.tick();
+    const failedId = f.coordinator.status().id;
+    assert.equal(f.coordinator.status().status, "failed");
+    const retried = await f.coordinator.retry();
+    assert.notEqual(retried.id, failedId);
+    assert.equal(retried.target, commit);
+    assert.equal(retried.status, "queued");
+    await f.coordinator.tick();
+    assert.equal(f.coordinator.status().status, "failed");
+    // Retrying onto the version already running has nothing to install.
+    git(f.source, "reset", "-q", "--hard", f.coordinator.revision);
+    assert.equal(await f.coordinator.retry(), null);
+    assert.equal(f.coordinator.status(), null);
+    assert.equal((await readRestartState(f.dataDir)).request, null);
+  } finally {
+    await f.close();
+  }
+});
+
+test("finished runtimes and database snapshots are removed, keeping the active and previous versions", async () => {
+  const f = await fixture();
+  try {
+    const runtimes = join(f.dataDir, "self-runtimes");
+    for (const name of ["previous", "stale", "pending-handoff"])
+      await mkdir(join(runtimes, name, "node_modules"), { recursive: true });
+    await writeFile(join(runtimes, "stale.tar"), "");
+    for (const id of ["old", "current"])
+      await writeFile(join(f.dataDir, "self-restart-" + id + ".sqlite"), "");
+    f.coordinator.state.previous = { root: join(runtimes, "previous") };
+    f.coordinator.state.handoff = {
+      candidate: { root: join(runtimes, "pending-handoff") },
+      snapshot: join(f.dataDir, "self-restart-current.sqlite"),
+    };
+    await f.coordinator.prune();
+    await f.coordinator.pruning;
+    assert.deepEqual((await readdir(runtimes)).sort(), [
+      "pending-handoff",
+      "previous",
+    ]);
+    const data = await readdir(f.dataDir);
+    assert.deepEqual(
+      data.filter((name) => name.startsWith("self-restart-")),
+      ["self-restart-current.sqlite"],
+    );
+    assert.ok(data.includes("workspace.sqlite"));
+  } finally {
+    delete f.coordinator.state.handoff;
+    await f.close();
   }
 });
 
