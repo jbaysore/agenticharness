@@ -86,6 +86,7 @@ export async function createHarness({
   startProviders = true,
   selfRestart: enableSelfRestart = startProviders,
   exitOnRestart = false,
+  closeStepMs = 3000,
   seedProject = process.env.HARNESS_INITIAL_PROJECT,
   openrouterOptions = {},
 } = {}) {
@@ -241,7 +242,10 @@ export async function createHarness({
         if (req.headers.authorization !== "Bearer " + controlToken)
           return json(res, 401, { error: "Invalid local shutdown capability" });
         json(res, 200, { stopping: true });
-        setTimeout(() => close(), 50);
+        setTimeout(
+          () => close().then(() => exitOnRestart && process.exit(0)),
+          50,
+        );
         return;
       }
       // Cursor reaches Harness's own tools through history-mcp.mjs and this bridge.
@@ -1041,20 +1045,42 @@ export async function createHarness({
     });
   };
   if (tunnel && publicOrigin && ownerSignedIn) runTunnel();
+  // A shutdown step that hangs or throws must not keep this host alive: the
+  // restart helper waits for the process to exit and will not kill it.
+  const step = (name, run) => {
+    let timer;
+    return Promise.race([
+      Promise.resolve()
+        .then(run)
+        .catch((error) =>
+          console.error(`Shutdown step ${name} failed: ${error.message}`),
+        ),
+      new Promise((resolve) => {
+        timer = setTimeout(() => {
+          console.error(`Shutdown step ${name} timed out; continuing`);
+          resolve();
+        }, closeStepMs);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  };
   close = () =>
     (closing ??= (async () => {
       ready = false;
-      await selfRestart?.close();
+      await step("self restart", () => selfRestart?.close());
       clearTimeout(tunnelRetry);
       tunnelProcess?.kill();
-      await controller.close();
-      await terminalSockets.close();
-      await browserSockets.close();
-      await terminals.closeAll();
+      await step("controller", () => controller.close());
+      await step("terminal sockets", () => terminalSockets.close());
+      await step("browser sockets", () => browserSockets.close());
+      await step("terminals", () => terminals.closeAll());
       for (const client of clients) client.end();
       server.closeIdleConnections();
-      await new Promise((resolve) => server.close(resolve));
-      store.close();
+      await step(
+        "server",
+        () => new Promise((resolve) => server.close(resolve)),
+      );
+      server.closeAllConnections();
+      await step("store", () => store.close());
     })());
   if (enableSelfRestart) {
     const candidate = new SelfRestart({

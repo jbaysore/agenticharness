@@ -507,3 +507,26 @@ test("agent rules are saved through the API, validated, and announced", async ()
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("host shutdown finishes when a step hangs or throws", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-shutdown-http-"));
+  const app = await createHarness({
+    dataDir: dir,
+    port: 0,
+    startProviders: false,
+    closeStepMs: 200,
+  });
+  try {
+    app.controller.close = () => new Promise(() => {});
+    app.terminals.closeAll = async () => {
+      throw new Error("AttachConsole failed");
+    };
+    const started = Date.now();
+    await app.close();
+    assert.ok(Date.now() - started < 2000);
+    await assert.rejects(fetch(app.runtime.origin + "/health"));
+    assert.throws(() => app.store.db.prepare("SELECT 1").get());
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
