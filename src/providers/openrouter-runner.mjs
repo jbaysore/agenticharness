@@ -8,6 +8,14 @@ import {
 } from "../core/openrouter-files.mjs";
 
 const MAX_REQUESTS = 20;
+// OpenRouter has no native Plan mode, so the host refuses these until the
+// plan is approved. edit_file checks the mode itself.
+const PLAN_DENIED = new Set([
+  "run_command",
+  "land_changes",
+  "restart_harness",
+  "move_chat",
+]);
 const MAX_TRANSCRIPT_BYTES = 2 * 1024 * 1024;
 const loopInstructions = `You are a coding agent in Agentic Harness using an explicitly approved OpenRouter model. Use the supplied tools to read, search, edit and run commands. Read AGENTS.md and relevant project instructions before making changes. File tool repository 0 is this chat's worktree; 1 and above are the upstream repositories listed in your instructions, which remain read-only. Tools are executed by Harness under the current permission mode. Ask and Plan restrictions are enforced by the host. In Plan mode, return the complete proposal inside <proposed_plan> tags and finish the turn; implementation waits for user approval. Keep requests bounded: this turn has at most 20 model requests. Older chat history is searchable. If context is full, explain the limit and use a fresh conversation with a bounded handoff; do not claim to have processed omitted material. A tool whose result was interrupted may already have changed files or run a command. Inspect its effects using read-only tools before deciding what remains; never blindly repeat an uncertain mutation.`;
 
@@ -148,21 +156,9 @@ export async function runOpenRouter(ctx) {
       throw new Error("OpenRouter is no longer accepting steering.");
     steers.push(item);
   });
-  const tools = [
-    ...openRouterFileTools.filter(
-      (t) => !["ask", "plan"].includes(ctx.mode) || t.name !== "edit_file",
-    ),
-    ...ctx.tools.filter(
-      (t) =>
-        ctx.mode !== "plan" ||
-        ![
-          "run_command",
-          "land_changes",
-          "restart_harness",
-          "move_chat",
-        ].includes(t.name),
-    ),
-  ];
+  // Every mode is offered the same tools. Ask and Plan refuse a change when
+  // it is called, so switching modes never removes a tool from the chat.
+  const tools = [...openRouterFileTools, ...ctx.tools];
   const schemas = new Map(
     tools.map((tool) => [tool.name, z.fromJSONSchema(tool.inputSchema)]),
   );
@@ -259,9 +255,10 @@ export async function runOpenRouter(ctx) {
           status: "running",
         });
         try {
-          if (!toolSchema)
+          if (!toolSchema) throw new Error("This tool is not available.");
+          if (ctx.mode === "plan" && PLAN_DENIED.has(name))
             throw new Error(
-              "This tool is unavailable in the current chat mode.",
+              "Plan mode proposes work first. This action is available after the plan is approved.",
             );
           const parsed = toolSchema.safeParse(
             JSON.parse(call.function.arguments),

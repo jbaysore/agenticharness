@@ -36,6 +36,12 @@ message as usual. **Ask** is read-only: the agent answers questions and explains
 how the project works, and it cannot change files, land commits, or change a
 page. Cursor uses its own Ask mode. Codex stays in a read-only sandbox, including
 when permissions are Override. Claude Code is limited to read and search tools.
+Harness offers its own tools (history, questions, commands, `land_changes`,
+self restart, mode suggestions and the browser) to every agent in every mode,
+and the mode decides whether a call may proceed when it is made. Switching
+modes therefore never removes a tool from a chat. A Codex thread keeps the tools
+it started with, so a thread started with a different set is replaced once with
+a handoff, unless an open Goal lives in it.
 **Plan** researches and proposes a plan. One **Confirm and build** button accepts
 it and returns the chat to Default so the plan can be built. **Goal** keeps Codex or Claude Code working until the
 message's condition is met. Cursor has no goal mode. `/ask`, `/plan`, `/goal`,

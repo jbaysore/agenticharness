@@ -233,9 +233,10 @@ test("an agent in Goal cannot switch itself to another mode", async (t) => {
   const { store, chat, start } = fixture(t, { mode: "goal" });
   let result;
   const { task } = start(async (ctx) => {
+    // Offered in every mode so a native session keeps it; Goal refuses it.
     assert.equal(
       ctx.tools.some((tool) => tool.name === "suggest_mode"),
-      false,
+      true,
     );
     assert.match(ctx.instructions, /stay in Goal until the objective is met/);
     assert.doesNotMatch(ctx.instructions, /You may call suggest_mode/);

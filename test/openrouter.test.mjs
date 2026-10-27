@@ -18,6 +18,7 @@ import { OpenRouterCredentials } from "../src/security/openrouter.mjs";
 import { callOpenRouterFile } from "../src/core/openrouter-files.mjs";
 import { agentInstructions } from "../src/core/history.mjs";
 import { checkMode } from "../src/core/modes.mjs";
+import { commandTool } from "../src/core/command-tool.mjs";
 import { subscriptionEnvironment } from "../src/security/environment.mjs";
 
 const ID = "fixture/coder-v1:free",
@@ -588,7 +589,7 @@ test("streamed tool calls are validated and results persist for follow-ups and l
   assert.match(JSON.stringify(resumed.messages.at(-1)), /Continue/);
 });
 
-test("Ask and Plan omit edits and reject forged tool calls even with Override", async (t) => {
+test("Ask and Plan offer every tool but refuse edits even with Override", async (t) => {
   for (const mode of ["ask", "plan"]) {
     const f = await fixture(t, {
       responses: [
@@ -608,7 +609,8 @@ test("Ask and Plan omit edits and reject forged tool calls even with Override", 
     await f.approve();
     await runOpenRouter({ ...f.ctx, mode, permissions: "override" });
     const sent = JSON.parse(f.inference()[0].options.body);
-    assert.ok(!sent.tools.some((t) => t.function.name === "edit_file"));
+    // The same tools in every mode, so switching modes never removes one.
+    assert.ok(sent.tools.some((t) => t.function.name === "edit_file"));
     assert.match(
       JSON.parse(f.inference()[1].options.body).messages.find(
         (m) => m.role === "tool",
@@ -627,6 +629,36 @@ test("Ask and Plan omit edits and reject forged tool calls even with Override", 
       code: "ENOENT",
     });
   }
+});
+
+test("Plan mode keeps host tools offered and refuses changes until the plan is approved", async (t) => {
+  const f = await fixture(t, {
+    responses: [
+      stream({ calls: [call("run_command", { command: "npm test" })] }),
+      stream(),
+    ],
+  });
+  await f.service.catalogRefresh();
+  await f.approve();
+  const called = [];
+  await runOpenRouter({
+    ...f.ctx,
+    mode: "plan",
+    tools: [commandTool],
+    history: async (name) => {
+      called.push(name);
+      return { ok: true };
+    },
+  });
+  const sent = JSON.parse(f.inference()[0].options.body);
+  assert.ok(sent.tools.some((t) => t.function.name === "run_command"));
+  assert.match(
+    JSON.parse(f.inference()[1].options.body).messages.find(
+      (m) => m.role === "tool",
+    ).content,
+    /after the plan is approved/,
+  );
+  assert.deepEqual(called, []);
 });
 
 test("file tools enforce worktree boundaries, private paths, upstream read-only and review decisions", async (t) => {

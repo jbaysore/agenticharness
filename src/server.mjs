@@ -26,15 +26,9 @@ import {
   repositoryDiff,
   readRepositoryFile,
 } from "./core/repository.mjs";
-import { historyCall, historyTools } from "./core/history.mjs";
-import {
-  ASK_DENY,
-  askHostAllowed,
-  hostToolsForMode,
-  modeSuggestionTool,
-} from "./core/modes.mjs";
-import { landTool } from "./core/worktrees.mjs";
-import { askUserTool } from "./core/questions.mjs";
+import { historyCall } from "./core/history.mjs";
+import { ASK_DENY, askHostAllowed } from "./core/modes.mjs";
+import { hostTools } from "./core/host-tools.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
 import { browserStreams } from "./core/browser-stream.mjs";
@@ -44,10 +38,9 @@ import { openReviewer } from "./providers/workers.mjs";
 import { OpenRouter } from "./providers/openrouter.mjs";
 import { Terminals } from "./core/terminals.mjs";
 import { terminalStreams } from "./core/terminal-stream.mjs";
-import { commandTool } from "./core/command-tool.mjs";
 import { backup, DatabaseSync } from "node:sqlite";
 import { APP_VERSION } from "./core/version.mjs";
-import { SelfRestart, restartTool } from "./core/self-restart.mjs";
+import { SelfRestart } from "./core/self-restart.mjs";
 import { importLocalHistory } from "./core/import-history.mjs";
 import {
   delegationStats,
@@ -256,21 +249,10 @@ export async function createHarness({
         const token = req.headers.authorization?.replace(/^Bearer /, "");
         if (!controller.bridgeTokens.has(token))
           return json(res, 401, { error: "History capability expired" });
-        const chatId = controller.bridgeTokens.get(token),
-          chat = store.conversation(chatId);
+        // The same tools in every mode; a call is checked when it is made.
         return json(res, 200, {
           tools: [
-            ...hostToolsForMode(chat?.mode, historyTools),
-            ...(controller.bridgeModes.has(token) ? [modeSuggestionTool] : []),
-            ...(controller.bridgeQuestions.has(token) ? [askUserTool] : []),
-            ...(controller.bridgeCommands.has(token) ? [commandTool] : []),
-            ...(controller.bridgeLand.has(token) ? [landTool] : []),
-            ...((await selfRestart?.eligible(
-              store.project(chat?.project_id)?.path,
-              chat?.mode,
-            ))
-              ? [restartTool]
-              : []),
+            ...hostTools,
             ...(controller.bridgeBrowser.get(token)?.tools ?? []),
           ],
         });
@@ -313,10 +295,22 @@ export async function createHarness({
           return json(res, 200, {
             mcp: await browser.call(body.name, body.arguments ?? {}),
           });
-        if (body.name === "land_changes" && controller.bridgeLand.has(token))
-          return json(res, 200, await controller.bridgeLand.get(token)());
+        if (body.name === "land_changes")
+          return json(
+            res,
+            200,
+            controller.bridgeLand.has(token)
+              ? await controller.bridgeLand.get(token)()
+              : { error: "This chat works in the shared project folder." },
+          );
         if (body.name === "restart_harness")
-          return json(res, 200, await controller.requestSelfRestart(chatId));
+          return json(
+            res,
+            200,
+            await controller
+              .requestSelfRestart(chatId)
+              .catch((failure) => ({ error: failure.message })),
+          );
         const result = historyCall(
           store,
           chatId,

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { GOAL_QUESTION_TIMEOUT } from "../src/core/modes.mjs";
+import { hostTools, hostToolsKey } from "../src/core/host-tools.mjs";
 
 test("an approval can be answered synchronously and retries never answer twice", async () => {
   const store = new Store(":memory:"),
@@ -665,7 +666,8 @@ test("goal decides permissions and plans without a card and does not leave goal"
     assert.equal(seen.plan.allow, true);
     assert.equal(seen.mode.changed, false);
     assert.match(seen.mode.reason, /stays on until the objective is met/);
-    assert.equal(seen.tools.includes("suggest_mode"), false);
+    // Offered in every mode, and refused in Goal (above).
+    assert.equal(seen.tools.includes("suggest_mode"), true);
     assert.match(seen.instructions, /stay in Goal until the objective is met/);
     assert.doesNotMatch(seen.instructions, /You may call suggest_mode/);
     assert.equal(store.conversation(chat.id).mode, "goal");
@@ -1147,4 +1149,92 @@ test("provider usage is re-read after a limit window resets", async (t) => {
   t.mock.timers.tick(10 * 60000);
   assert.equal(refreshes, 2);
   store.close();
+});
+
+test("every mode offers the same Harness tools to every provider", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {}),
+    project = store.addProject("fixture", "C:\tools-fixture"),
+    names = (ctx) => ctx.tools.map((tool) => tool.name);
+  const seen = {};
+  for (const provider of ["codex", "claude", "cursor", "openrouter"])
+    controller.runners[provider] = async (ctx) => {
+      seen[provider + "/" + ctx.mode] = names(ctx);
+      return { status: "completed" };
+    };
+  controller.providers = ["codex", "claude", "cursor", "openrouter"].map(
+    (id) => ({ id, models: [{ id: "m", efforts: [] }] }),
+  );
+  try {
+    for (const provider of ["codex", "claude", "cursor", "openrouter"])
+      for (const mode of ["default", "ask", "plan", "goal"]) {
+        if (mode === "goal" && ["cursor", "openrouter"].includes(provider))
+          continue;
+        const chat = store.createConversation({
+          projectId: project.id,
+          provider,
+          mode,
+        });
+        controller.send(chat.id, {
+          actionId: "all-tools-" + provider + "-" + mode,
+          text: "Look around",
+          provider,
+          model: "m",
+        });
+        await controller.active.get(chat.id).task;
+      }
+    const expected = hostTools.map((tool) => tool.name);
+    assert.equal(Object.keys(seen).length, 14);
+    for (const [key, offered] of Object.entries(seen))
+      assert.deepEqual(offered, expected, key);
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+test("a Codex thread started with fewer tools is replaced once, with a handoff", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {}),
+    project = store.addProject("fixture", "C:\codex-tools-fixture"),
+    chat = store.createConversation({ projectId: project.id, provider: "codex" }),
+    contexts = [];
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  controller.runners.codex = async (ctx) => {
+    contexts.push(ctx);
+    ctx.saveSession({ id: ctx.session?.id ?? "thread-" + contexts.length });
+    return { status: "completed" };
+  };
+  const send = async (text) => {
+    controller.send(chat.id, {
+      actionId: "codex-tools-" + text,
+      text,
+      provider: "codex",
+      model: "m",
+    });
+    await controller.active.get(chat.id).task;
+  };
+  try {
+    await send("First");
+    // A thread from before every tool was offered, as an Ask-mode start left it.
+    store.updateConversation(chat.id, {
+      sessions: { codex: { id: "ask-thread" } },
+    });
+    await send("Second");
+    assert.equal(contexts[1].session, undefined);
+    assert.match(contexts[1].handoff, /S/);
+    assert.deepEqual(store.conversation(chat.id).sessions.codex.tools, hostToolsKey);
+    assert.equal(store.conversation(chat.id).sessions.codex.id, "thread-2");
+    await send("Third");
+    assert.equal(contexts[2].session.id, "thread-2");
+    // An open Goal lives in its thread, so that thread is kept.
+    store.updateConversation(chat.id, {
+      sessions: { codex: { id: "goal-thread", goal: { status: "paused" } } },
+    });
+    await send("Fourth");
+    assert.equal(contexts[3].session.id, "goal-thread");
+  } finally {
+    await controller.close();
+    store.close();
+  }
 });

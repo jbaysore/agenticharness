@@ -91,11 +91,6 @@ export function askHostAllowed(name) {
   return ASK_HOST_TOOLS.has(name);
 }
 
-export function hostToolsForMode(mode, tools) {
-  if (mode !== "ask") return tools;
-  return tools.filter((tool) => askHostAllowed(tool.name));
-}
-
 // Claude Code has no Ask mode. These built-in tools are the read-only set,
 // and canUseTool denies anything else, including a tool added later.
 export const CLAUDE_ASK_TOOLS = [

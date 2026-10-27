@@ -415,7 +415,7 @@ export async function runClaude(
             }),
           ),
         ),
-      // Offered only to a chat working in its own worktree.
+      // Offered in every mode; the host answers when a call cannot apply.
       ...(ctx.tools ?? [])
         .filter((t) => ["land_changes", "restart_harness"].includes(t.name))
         .map((t) =>

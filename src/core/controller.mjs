@@ -14,7 +14,6 @@ import {
   agentInstructions,
   handoffContext,
   historyCall,
-  historyTools,
   promptDelivery,
   provisionalTitle,
   projectLogContext,
@@ -42,8 +41,6 @@ import {
   askHostAllowed,
   checkMode,
   goalQuestionAnswers,
-  hostToolsForMode,
-  modeSuggestionTool,
   questionKey,
 } from "./modes.mjs";
 import {
@@ -52,17 +49,13 @@ import {
   prepareMessage,
   skillInstructions,
 } from "./skills.mjs";
-import { isDelegationTool, offeredTools } from "./delegation.mjs";
+import { isDelegationTool } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { commandInstructions } from "./command-shells.mjs";
-import { commandTool, executeCommand } from "./command-tool.mjs";
+import { executeCommand } from "./command-tool.mjs";
 import { browserGateway, browserTitle } from "./browser.mjs";
-import {
-  askUserTool,
-  checkQuestions,
-  QUESTION_INSTRUCTIONS,
-} from "./questions.mjs";
+import { checkQuestions, QUESTION_INSTRUCTIONS } from "./questions.mjs";
 import { proposalText, taggedProposal, PLAN_INSTRUCTIONS } from "./plans.mjs";
 import {
   attachmentContext,
@@ -71,13 +64,12 @@ import {
 } from "./attachments.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
-import { restartTool } from "./self-restart.mjs";
+import { hostTools, hostToolsKey } from "./host-tools.mjs";
 import { blockingGoals, goalStopped, resumableGoals } from "./goals.mjs";
 import { isUsageExhausted } from "../security/billing.mjs";
 import { usageWindows } from "../ui/status.mjs";
 import {
   createWorktree,
-  landTool,
   landWorktree,
   restoreWorktree,
   syncWorktree,
@@ -984,7 +976,17 @@ export class Controller extends EventEmitter {
     const lastAgent = messages
       .filter((m) => m.role === "assistant")
       .at(-1)?.provider;
-    const session = chat.sessions[run.provider];
+    // Codex takes a thread's tools only when the thread starts. A thread that
+    // started with a different set gets one fresh start with a handoff,
+    // unless a Goal that lives in that thread is still open.
+    const saved = chat.sessions[run.provider],
+      session =
+        run.provider === "codex" &&
+        saved?.id &&
+        saved.tools !== hostToolsKey &&
+        (!saved.goal || ["complete", "cleared"].includes(saved.goal.status))
+          ? undefined
+          : saved;
     const handoff =
       (lastAgent && lastAgent !== run.provider) ||
       (!session && messages.length > 1)
@@ -1025,17 +1027,15 @@ export class Controller extends EventEmitter {
     // out, and the turn says why rather than offering a tool that would fail.
     const rules = readRules(this.store);
     // Ask mode may hand off a read or a search. An edit, a command, or a
-    // draft would change the project or prepare a commit, so they are absent.
+    // draft would change the project or prepare a commit, so the instructions
+    // leave them out and the host refuses them. The tools stay offered, so a
+    // native session keeps them after the mode changes.
     let plan = planDelegation(rules, this.providers, run, this.store);
-    if (chat.mode === "ask") {
-      const actions = {
-        ...plan.actions,
-        edit: false,
-        run: false,
-        draft: false,
+    if (chat.mode === "ask")
+      plan = {
+        ...plan,
+        actions: { ...plan.actions, edit: false, run: false, draft: false },
       };
-      plan = { ...plan, actions, tools: offeredTools(actions) };
-    }
     const delegator =
       plan.tools.length &&
       new Delegator({
@@ -1064,22 +1064,19 @@ export class Controller extends EventEmitter {
         },
       });
     // The browser is offered only when it can start; a turn goes on without it.
+    // Ask mode refuses page changes when they are called, below.
     const browserTools = this.browser
       ? await this.browser.tools().then(
-          (tools) => {
-            const visible = tools.filter(
-              (tool) => chat.mode !== "ask" || tool.readOnly,
-            );
-            return visible.length
-              ? [browserGateway(visible)].map(
+          (tools) =>
+            tools.length
+              ? [browserGateway(tools)].map(
                   ({ name, description, inputSchema }) => ({
                     name,
                     description,
                     inputSchema,
                   }),
                 )
-              : [];
-          },
+              : [],
           (failure) => {
             this.event(chat.id, run.id, "work", {
               kind: "browser-unavailable",
@@ -1156,6 +1153,8 @@ export class Controller extends EventEmitter {
     // A chat in its own worktree delivers its commits through land_changes.
     const land = async () => {
       const { worktree } = project;
+      if (!worktree)
+        return { error: "This chat works in the shared project folder." };
       emit("work", {
         kind: "landing",
         item: { title: `Landing ${worktree.branch} on ${worktree.base}` },
@@ -1208,8 +1207,7 @@ export class Controller extends EventEmitter {
       });
       return result;
     };
-    if (project.worktree && chat.mode !== "ask")
-      this.bridgeLand.set(token, land);
+    this.bridgeLand.set(token, land);
     // This request is always a user decision, never an action for the reviewer.
     // Restart the native session so its sandbox and collaboration mode agree.
     let suggestingMode = false,
@@ -1318,7 +1316,7 @@ export class Controller extends EventEmitter {
         emit,
         run: (options) => this.runCommand(options),
       });
-    if (chat.mode !== "ask") this.bridgeCommands.set(token, command);
+    this.bridgeCommands.set(token, command);
     const skills = invokedSkills(listSkills(this.store), text);
     if (skills.length)
       this.event(chat.id, run.id, "work", {
@@ -1413,20 +1411,7 @@ export class Controller extends EventEmitter {
       instructions: delivery.instructions,
       addendum: [delivery.addendum, renameLine].filter(Boolean).join("\n\n"),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
-      tools: [
-        ...hostToolsForMode(chat.mode, [
-          ...historyTools,
-          askUserTool,
-          commandTool,
-          ...(chat.mode === "goal" ? [] : [modeSuggestionTool]),
-          ...(project.worktree ? [landTool] : []),
-          ...((await this.selfRestart?.eligible(home.path, chat.mode))
-            ? [restartTool]
-            : []),
-          ...plan.tools,
-        ]),
-        ...browserTools,
-      ],
+      tools: [...hostTools, ...plan.tools, ...browserTools],
       browser,
       signal: abort.signal,
       // The provider calls this once its session can take another user message.
@@ -1439,7 +1424,13 @@ export class Controller extends EventEmitter {
       emit,
       billingConfirmation: this.store.setting("cursor-billing"),
       learnEfforts: (options) => this.learnCursorEfforts(options),
-      saveSession: (incoming) => writeSession(incoming),
+      // A Codex thread started this turn records the tools it was given.
+      saveSession: (incoming) =>
+        writeSession(
+          run.provider === "codex" && !session?.id && incoming?.id
+            ? { ...incoming, tools: hostToolsKey }
+            : incoming,
+        ),
       goalState: (status, objective) => {
         // A stopped/replaced runner cannot release a newer session's hold.
         if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id)
@@ -1463,11 +1454,11 @@ export class Controller extends EventEmitter {
         if (name === "suggest_mode") return suggestMode(input);
         if (name === "ask_user") return askUser(input);
         if (name === "run_command") return command(input);
-        if (name === "restart_harness") return this.requestSelfRestart(chat.id);
-        if (name === "land_changes")
-          return project.worktree
-            ? land()
-            : { error: "This chat works in the shared project folder." };
+        if (name === "restart_harness")
+          return this.requestSelfRestart(chat.id).catch((failure) => ({
+            error: failure.message,
+          }));
+        if (name === "land_changes") return land();
         if (name === "move_chat")
           return this.requestChatMove(chat.id, input.directory);
         if (isDelegationTool(name))

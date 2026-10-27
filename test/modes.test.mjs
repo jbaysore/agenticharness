@@ -4,8 +4,9 @@ import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { runClaude } from "../src/providers/claude.mjs";
 import {
+  ASK_DENY,
   CLAUDE_ASK_TOOLS,
-  hostToolsForMode,
+  askHostAllowed,
   modeSuggestionTool,
 } from "../src/core/modes.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -440,35 +441,42 @@ test("ask mode stays on after a turn and reaches Cursor", async () => {
   await controller.active.get(chat.id).task;
   assert.equal(seen.mode, "ask");
   assert.match(seen.instructions, /Ask mode/);
-  assert.equal(
-    seen.tools.some((tool) => tool.name === "land_changes"),
-    false,
-  );
-  assert.equal(
-    seen.tools.some((tool) => tool.name === "history_search"),
-    true,
-  );
+  // Every tool is offered; Ask refuses a change when it is called.
+  for (const name of ["land_changes", "run_command", "history_search"])
+    assert.equal(
+      seen.tools.some((tool) => tool.name === name),
+      true,
+    );
+  assert.deepEqual(await seen.history("run_command", { command: "echo" }), {
+    error: ASK_DENY,
+  });
+  assert.deepEqual(await seen.history("land_changes", {}), {
+    error: ASK_DENY,
+  });
   // Answering a question leaves the chat in ask mode.
   assert.equal(store.conversation(chat.id).mode, "ask");
   store.close();
 });
 
-test("ask mode offers read tools and withholds anything that can change the project", () => {
-  const tools = hostToolsForMode("ask", [
-    { name: "history_search" },
-    { name: "rename_chat" },
-    { name: "delegate_read" },
-    { name: "delegate_locate" },
-    { name: "delegate_edit" },
-    { name: "delegate_run" },
-    { name: "delegate_draft" },
-    { name: "land_changes" },
+test("ask mode allows read tools and refuses anything that can change the project", () => {
+  const names = [
+    "history_search",
+    "rename_chat",
+    "delegate_read",
+    "delegate_locate",
+    "delegate_edit",
+    "delegate_run",
+    "delegate_draft",
+    "land_changes",
+    "run_command",
+    "restart_harness",
+  ];
+  assert.deepEqual(names.filter(askHostAllowed), [
+    "history_search",
+    "rename_chat",
+    "delegate_read",
+    "delegate_locate",
   ]);
-  assert.deepEqual(
-    tools.map((tool) => tool.name),
-    ["history_search", "rename_chat", "delegate_read", "delegate_locate"],
-  );
-  assert.equal(hostToolsForMode("plan", [{ name: "land_changes" }]).length, 1);
 });
 
 test("Claude ask mode can read and cannot edit, run commands, or leave the mode", async () => {
