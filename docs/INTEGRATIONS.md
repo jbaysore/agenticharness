@@ -85,3 +85,55 @@ and [Access token validation](https://developers.cloudflare.com/cloudflare-one/i
 The app trusts no proxy-supplied identity header. It verifies the RS256 signature
 of `Cf-Access-Jwt-Assertion` against the team's published keys, then the issuer,
 audience, expiry and owner email, and also requires an app session.
+
+## Context and caching — 2026-10-27
+
+Context occupancy, per-request model usage, and account quotas are separate.
+Codex uses the root thread's `tokenUsage.last` and `modelContextWindow`, not
+the cumulative `total`. Claude uses `getContextUsage({detail: "summary"})`;
+never omit `detail`, because the SDK defaults to per-category token-count API
+calls. Cursor accepts ACP `usage_update.used`/`size` when supplied. OpenRouter
+uses returned request usage and live catalog capacity, labeled as an estimate.
+Missing data stays unavailable. Cached tokens remain part of context occupancy.
+
+Snapshots persist in `conversation_context` and the event log in one transaction.
+Conversation snapshots expose `contextByProvider`; SSE emits `context-usage`.
+Session/model provenance and context generations protect against late reads,
+child-agent events, and compaction. Cancellation and recovery mark readings
+outdated. No idle inference, cache warming, or draft-token prediction is used.
+
+Prompt delivery tracks independent skill, Project Log, and workspace blocks.
+Delivery hashes commit only on acceptance; uncertain delivery remains pending.
+Explicit skill reinvocations are delivered again. Compaction invalidates delivery
+fingerprints. Full tool fingerprints are diagnostic and do not change the legacy
+thread-migration key. Instructions retain their bytes, order, and priority.
+Native compaction, model/effort selection, and all billing protections are unchanged.
+
+Independent block delivery defaults on for Codex following native verification.
+Other routes retain legacy combined addenda pending native validation; their
+existing provider-managed caching remains active. The internal SQLite setting
+`prompt-delivery-v2=false` rolls delivery back without resetting sessions or
+disabling telemetry. A per-provider object, such as `{"codex":true}`, enables
+only explicitly verified routes; `true` enables all routes and should only be
+used after verifying them. This is an internal compatibility switch, not a
+model-facing tool or a new public settings endpoint.
+
+`node scripts/context-provider-smoke.mjs --codex` opts into two small turns
+through the subscription adapter. On the installed Codex 0.164.0-alpha.11.1,
+GPT-6.1 Sol retained the same native session and all three reference facts.
+The second turn sent 27 addendum bytes instead of 168 and reported 18,176
+cached input tokens. The native working window was 475,000 tokens; it is
+reported dynamically, not hardcoded. These observations are not a universal
+savings rate or a subscription charge estimate.
+
+Claude and Cursor event handling is verified with protocol fixtures. An optional
+Claude summary-control probe (`node scripts/probe-claude.mjs --context`, no
+inference input) was not executed: automatic approval review rejected using
+another provider from the current Codex integration. No live Claude/Cursor
+caching improvement is claimed. UI acceptance uses isolated fixture providers.
+
+References: [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching),
+[Codex app-server](https://learn.chatgpt.com/docs/app-server),
+[Claude Code usage](https://code.claude.com/docs/en/costs),
+[ACP usage schema](https://agentclientprotocol.com/protocol/v1/schema#sessionupdate),
+[OpenRouter cache fields](https://openrouter.ai/docs/guides/best-practices/prompt-caching).

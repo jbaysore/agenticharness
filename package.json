@@ -24,6 +24,7 @@
     "test:questions": "npm run build && node scripts/questions-acceptance.mjs",
     "test:interface": "npm run build && node scripts/interface-acceptance.mjs",
     "test:usage-stop": "npm run build && node scripts/usage-stop-acceptance.mjs",
+    "test:context": "npm run build && node scripts/context-acceptance.mjs",
     "test:modes": "npm run build && node scripts/mode-suggestions-acceptance.mjs",
     "test:reviewer": "npm run build && node scripts/cursor-review-acceptance.mjs",
     "test:reviewer-settings": "npm run build && node scripts/reviewer-settings-acceptance.mjs",

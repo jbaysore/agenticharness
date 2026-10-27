@@ -151,6 +151,33 @@ test("Codex keeps its Goal session open across long continuation gaps", async (t
   }
 });
 
+test("Codex context uses the root's last request and compaction, never cumulative or child usage", async () => {
+  const readings = [];
+  let invalidations = 0;
+  const f = codexFixture({ emit: (type, value) => { if (type === "context-usage") readings.push(value); }, invalidatePromptDelivery: () => invalidations++ });
+  try {
+    await f.started;
+    await flush();
+    const usage = { last: { totalTokens: 84000, inputTokens: 80000, cachedInputTokens: 72000, outputTokens: 4000 }, total: { totalTokens: 900000, inputTokens: 850000, cachedInputTokens: 700000, outputTokens: 50000 }, modelContextWindow: 200000 };
+    f.notify("thread/tokenUsage/updated", { tokenUsage: usage });
+    assert.equal(readings.at(-1).usedTokens, 84000);
+    assert.equal(readings.at(-1).cache.cacheReadTokens, 72000);
+    const before = readings.length;
+    f.notify("thread/tokenUsage/updated", { threadId: "child", tokenUsage: { ...usage, last: { ...usage.last, totalTokens: 199000 } } });
+    assert.equal(readings.length, before);
+    f.notify("item/started", { item: { id: "compact", type: "contextCompaction" } });
+    assert.equal(invalidations, 1);
+    assert.equal(readings.at(-1).state, "compacting");
+    f.notify("item/completed", { item: { id: "compact", type: "contextCompaction" } });
+    f.notify("thread/tokenUsage/updated", { tokenUsage: { ...usage, last: { ...usage.last, totalTokens: 20000 } } });
+    assert.equal(readings.at(-1).usedTokens, 20000);
+    assert.equal(readings.at(-1).generation, 1);
+    f.notify("turn/completed", { turn: { id: "turn-1", status: "completed" } });
+    f.notify("thread/goal/updated", { goal: { status: "complete" } });
+    await f.run;
+  } finally { f.rpc.close(); await f.run.catch(() => {}); }
+});
+
 test("Codex handles terminal Goal events on either side of turn completion", async (t) => {
   for (const status of [
     "complete",

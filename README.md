@@ -33,6 +33,10 @@ checked separately; startup failure restores the previous version. See
 Real editing, test execution and handoff across all three agents pass. The app
 includes streaming chat, native sessions, shared history search, review comments,
 revision requests, file artifacts, decisions, approvals, and PowerShell terminals.
+Each chat has a context bar with token counts, cache reuse, and measurement
+details. It keeps context occupancy separate from subscription allowance and
+labels estimates or unavailable provider data. Codex context delivery avoids
+repeating unchanged supporting material while preserving its native session.
 Paste screenshots into the chatbox, use the paperclip to upload files, or drag
 files onto the composer. Preview or remove attachments before sending, with or
 without message text. Each message accepts up to 10 files, 20 MB each; uploaded

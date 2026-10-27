@@ -1,4 +1,5 @@
 import { RpcProcess } from "../core/rpc.mjs";
+import { contextReporter, tokenCount } from "../core/context.mjs";
 import { cursorCommand } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import {
@@ -343,6 +344,7 @@ const continuePrompt =
   "Continue where you left off. Your last response was cut off by a dropped connection.";
 
 export async function runCursor(ctx, deps = {}) {
+  const context = contextReporter(ctx, "cursor");
   // Starting Cursor while its status is checked saves a second; nothing is
   // sent to a session until the account is confirmed.
   const authenticate = deps.cursorAuth ?? cursorAuth;
@@ -488,7 +490,10 @@ export async function runCursor(ctx, deps = {}) {
   rpc.on("notification", ({ method, params: p }) => {
     if (!live) return;
     const update = p?.update;
+    if (p?.sessionId && sessionId && p.sessionId !== sessionId) return;
     if (method === "session/update" && update) {
+      if (update.sessionUpdate === "usage_update" && tokenCount(update.used) !== null)
+        context.update({ usedTokens: update.used, windowTokens: update.size, source: "Cursor ACP usage update", accuracy: "provider-reported", basis: "current-context" });
       const nativeId = messageId(update);
       if (nativeId) {
         promptText += update.content.text;
@@ -537,6 +542,7 @@ export async function runCursor(ctx, deps = {}) {
       : await rpc.call("session/new", setup);
     sessionId = ctx.session?.id ?? session.sessionId;
     ctx.saveSession({ id: sessionId });
+    context.start(sessionId);
     const model = cursorModels(session).find((m) => m.id === ctx.model);
     if (!model || model.disabled)
       throw new Error(
@@ -581,6 +587,7 @@ export async function runCursor(ctx, deps = {}) {
     if (pending.length && !ctx.signal.aborted)
       rpc.notify("session/cancel", { sessionId });
     let result = await first;
+    ctx.promptAccepted?.();
     const retryDropped = () => {
       // A queued steer already continues the turn.
       if (
@@ -645,6 +652,7 @@ export async function runCursor(ctx, deps = {}) {
       ctx.emit("work", { kind: "billing-stop", reason: error.message });
     throw error;
   } finally {
+    context.finish();
     accepting = false;
     clearTimeout(killTimer);
     ctx.signal.removeEventListener("abort", cancel);

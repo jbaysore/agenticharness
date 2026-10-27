@@ -4,6 +4,7 @@ import {
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { contextReporter, contextSampler, claudeUsage } from "../core/context.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, mkdir, readdir, stat } from "node:fs/promises";
@@ -561,6 +562,8 @@ export async function runClaude(
       },
     },
   });
+  const context = contextReporter(ctx, "claude");
+  const contextRead = contextSampler(q, context);
   let timer,
     killTimer,
     polling = false,
@@ -621,7 +624,10 @@ export async function runClaude(
       }
     }, pollIntervalMs);
     for await (const event of q) {
-      if (event.session_id) ctx.saveSession({ id: event.session_id });
+      if (event.session_id && !event.parent_tool_use_id && !event.agent_id) {
+        ctx.saveSession({ id: event.session_id });
+        if (context.snapshot?.sessionId !== event.session_id) context.start(event.session_id);
+      }
       if (["assistant", "stream_event", "user"].includes(event.type))
         pendingResult = null;
       if (event.type === "active_goal") {
@@ -659,6 +665,10 @@ export async function runClaude(
           });
       }
       if (event.type === "assistant") {
+        if (!event.parent_tool_use_id && !event.agent_id) {
+          if (event.message.usage) context.update({ cache: claudeUsage(event.message.usage) });
+          void contextRead.sample();
+        }
         if (event.parent_tool_use_id)
           ctx.emit("work", {
             kind: "native-subagent",
@@ -741,7 +751,14 @@ export async function runClaude(
         cancel();
         ctx.emit("work", { kind: "billing-stop", reason: stopped });
       }
+      if (event.type === "system" && event.subtype === "compact_boundary" && !event.parent_tool_use_id) {
+        context.compact();
+        void contextRead.sample(true);
+      }
       if (event.type === "result") {
+        if (!event.is_error) ctx.promptAccepted?.();
+        context.totals(Object.fromEntries(Object.entries(event.modelUsage ?? {}).map(([model, usage]) => [model, claudeUsage(usage)])), "query-including-native-children");
+        await contextRead.sample(true);
         ctx.emit("work", {
           kind: "token-usage",
           modelUsage: event.modelUsage,
@@ -772,6 +789,8 @@ export async function runClaude(
     if (stopped) return { status: "failed", error: stopped };
     throw error;
   } finally {
+    contextRead.dispose();
+    context.finish();
     finished = true;
     accepting = false;
     clearInterval(timer);

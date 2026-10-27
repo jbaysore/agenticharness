@@ -7,6 +7,7 @@
 import { resolve } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AsyncQueue } from "../core/queue.mjs";
+import { claudeUsage, usageDelta } from "../core/context.mjs";
 import { checkCodexBilling } from "../security/billing.mjs";
 import { claudeAuth, claudeOptions, usageOf } from "./claude.mjs";
 import {
@@ -367,26 +368,35 @@ export async function runCodexWorker(
   }
 }
 
-const reviewResult = (event, model) => {
+const reviewResult = (event, model, previous) => {
   const text = JSON.stringify(event.structured_output);
   if (event.is_error || typeof text !== "string")
     throw new Error(
       event.errors?.join("\n") || "The reviewer ended without a decision",
     );
-  const used = Object.values(event.modelUsage ?? {});
+  const used = Object.entries(event.modelUsage ?? {}).map(([name, raw]) => {
+    const totals = claudeUsage(raw);
+    const before =
+      previous.get(name) ??
+      Object.fromEntries(
+        Object.entries(totals).map(([key, value]) => [
+          key,
+          value === null ? null : 0,
+        ]),
+      );
+    previous.set(name, totals);
+    return usageDelta(before, totals);
+  });
+  const sumKnown = (key) =>
+    used.length && used.every((u) => u[key] !== null)
+      ? used.reduce((sum, u) => sum + u[key], 0)
+      : null;
   return {
     text,
     model: Object.keys(event.modelUsage ?? {})[0] ?? model,
     usage: {
-      input: used.reduce(
-        (sum, u) =>
-          sum +
-          u.inputTokens +
-          u.cacheReadInputTokens +
-          u.cacheCreationInputTokens,
-        0,
-      ),
-      output: used.reduce((sum, u) => sum + u.outputTokens, 0),
+      input: sumKnown("inputTokens"),
+      output: sumKnown("outputTokens"),
     },
   };
 };
@@ -428,7 +438,8 @@ export async function openClaudeReviewer(
             : { behavior: "deny", message: "This reviewer has no tools." },
       },
     });
-  const waiting = [];
+  const waiting = [],
+    previousUsage = new Map();
   let ended = null,
     closed = false;
   const fail = (error) => {
@@ -517,7 +528,7 @@ export async function openClaudeReviewer(
         });
       });
       if (signal.aborted) throw cancelled();
-      const answer = reviewResult(event, model);
+      const answer = reviewResult(event, model, previousUsage);
       const { reason: after } = await monitor.read(() => readUsage(q));
       if (after) throw new WorkerUnavailable(after);
       return answer;
@@ -633,6 +644,7 @@ export async function openCodexReviewer(
     async ask(task, askSignal) {
       if (closed || signal.aborted || askSignal?.aborted) throw cancelled();
       if (settle) throw new Error("A review is already running");
+      const before = { ...usage };
       text = "";
       const onAbort = () => {
         if (threadId && turnId && !rpc.closed)
@@ -676,7 +688,16 @@ export async function openCodexReviewer(
         await rpc.call("account/rateLimits/read"),
       );
       if (boundary) throw new WorkerUnavailable(boundary);
-      return { text, model, usage };
+      return {
+        text,
+        model,
+        usage: {
+          input:
+            usage.input >= before.input ? usage.input - before.input : null,
+          output:
+            usage.output >= before.output ? usage.output - before.output : null,
+        },
+      };
     },
     async close() {
       if (closed) return;

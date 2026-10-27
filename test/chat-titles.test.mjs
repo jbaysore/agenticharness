@@ -23,6 +23,8 @@ for (const provider of ["codex", "claude", "cursor"])
     ];
     controller.runners[provider] = async (ctx) => {
       contexts.push(ctx);
+      ctx.saveSession({ id: ctx.session?.id ?? `title-session-${provider}` });
+      ctx.promptAccepted();
       if (contexts.length === 2) {
         await ctx.history("rename_chat", { title: "Fix sidebar flicker" });
         ctx.emit("text", {

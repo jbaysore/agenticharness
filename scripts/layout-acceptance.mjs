@@ -259,7 +259,7 @@ try {
     for (const pane of await panes.all()) {
       expect(
         (await pane.locator(".composer-area").boundingBox()).height,
-      ).toBeLessThanOrEqual(124);
+      ).toBeLessThanOrEqual(140); // Includes the 24px context row.
       expect(
         (await pane.locator(".messages").boundingBox()).height,
       ).toBeGreaterThan(100);

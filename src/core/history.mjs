@@ -16,20 +16,71 @@ export function textHash(text) {
     .digest("hex");
 }
 
-// Cursor has no system channel, so the standing prefix is sent in the user
-// message only when this session has not already been given these bytes.
-// The addendum is sent for every provider only when it changed.
-export function promptDelivery({ provider, session, prefix, addendum }) {
+export function independentDeliveryEnabled(provider, setting) {
+  if (typeof setting === "boolean") return setting;
+  if (setting && typeof setting === "object") return setting[provider] === true;
+  // Native two-turn continuity/telemetry verified for this route. Other
+  // adapters keep legacy delivery until their native verification is recorded.
+  return provider === "codex";
+}
+
+// Cursor has no system channel, so its standing prefix is delivered only
+// when needed. Other providers retain the stable system/developer channel.
+export function promptDelivery({
+  provider,
+  session,
+  prefix,
+  addendum,
+  blocks,
+  independent = false,
+}) {
   const saved = session && typeof session === "object" ? session : {},
+    generation = saved.deliveryGeneration ?? 0,
+    retained = (saved.acceptedGeneration ?? 0) === generation,
     promptHash = textHash(prefix),
     addendumHash = textHash(addendum),
     sendAddendum = Boolean(addendum) && saved.addendumHash !== addendumHash;
+  const blockHashes = Object.fromEntries(
+    (blocks ?? []).map((b) => [b.key, textHash(b.text)]),
+  );
+  const priorBlocks = retained
+    ? (saved.blockHashes ??
+      (saved.addendumHash === addendumHash ? blockHashes : {}))
+    : {};
+  const selected =
+    independent && blocks
+      ? blocks.flatMap((block) => {
+          if (
+            block.text &&
+            (block.repeat || priorBlocks[block.key] !== blockHashes[block.key])
+          )
+            return [{ key: block.key, text: block.text }];
+          if (
+            !block.text &&
+            block.clear &&
+            priorBlocks[block.key] &&
+            priorBlocks[block.key] !== blockHashes[block.key]
+          )
+            return [{ key: block.key, text: block.clear }];
+          return [];
+        })
+      : null;
   return {
     instructions:
-      provider === "cursor" && saved.promptHash === promptHash ? "" : prefix,
-    addendum: sendAddendum ? addendum : "",
+      provider === "cursor" && retained && saved.promptHash === promptHash
+        ? ""
+        : prefix,
+    addendum: selected
+      ? selected.map((b) => b.text).join("\n\n")
+      : sendAddendum || !retained
+        ? addendum
+        : "",
     promptHash,
     addendumHash,
+    blockHashes,
+    generation,
+    deliveredBlocks:
+      selected?.map((b) => b.key) ?? (sendAddendum ? ["combined"] : []),
   };
 }
 
@@ -429,5 +480,5 @@ function workspaceInstructions(project) {
 }
 
 export function agentInstructions(project, chat) {
-  return `Automatic chat naming is silent housekeeping. Never announce, narrate, or mention your own automatic chat rename in progress updates or final responses.\nProgress updates: write one or two plain sentences, without headings or lists, only at real milestones: when you move to a new phase of the work, learn something that changes the plan, or have been working silently for a minute or more. Do not narrate every tool call or batch; several batches of tool work can run between updates, and Harness shows that work on its own. Keep the detail for one final message at the end of the turn: what changed, how it was verified and anything left open.\nThis is the user's personal Agentic Harness workspace. ${chat.provider === 'openrouter' ? 'Use only the current OpenRouter integration and its server-approved free model for AI work, including summaries. The user must enable data-sharing consent and approve exact model IDs in Connections & usage. Do not obtain API keys, change the allowlist or consent, use other inference routes, buy credits, or enable paid extras. Stop at provider limits. Automatic worker delegation and native subagents are unavailable.' : 'Use only the current subscription integration for all AI work, including summaries and subagents. Never use inference API keys, paid overages, credit purchases, or other paid inference routes. Stop on subscription limits.'}\nApp conversation: harness://conversation/${chat.id}. Shared history scope: ${chat.scope}. Search and read history on demand; don't load the entire archive. Preserve source links. Native sessions from other providers are not interchangeable.\nDecide coding, command, and implementation choices yourself; do not ask the user to judge them. Ask only when the task leaves a managerial choice only the user can make, such as spending money, publishing or sending something, signing in, or changing the goal, and explain why you cannot decide it. When asking the user a multiple-choice question, use the native question tool so Harness can show its question UI. Give every option a short label and a brief description explaining when to choose it or its main tradeoff. If the tool only accepts option labels, include the explanation after " — " in the label. Harness adds an Other response field automatically; do not add a duplicate Other option.\nPrimary writable repository: ${project.path}.\nUpstream references (read-only, one-way; never modify unless the user explicitly changes scope): ${project.repositories.map((r) => `${r.name}: ${r.path}`).join("; ") || "none"}. Consult project instructions. Keep each repository's Git state distinct. Report verification results accurately.\n${workspaceInstructions(project)}`;
+  return `Automatic chat naming is silent housekeeping. Never announce, narrate, or mention your own automatic chat rename in progress updates or final responses.\nProgress updates: write one or two plain sentences, without headings or lists, only at real milestones: when you move to a new phase of the work, learn something that changes the plan, or have been working silently for a minute or more. Do not narrate every tool call or batch; several batches of tool work can run between updates, and Harness shows that work on its own. Keep the detail for one final message at the end of the turn: what changed, how it was verified and anything left open.\nThis is the user's personal Agentic Harness workspace. ${chat.provider === "openrouter" ? "Use only the current OpenRouter integration and its server-approved free model for AI work, including summaries. The user must enable data-sharing consent and approve exact model IDs in Connections & usage. Do not obtain API keys, change the allowlist or consent, use other inference routes, buy credits, or enable paid extras. Stop at provider limits. Automatic worker delegation and native subagents are unavailable." : "Use only the current subscription integration for all AI work, including summaries and subagents. Never use inference API keys, paid overages, credit purchases, or other paid inference routes. Stop on subscription limits."}\nApp conversation: harness://conversation/${chat.id}. Shared history scope: ${chat.scope}. Search and read history on demand; don't load the entire archive. Preserve source links. Native sessions from other providers are not interchangeable.\nDecide coding, command, and implementation choices yourself; do not ask the user to judge them. Ask only when the task leaves a managerial choice only the user can make, such as spending money, publishing or sending something, signing in, or changing the goal, and explain why you cannot decide it. When asking the user a multiple-choice question, use the native question tool so Harness can show its question UI. Give every option a short label and a brief description explaining when to choose it or its main tradeoff. If the tool only accepts option labels, include the explanation after " — " in the label. Harness adds an Other response field automatically; do not add a duplicate Other option.\nPrimary writable repository: ${project.path}.\nUpstream references (read-only, one-way; never modify unless the user explicitly changes scope): ${project.repositories.map((r) => `${r.name}: ${r.path}`).join("; ") || "none"}. Consult project instructions. Keep each repository's Git state distinct. Report verification results accurately.\n${workspaceInstructions(project)}`;
 }

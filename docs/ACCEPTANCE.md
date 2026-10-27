@@ -25,6 +25,20 @@ folders. No credentials, account identifiers or session transcripts are committe
 
 ## Reproduce
 
+Context/caching checks added 2026-10-27: `npm run test:context` uses isolated
+fixture providers and Edge to verify live updates, cache details, compaction,
+model changes, draft preservation, reload, two/four panes, keyboard controls,
+and mobile layout. Screenshots are in `.local/screenshots/context-*.png`.
+Unit fixtures cover provider token semantics, cumulative reviewer deltas,
+failed delivery, generation/session boundaries, and summary-read timeout and
+single-flight behavior. Native Codex continuity and cache telemetry passed the
+opt-in two-turn `context-provider-smoke.mjs --codex` check; other adapters were
+verified with fixtures. See INTEGRATIONS.md for the native probe limitation.
+Final unit verification used `node --test --test-concurrency=1 test/*.test.mjs`:
+476 passed. The parallel run encountered an intermittent Windows `EPERM` while
+the existing detached restart helper replaced its state file; that fixture
+passed without concurrent browser work. Restart implementation was unchanged.
+
 Additional delivery checks passed after the table above: an actual host-process
 kill during a real Codex response preserved partial output, marked the run
 interrupted, refused duplicate execution, and allowed explicit native continuation.

@@ -14,6 +14,7 @@ import {
   agentInstructions,
   handoffContext,
   historyCall,
+  independentDeliveryEnabled,
   promptDelivery,
   provisionalTitle,
   projectLogContext,
@@ -64,7 +65,7 @@ import {
 } from "./attachments.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
-import { hostTools, hostToolsKey } from "./host-tools.mjs";
+import { hostTools, hostToolsKey, toolFingerprint } from "./host-tools.mjs";
 import { blockingGoals, goalStopped, resumableGoals } from "./goals.mjs";
 import { isUsageExhausted } from "../security/billing.mjs";
 import { usageWindows } from "../ui/status.mjs";
@@ -788,6 +789,7 @@ export class Controller extends EventEmitter {
     let status = "failed",
       error;
     let latestProposal = null;
+    let contextSessionId = null;
     const saveProposal = (text) => {
       if (!text || text === latestProposal) return;
       latestProposal = text;
@@ -810,6 +812,11 @@ export class Controller extends EventEmitter {
       this.event(chat.id, null, "chat", this.store.conversation(chat.id));
     };
     const emit = (type, payload) => {
+      if (type === "context-usage") {
+        if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id || payload.sessionId !== contextSessionId) return;
+        this.event(chat.id, run.id, type, { ...payload, provider: run.provider, runId: run.id });
+        return;
+      }
       if (type === "proposed-plan") {
         noteActivity();
         saveProposal(proposalText(payload.text));
@@ -1349,7 +1356,12 @@ export class Controller extends EventEmitter {
       .join("\n\n");
     // The rename line is repeated until the title is set. The rest of the
     // addendum is sent only when its text changes.
-    const addendumBody = [skillInstructions(skills), projectLog, notice]
+    const blocks = [
+      { key: "skills", text: skillInstructions(skills), repeat: skills.length > 0 && !continuing },
+      { key: "project-log", text: projectLog },
+      { key: "workspace", text: notice, clear: "Workspace update: no other Harness chats are currently working in this directory. Other chats can start later; continue to check workspace_activity before committing." },
+    ];
+    const addendumBody = blocks.map((b) => b.text)
       .filter(Boolean)
       .join("\n\n");
     const delivery = promptDelivery({
@@ -1357,6 +1369,8 @@ export class Controller extends EventEmitter {
       session: savedSession,
       prefix,
       addendum: addendumBody,
+      blocks,
+      independent: independentDeliveryEnabled(run.provider, this.store.setting("prompt-delivery-v2")),
     });
     const renameLine = needsRename ? renameInstructions(run.provider) : "";
     const noticeRulesSent = Boolean(
@@ -1373,10 +1387,13 @@ export class Controller extends EventEmitter {
         sessions: { ...current.sessions, [run.provider]: next },
       });
     };
-    writeSession({
+    let promptAccepted = false;
+    this.event(chat.id, run.id, "prompt-cache", {
       promptHash: delivery.promptHash,
-      addendumHash: delivery.addendumHash,
-      noticeRulesSent,
+      toolsHash: toolFingerprint([...hostTools, ...plan.tools, ...browserTools]),
+      deliveredBlocks: delivery.deliveredBlocks,
+      addendumBytes: Buffer.byteLength(delivery.addendum),
+      independent: independentDeliveryEnabled(run.provider, this.store.setting("prompt-delivery-v2")),
     });
     const ctx = {
       project,
@@ -1407,6 +1424,24 @@ export class Controller extends EventEmitter {
         );
       },
       session,
+      context: this.store.contextByProvider(chat.id)[run.provider],
+      promptAccepted: () => {
+        const saved = this.store.conversation(chat.id)?.sessions[run.provider];
+        if (promptAccepted || abort.signal.aborted || !contextSessionId || this.active.get(chat.id)?.run.id !== run.id || (saved?.deliveryGeneration ?? 0) !== delivery.generation) return;
+        promptAccepted = true;
+        writeSession({
+          promptHash: delivery.promptHash,
+          addendumHash: delivery.addendumHash,
+          blockHashes: delivery.blockHashes,
+          acceptedGeneration: delivery.generation,
+          noticeRulesSent,
+        });
+      },
+      invalidatePromptDelivery: () => {
+        if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id) return;
+        const saved = this.store.conversation(chat.id)?.sessions[run.provider];
+        writeSession({ deliveryGeneration: (saved?.deliveryGeneration ?? 0) + 1 });
+      },
       handoff,
       instructions: delivery.instructions,
       addendum: [delivery.addendum, renameLine].filter(Boolean).join("\n\n"),
@@ -1425,12 +1460,15 @@ export class Controller extends EventEmitter {
       billingConfirmation: this.store.setting("cursor-billing"),
       learnEfforts: (options) => this.learnCursorEfforts(options),
       // A Codex thread started this turn records the tools it was given.
-      saveSession: (incoming) =>
+      saveSession: (incoming) => {
+        if (this.active.get(chat.id)?.abort !== abort) return;
+        if (incoming?.id) contextSessionId = incoming.id;
         writeSession(
           run.provider === "codex" && !session?.id && incoming?.id
             ? { ...incoming, tools: hostToolsKey }
             : incoming,
-        ),
+        );
+      },
       goalState: (status, objective) => {
         // A stopped/replaced runner cannot release a newer session's hold.
         if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id)
@@ -1534,6 +1572,9 @@ export class Controller extends EventEmitter {
         usageStopReason = error;
     } finally {
       await reviewer?.close();
+      const reading = this.store.contextByProvider(chat.id)[run.provider];
+      if (reading?.runId === run.id && (abort.signal.aborted || status === "failed"))
+        this.event(chat.id, run.id, "context-usage", { ...reading, state: reading.usedTokens === null ? "unavailable" : "outdated" });
       this.store.expireApprovals(run.id);
       this.bridgeTokens.delete(token);
       this.bridgeBrowser.delete(token);

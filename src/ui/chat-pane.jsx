@@ -13,6 +13,7 @@ import { Attachments } from "./attachments.jsx";
 import { useChatScroll } from "./chat-scroll.jsx";
 import { ModelPicker } from "./model-picker.jsx";
 import { DirectoryPicker } from "./directory-picker.jsx";
+import { ContextBar } from "./context-bar.jsx";
 import { SkillSlash } from "./skills-modal.jsx";
 import {
   DELIVERY_COMMANDS,
@@ -644,11 +645,16 @@ export function ChatPane({
       (chat.mode === "goal" || chat.runs?.[0]?.id === goal.runId),
   );
   const finishedPlan = chat?.runs?.[0];
+  const hasPlanOutput = Boolean(
+    chat?.proposedPlans?.[finishedPlan?.id]?.trim() ||
+    chat?.messages?.some((m) => m.run_id === finishedPlan?.id && m.role === "assistant" && m.content?.trim()),
+  );
   const planReady =
     chat &&
     !chat.activeRun &&
     mode === "plan" &&
     finishedPlan?.status === "completed" &&
+    hasPlanOutput &&
     !keptPlans.has(finishedPlan.id) &&
     !chat.approvals?.some((a) => a.request?.kind === "plan")
       ? finishedPlan
@@ -1087,6 +1093,7 @@ export function ChatPane({
             </button>
           </div>
         </form>
+        <ContextBar chat={chat} provider={provider} model={model} />
         <div className="composer-footer">
           <label
             className={"permissions-control " + permissions}

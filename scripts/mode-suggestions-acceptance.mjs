@@ -30,6 +30,10 @@ for (const { id } of app.controller.providers)
   app.controller.runners[id] = async (ctx) => {
     contexts.push(ctx);
     ctx.saveSession({ id: "saved-" + id });
+    ctx.promptAccepted();
+    // The stand-ins report native Goal state as the real adapters do.
+    if (id !== "cursor")
+      ctx.goalState(ctx.mode === "goal" ? "complete" : "cleared");
     if (!ctx.continuing)
       await ctx.history("suggest_mode", {
         mode: target,

@@ -29,6 +29,9 @@ try {
     await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
       skipBehaviors: true,
     });
+  const context = process.argv.includes("--context")
+    ? await q.getContextUsage({ detail: "summary" })
+    : null;
   console.log(
     JSON.stringify(
       {
@@ -47,6 +50,14 @@ try {
           extraUsage: usage.rate_limits?.extra_usage?.is_enabled,
           windows: usage.rate_limits?.limits,
         },
+        ...(context && {
+          context: {
+            model: context.model,
+            usedTokens: context.totalTokens,
+            workingWindowTokens: context.rawMaxTokens,
+            method: "summary (no inference or per-category token-count calls)",
+          },
+        }),
       },
       null,
       2,

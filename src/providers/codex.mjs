@@ -1,4 +1,5 @@
 import { RpcProcess } from "../core/rpc.mjs";
+import { contextReporter, openAIUsage, tokenCount } from "../core/context.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { checkCodexBilling, publicCodexUsage } from "../security/billing.mjs";
@@ -158,6 +159,8 @@ const permissionModes = {
 };
 export async function runCodex(ctx, { open = openCodex } = {}) {
   const rpc = await open(ctx.project.path);
+  const context = contextReporter(ctx, "codex");
+  let compacting = false;
   let turnId,
     threadId,
     finished = false,
@@ -442,8 +445,24 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       });
     if (method === "turn/plan/updated")
       ctx.emit("work", { kind: "plan", ...p });
-    if (method === "thread/tokenUsage/updated")
+    if (method === "item/started" && p.item?.type === "contextCompaction") {
+      compacting = true;
+      context.compact();
+    }
+    if (method === "item/completed" && p.item?.type === "contextCompaction") compacting = false;
+    if (method === "thread/tokenUsage/updated" && threadId) {
       ctx.emit("work", { kind: "token-usage", ...p });
+      const usage = p.tokenUsage;
+      if (!compacting && tokenCount(usage?.last?.totalTokens) !== null)
+        context.update({
+          usedTokens: usage.last.totalTokens,
+          windowTokens: usage.modelContextWindow,
+          basis: "last-request", accuracy: "provider-estimated",
+          source: "Codex latest request usage",
+          cache: openAIUsage(usage.last),
+        });
+      if (usage?.total) context.totals({ [ctx.model]: openAIUsage(usage.total) }, "root-thread");
+    }
     if (method === "error") ctx.emit("work", { kind: "error", error: p.error });
     if (method === "turn/completed") {
       if (p.turn.id && turnId && p.turn.id !== turnId) return;
@@ -501,6 +520,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       });
     threadId = response.thread.id;
     ctx.saveSession({ id: threadId });
+    context.start(threadId);
     if (ctx.session?.id && !ctx.startGoal && (goal || ctx.session.goal)) {
       const version = goalVersion;
       try {
@@ -561,6 +581,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
         input: codexInput(ctx),
       });
       turnId = start.turn.id;
+      ctx.promptAccepted?.();
     }
     if (goal && ctx.startGoal) {
       // A resumed Plan session must first receive Default collaboration mode.
@@ -599,6 +620,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     }, 20000);
     return await done;
   } finally {
+    context.finish();
     finished = true;
     steerOpen = false;
     clearInterval(timer);

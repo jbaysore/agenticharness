@@ -5,6 +5,7 @@ import "@fontsource-variable/newsreader/opsz.css";
 import "@fontsource-variable/newsreader/opsz-italic.css";
 import "./style.css";
 import { api } from "./api.mjs";
+import { mergeContextSnapshots } from "./context.mjs";
 import { serverClock } from "./clock.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
@@ -235,9 +236,10 @@ function App() {
   // A chat is tracked from the moment its snapshot arrives, so no streamed
   // text between that snapshot and the next render is dropped.
   const admit = useCallback((next) => {
+    if (next.lastEventId < (floors.current[next.id] ?? 0)) return next;
     floors.current[next.id] = next.lastEventId;
     tracked.current.add(next.id);
-    setChats((all) => ({ ...all, [next.id]: next }));
+    setChats((all) => ({ ...all, [next.id]: { ...next, contextByProvider: mergeContextSnapshots(all[next.id]?.contextByProvider, next.contextByProvider, next.lastEventId) } }));
     return next;
   }, []);
   const reload = useCallback(
@@ -553,6 +555,12 @@ function App() {
       )
         setBrowserUnseen(true);
       if (!tracked.current.has(e.conversationId)) return;
+      if (e.type === "context-usage" && e.id > (floors.current[e.conversationId] ?? 0))
+        setChats((all) => {
+          const c = all[e.conversationId];
+          if (!c) return all;
+          return { ...all, [c.id]: { ...c, contextByProvider: { ...c.contextByProvider, [e.payload.provider]: { ...e.payload, eventId: e.id } } } };
+        });
       if (e.type === "text" && e.id > (floors.current[e.conversationId] ?? 0))
         setChats((all) => {
           const c = all[e.conversationId];

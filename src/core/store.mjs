@@ -59,6 +59,7 @@ export class Store {
       CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content ON messages BEGIN INSERT INTO messages_fts(messages_fts,rowid,content) VALUES ('delete',old.rowid,old.content); INSERT INTO messages_fts(rowid,content) VALUES (new.rowid,new.content); END;
       CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT, run_id TEXT, type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS events_conversation ON events(conversation_id,id);
+      CREATE TABLE IF NOT EXISTS conversation_context(conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, provider TEXT NOT NULL, payload TEXT NOT NULL, last_event_id INTEGER NOT NULL, PRIMARY KEY(conversation_id,provider));
       CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,created_at);
       CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL, request TEXT NOT NULL, status TEXT NOT NULL, response TEXT, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), conversation_id TEXT REFERENCES conversations(id), content TEXT NOT NULL, evidence TEXT NOT NULL, stale INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
@@ -486,6 +487,7 @@ export class Store {
     if (!this.conversation(id)) throw new Error("Conversation not found");
     if (!this.project(projectId)) throw new Error("Project not found");
     this.db.prepare("DELETE FROM openrouter_sessions WHERE conversation_id=?").run(id);
+    this.db.prepare("DELETE FROM conversation_context WHERE conversation_id=?").run(id);
     this.db
       .prepare(
         "UPDATE conversations SET project_id=?,sessions='{}',worktree=NULL,updated_at=? WHERE id=?",
@@ -849,6 +851,29 @@ export class Store {
       );
   }
   appendEvent(conversationId, runId, type, payload) {
+    if (type !== "context-usage")
+      return this.insertEvent(conversationId, runId, type, payload);
+    this.db.exec("SAVEPOINT context_event");
+    try {
+      const event = this.insertEvent(conversationId, runId, type, payload);
+      this.db.prepare("INSERT INTO conversation_context(conversation_id,provider,payload,last_event_id) VALUES(?,?,?,?) ON CONFLICT(conversation_id,provider) DO UPDATE SET payload=excluded.payload,last_event_id=excluded.last_event_id")
+        .run(conversationId, payload.provider, JSON.stringify(payload), event.id);
+      this.db.exec("RELEASE context_event");
+      return event;
+    } catch (error) {
+      this.db.exec("ROLLBACK TO context_event; RELEASE context_event");
+      throw error;
+    }
+  }
+  contextByProvider(conversationId) {
+    const sessions = this.conversation(conversationId)?.sessions ?? {};
+    return Object.fromEntries(this.db.prepare("SELECT provider,payload,last_event_id FROM conversation_context WHERE conversation_id=?").all(conversationId).flatMap((row) => {
+      const payload = JSON.parse(row.payload), saved = sessions[row.provider];
+      return payload.sessionId === (typeof saved === "string" ? saved : saved?.id)
+        ? [[row.provider, { ...payload, eventId: row.last_event_id }]] : [];
+    }));
+  }
+  insertEvent(conversationId, runId, type, payload) {
     const now = this.now();
     const result = this.db
       .prepare(
@@ -1033,6 +1058,7 @@ export class Store {
       }));
   }
   recover() {
+    this.db.prepare("UPDATE conversation_context SET payload=json_set(payload,'$.state','outdated') WHERE json_extract(payload,'$.state') IN ('ready','updating')").run();
     const interrupted = this.db
       .prepare(
         "SELECT * FROM runs WHERE status IN ('starting','running','waiting')",
@@ -1100,6 +1126,7 @@ export class Store {
   conversationSnapshot(id) {
     return {
       ...this.conversation(id),
+      contextByProvider: this.contextByProvider(id),
       messages: this.messages(id),
       proposedPlans: this.proposedPlans(id),
       activeRun: this.activeRun(id),

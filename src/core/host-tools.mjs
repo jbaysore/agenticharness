@@ -23,3 +23,19 @@ export const hostTools = [
 export const hostToolsKey = textHash(
   hostTools.map((tool) => tool.name).join("\n"),
 );
+
+// Hash the full definitions for diagnostics without changing thread migration
+// identity. Preserve array order; sort only object keys in the fingerprint.
+export function toolFingerprint(tools) {
+  const canonical = (value) =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, canonical(value[key])]),
+          )
+        : value;
+  return textHash(JSON.stringify(canonical(tools)));
+}

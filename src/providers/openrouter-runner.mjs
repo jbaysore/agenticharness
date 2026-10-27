@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { contextReporter, openAIUsage, tokenCount } from "../core/context.mjs";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { attachmentPath, resolveAttachments } from "../core/attachments.mjs";
@@ -149,6 +150,10 @@ export async function runOpenRouter(ctx) {
   state.messages.push(await inputMessage(ctx, preface, ctx.attachments));
   checkpoint(store, ctx.chat.id, state);
   ctx.saveSession({ id: ctx.chat.id });
+  const context = contextReporter(ctx, "openrouter");
+  context.start(ctx.chat.id);
+  // This adapter owns its transcript: checkpointing is the acceptance boundary.
+  ctx.promptAccepted?.();
   const steers = [];
   let open = true;
   ctx.attachSteer?.((item) => {
@@ -233,6 +238,11 @@ export async function runOpenRouter(ctx) {
           outputTokens: result.usage.completion_tokens,
           cost: result.usage.cost ?? null,
         });
+      if (result.usage) {
+        const cache = openAIUsage(result.usage);
+        const usedTokens = tokenCount(result.usage.total_tokens) ?? (cache.inputTokens !== null && cache.outputTokens !== null ? cache.inputTokens + cache.outputTokens : null);
+        if (usedTokens !== null) context.update({ usedTokens, windowTokens: model.context_length, cache, source: "OpenRouter latest request usage", basis: "last-request", accuracy: "provider-estimated" });
+      }
       state.messages.push(result.message);
       checkpoint(store, ctx.chat.id, state);
       if (!result.message.tool_calls?.length) {
@@ -316,6 +326,7 @@ export async function runOpenRouter(ctx) {
       "OpenRouter reached the 20-request limit for this turn. Send a message to continue from saved progress.",
     );
   } finally {
+    context.finish();
     open = false;
     if (!ctx.signal.aborted) {
       await service.refreshUsage();
