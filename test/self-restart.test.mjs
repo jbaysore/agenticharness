@@ -558,6 +558,37 @@ test("a newer delivery during preparation supersedes the old candidate", async (
   }
 });
 
+test("preparation reports no blockers, then waits only for work still running", async () => {
+  const f = await fixture();
+  try {
+    let release;
+    const normal = f.coordinator.prepare;
+    f.coordinator.prepare = async (input) => {
+      if (!release)
+        await new Promise((r) => {
+          release = r;
+        });
+      return normal(input);
+    };
+    // The delivering chat is still active when its landing queues the update.
+    f.controller.active.set("delivering-chat", {});
+    await f.coordinator.request(f.source, "default", {
+      automatic: true,
+      commit: await f.bump(),
+    });
+    const preparing = f.coordinator.tick();
+    while (!release) await pause(5);
+    assert.equal(f.coordinator.status().status, "preparing");
+    assert.deepEqual(f.coordinator.status().blockers, []);
+    f.controller.active.delete("delivering-chat");
+    release();
+    await preparing;
+    assert.equal(f.handoffs.length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
 test("work admitted during the last source check prevents the handoff", async () => {
   const f = await fixture();
   try {

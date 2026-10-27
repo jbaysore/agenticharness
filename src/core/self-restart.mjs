@@ -454,7 +454,9 @@ export class SelfRestart {
     await this.terminals.checkRunning({ maxAge: 5000 });
     if (!this.prepared) {
       request.status = "preparing";
-      request.blockers = this.blockers();
+      // Preparation waits for nothing. Blockers read now would go stale over
+      // the minutes it takes, and always include the chat that delivered it.
+      request.blockers = [];
       await this.save();
       this.publish();
       // The fallback comes from the revision recorded when this process started,
