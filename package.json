@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "test:attachments": "npm run build && node scripts/attachments-acceptance.mjs",
     "test:directory": "npm run build && node scripts/directory-acceptance.mjs",
     "test:directoryless": "npm run build && node scripts/directoryless-acceptance.mjs",

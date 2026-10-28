@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 test(
   "boot supervisor retries failed and stopped launchers with the selected data folder",
-  { skip: process.platform !== "win32", timeout: 20000 },
+  { skip: process.platform !== "win32", timeout: 60000 },
   async () => {
     const root = await mkdtemp(join(tmpdir(), "harness startup "));
     const data = join(root, "app data");
@@ -69,7 +69,10 @@ console.log('fixture host stopped');
       child.once("error", reject);
     });
     try {
-      const deadline = Date.now() + 10000;
+      // Cold PowerShell startup competes with installs and other Windows work
+      // during update preflight. Allow for that while requiring all retries,
+      // and leave time inside the test's timeout for process/file cleanup.
+      const deadline = Date.now() + 45000;
       let attempts = [];
       while (Date.now() < deadline) {
         attempts = await readFile(join(data, "attempts.jsonl"), "utf8")
@@ -79,7 +82,10 @@ console.log('fixture host stopped');
         assert.equal(child.exitCode, null, output);
         await new Promise((done) => setTimeout(done, 100));
       }
-      assert.ok(attempts.length >= 3, output);
+      assert.ok(
+        attempts.length >= 3,
+        `Expected three launcher attempts (failure, stop, retry); saw ${attempts.length}.\n${output}`,
+      );
       for (const attempt of attempts) {
         assert.deepEqual(attempt.args, ["--supervise"]);
         assert.equal(attempt.cwd, root);

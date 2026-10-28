@@ -46,6 +46,14 @@ Final unit verification used `node --test --test-concurrency=1 test/*.test.mjs`:
 the existing detached restart helper replaced its state file; that fixture
 passed without concurrent browser work. Restart implementation was unchanged.
 
+Update preflight reliability fixed 2026-10-28: `npm test` now uses that serial
+test-file schedule by default, including inside prepared runtimes. A live update
+was rejected when cold PowerShell startup left time for only two of the startup
+supervisor test's three required launches before its ten-second deadline. That
+behavior check now allows 45 seconds, with a separate 60-second test timeout for
+cleanup; all launch arguments, environment isolation, retry counts and log
+assertions remain required.
+
 Additional delivery checks passed after the table above: an actual host-process
 kill during a real Codex response preserved partial output, marked the run
 interrupted, refused duplicate execution, and allowed explicit native continuation.

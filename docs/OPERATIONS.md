@@ -611,8 +611,12 @@ reconnection and any client reload. It closes automatically after the host is
 accepting work and the workspace has loaded. Your saved drafts remain in place.
 
 Harness exports the committed revision into a separate runtime, installs its
-locked dependencies, builds it and runs the tests without inference. It waits
-for all chats, queued messages, approvals, live terminals and host jobs to finish,
+locked dependencies, builds it and runs the tests without inference. Test files
+run one at a time to avoid Windows process contention and intermittent
+restart-fixture file locks. The startup supervisor
+test allows for cold PowerShell startup while still requiring all retry checks.
+After the checks pass, it waits for all chats, queued messages, approvals, live
+terminals and host jobs to finish,
 then checks five seconds of idle time before switching. Close terminal tabs to
 allow an update; waiting never stops work for you. Uncommitted source changes or
 a changed source branch also postpone the switch.
