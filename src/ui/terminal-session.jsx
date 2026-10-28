@@ -235,7 +235,7 @@ export function ShellMenu({ label, className = "", children, onPick }) {
 }
 
 // A terminal window in the pane strip beside the chats. Each tab is its own
-// shell on the host; closing the pane leaves every tab running.
+// shell on the host; closing the pane ends them all.
 export const TerminalSession = forwardRef(function TerminalSession(
   {
     group,
@@ -286,24 +286,14 @@ export const TerminalSession = forwardRef(function TerminalSession(
         <button
           className="icon-button"
           aria-label="Close pane"
-          title="Close this pane. The terminal keeps running."
+          title={group ? "Close this terminal and all its tabs" : "Close pane"}
           onClick={(e) => {
             e.stopPropagation();
-            onClose();
+            if (group) onEnd();
+            else onClose();
           }}
         >
           <Icon name="close" size={14} />
-        </button>
-        <button
-          className="icon-button"
-          aria-label={`End ${title}`}
-          title="End this terminal and all its tabs"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEnd();
-          }}
-        >
-          <Icon name="stop" size={13} />
         </button>
       </header>
       {group ? (

@@ -203,14 +203,13 @@ try {
   await expect(page.locator(".chat-pane")).toHaveCount(3);
   await page.screenshot({ path: ".local/screenshots/terminal-panes.png" });
 
-  // Closing a pane keeps the shell; it comes back from the sidebar.
-  await page.getByLabel("Close pane").first().click();
+  // Closing a terminal's pane ends its shell and drops it from the sidebar.
+  const running = app.terminals.list().length;
+  await page.locator(".terminal-pane").nth(1).getByLabel("Close pane").click();
   await expect(page.locator(".terminal-pane")).toHaveCount(1);
   await expect(page.locator(".chat-pane")).toHaveCount(2);
-  expect(app.terminals.list()).toHaveLength(2);
-  await sidebar
-    .getByRole("button", { name: "Terminal 1", exact: true })
-    .click();
+  await expect.poll(() => app.terminals.list().length).toBe(running - 1);
+  await expect(page.locator(".terminal-row")).toHaveCount(1);
   await expect(page.locator(".terminal-pane .xterm-rows")).toContainText(
     "PANE_OK",
   );
@@ -261,7 +260,7 @@ try {
   await expect(page.locator(".terminal-row")).toHaveCount(1);
   await page.getByRole("button", { name: "New terminal", exact: true }).click();
   await expect.poll(() => app.terminals.list().length).toBe(kept + 1);
-  await page.getByLabel("Close pane").first().click();
+  await page.locator(".terminal-pane").getByLabel("Close pane").click();
   await expect.poll(() => app.terminals.list().length).toBe(kept);
   await expect(page.locator(".terminal-row")).toHaveCount(1);
 
