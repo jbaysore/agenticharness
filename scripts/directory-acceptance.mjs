@@ -373,7 +373,7 @@ try {
     await welcome.goto(fresh.runtime.origin);
     await expect(
       welcome.getByLabel("Message your coding agent"),
-    ).toBeDisabled();
+    ).toBeEnabled();
     await welcome
       .getByRole("button", { name: "Change directory", exact: true })
       .click();

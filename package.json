@@ -11,6 +11,7 @@
     "test": "node --test test/*.test.mjs",
     "test:attachments": "npm run build && node scripts/attachments-acceptance.mjs",
     "test:directory": "npm run build && node scripts/directory-acceptance.mjs",
+    "test:directoryless": "npm run build && node scripts/directoryless-acceptance.mjs",
     "test:codex-commands": "node scripts/codex-command-acceptance.mjs",
     "test:layout": "npm run build && node scripts/layout-acceptance.mjs",
     "test:mobile": "npm run build && node scripts/mobile-acceptance.mjs",

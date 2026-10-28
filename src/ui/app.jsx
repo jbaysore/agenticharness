@@ -74,6 +74,9 @@ import {
 const terminalsKey = "harness.terminals.open.v1";
 const projectsKey = "harness.projects.open.v1";
 const recentsKey = "harness.recents.open.v1";
+const NO_DIRECTORY = "no-directory";
+const folderOfChat = (chat) =>
+  chat?.directoryless ? NO_DIRECTORY : chat?.project_id;
 function loadSectionOpen(key) {
   try {
     return localStorage.getItem(key) !== "false";
@@ -230,7 +233,9 @@ function App() {
   const refresh = useCallback(async () => {
     const next = await api("/api/state");
     setState(next);
-    setSelectedProject((p) => p || next.projects[0]?.id || "");
+    setSelectedProject(
+      (p) => p || next.projects.find((p) => !p.scratch)?.id || NO_DIRECTORY,
+    );
     return next;
   }, []);
   // A chat is tracked from the moment its snapshot arrives, so no streamed
@@ -274,9 +279,10 @@ function App() {
           ? openBeside(current, id, next.project_id, limit.current)
           : openInFocused(current, id, next.project_id),
       );
-      setSelectedProject(next.project_id);
+      const folder = folderOfChat(next);
+      setSelectedProject(folder);
       setExpandedFolders((saved) =>
-        changeFolders(saved, next.project_id, next.project_id, "expand"),
+        changeFolders(saved, folder, folder, "expand"),
       );
       setSidebar(false);
       return next;
@@ -399,8 +405,10 @@ function App() {
           setView(rebuilt);
           const focus = focusedPane(rebuilt);
           setSelectedProject(
-            found.find((c) => c.id === focus.chatId)?.project_id ??
-              (focus.projectId || next.projects[0]?.id || ""),
+            folderOfChat(found.find((c) => c.id === focus.chatId)) ??
+              (focus.projectId ||
+                next.projects.find((p) => !p.scratch)?.id ||
+                NO_DIRECTORY),
           );
         } else if (found.length) {
           found.forEach(admit);
@@ -418,7 +426,9 @@ function App() {
           );
           setView(restored);
           setSelectedProject(
-            found.find((c) => c.id === focusedPane(restored).chatId).project_id,
+            folderOfChat(
+              found.find((c) => c.id === focusedPane(restored).chatId),
+            ),
           );
         }
         setOnline(true);
@@ -671,13 +681,15 @@ function App() {
   const paneProject = (p) =>
     state.projects.find(
       (candidate) =>
+        (p.chatId || !candidate.scratch) &&
         candidate.id ===
         (chats[p.chatId]?.project_id ?? (p.projectId || selectedProject)),
     );
   // The work panel and breadcrumb follow whichever pane has focus.
   const project = paneProject(current);
   useEffect(() => {
-    if (project) setSelectedProject(project.id);
+    if (project)
+      setSelectedProject(project.scratch ? NO_DIRECTORY : project.id);
   }, [view.focused]);
   // Looking at a chat is what marks its finished turn as read.
   const shownIds = shown.map((p) => p.chatId).filter(Boolean);
@@ -704,7 +716,12 @@ function App() {
     return () => window.removeEventListener("keydown", jump);
   }, [shown.map((p) => p.key).join(",")]);
   // The taskbar shows how many chats are waiting while the window is in the background.
-  const active = activeChats(state.conversations),
+  const projects = state.projects.filter((p) => !p.scratch),
+    sidebarProjects = [
+      { id: NO_DIRECTORY, name: "No directory", scratch: true },
+      ...projects,
+    ],
+    active = activeChats(state.conversations),
     pinned = pinnedChats(state.conversations),
     recent = recentChats(state.conversations),
     recentLimit = folderLimits.recents ?? INITIAL_CHAT_LIMIT,
@@ -851,12 +868,8 @@ function App() {
   }
   async function newChat(beside = false, projectId = selectedProject) {
     const target = state.projects.find((p) => p.id === projectId);
-    if (!target) {
-      setModal("project");
-      return;
-    }
     const c = await api("/api/chats", {
-      projectId: target.id,
+      projectId: target && !target.scratch ? target.id : null,
       ...selection.current,
     });
     await openChat(c.id, beside);
@@ -870,6 +883,7 @@ function App() {
     });
     const next = admit(await api("/api/chats/" + c.id));
     setView((v) => setPaneChat(v, p.key, c.id));
+    await refresh();
     return next;
   }
   async function followLink(id, beside, anchor) {
@@ -884,20 +898,24 @@ function App() {
   async function changePaneProject(p, target, chosen) {
     await refresh();
     if (p.chatId) {
-      await api("/api/chats/" + p.chatId, { projectId: target.id }, "PATCH");
+      await api("/api/chats/" + p.chatId, { projectId: target?.id ?? null }, "PATCH");
       await reload(p.chatId);
+      await refresh();
     } else {
-      await ensureChat(p, { ...chosen, projectId: target.id });
+      await ensureChat(p, { ...chosen, projectId: target?.id ?? null });
     }
     setView((v) => ({
       ...v,
       panes: v.panes.map((pane) =>
-        pane.key === p.key ? { ...pane, projectId: target.id } : pane,
+        pane.key === p.key
+          ? { ...pane, projectId: target?.id ?? NO_DIRECTORY }
+          : pane,
       ),
     }));
-    setSelectedProject(target.id);
+    const folder = target?.scratch ? NO_DIRECTORY : (target?.id ?? NO_DIRECTORY);
+    setSelectedProject(folder);
     setExpandedFolders((saved) =>
-      changeFolders(saved, target.id, target.id, "expand"),
+      changeFolders(saved, folder, folder, "expand"),
     );
   }
   const action = (fn) => async () => {
@@ -1134,8 +1152,8 @@ function App() {
               <Icon name="chevron" size={12} />
               Projects
             </span>
-            {!projectsOpen && state.projects.length > 0 && (
-              <small>{state.projects.length}</small>
+            {!projectsOpen && projects.length > 0 && (
+              <small>{projects.length}</small>
             )}
           </button>
           <button
@@ -1147,9 +1165,9 @@ function App() {
           </button>
         </div>
         <div className="project-list" id="project-list" hidden={!projectsOpen}>
-          {state.projects.map((p) => {
+          {sidebarProjects.map((p) => {
             const mine = state.conversations.filter(
-                (c) => c.project_id === p.id,
+                (c) => folderOfChat(c) === p.id,
               ),
               archived = sidebarOrder(mine.filter((c) => c.archived_at)),
               openChats = sidebarOrder(mine.filter((c) => !c.archived_at)),
@@ -1198,8 +1216,16 @@ function App() {
                   </button>
                   <button
                     className="icon-button folder-new-chat"
-                    aria-label={`New conversation in ${p.name}`}
-                    title={`New conversation in ${p.name}`}
+                    aria-label={
+                      p.scratch
+                        ? "New conversation without a directory"
+                        : `New conversation in ${p.name}`
+                    }
+                    title={
+                      p.scratch
+                        ? "New conversation without a directory"
+                        : `New conversation in ${p.name}`
+                    }
                     onClick={(e) =>
                       action(() => newChat(e.ctrlKey || e.metaKey, p.id))()
                     }
@@ -1234,9 +1260,9 @@ function App() {
               </div>
             );
           })}
-          {!state.projects.length && (
+          {!projects.length && (
             <p className="sidebar-hint">
-              Add a folder to begin. Your code stays on this computer.
+              Start a chat without a directory, or add a project folder.
             </p>
           )}
         </div>
@@ -1326,7 +1352,7 @@ function App() {
             <Icon name="sidebar" />
           </button>
           <div className="breadcrumbs">
-            <span>{project?.name ?? "Your workspace"}</span>
+            <span>{project?.name ?? "No directory"}</span>
             <b>/</b>
             <strong>
               {current.terminalId
@@ -1486,7 +1512,7 @@ function App() {
                 }}
                 chat={(p.chatId && chats[p.chatId]) || null}
                 project={paneProject(p)}
-                projects={state.projects}
+                projects={projects}
                 onChangeProject={(target, chosen) =>
                   changePaneProject(p, target, chosen)
                 }
@@ -1924,7 +1950,9 @@ function App() {
                 "/api/search?q=" +
                   encodeURIComponent(search) +
                   (searchScope === "project" && selectedProject
-                    ? "&projectId=" + selectedProject
+                    ? selectedProject === NO_DIRECTORY
+                      ? "&directoryless=true"
+                      : "&projectId=" + selectedProject
                     : ""),
               )
                 .then(setResults)
@@ -1943,7 +1971,9 @@ function App() {
               value={searchScope}
               onChange={(e) => setSearchScope(e.target.value)}
             >
-              <option value="project">This project</option>
+              <option value="project">
+                {selectedProject === NO_DIRECTORY ? "No directory" : "This project"}
+              </option>
               <option value="all">All projects</option>
             </select>
             <button className="primary">Search</button>
@@ -2016,6 +2046,12 @@ function WorkspacePanel({
   const wanted = useRef(query);
   wanted.current = query;
   const refresh = useCallback(async () => {
+    if (project.scratch) {
+      setState({ files: [], changes: [] });
+      setProblem("");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const next = await api("/api/repository?" + query);
@@ -2027,7 +2063,7 @@ function WorkspacePanel({
     } finally {
       if (wanted.current === query) setLoading(false);
     }
-  }, [query]);
+  }, [query, project.scratch]);
   useEffect(() => {
     setSelectedFile("");
     setDiff(null);
@@ -2154,6 +2190,14 @@ function WorkspacePanel({
         )}
       </div>
     );
+  if (project.scratch && panel === "review")
+    return (
+      <div className="panel-empty">
+        <Icon name="chat" size={28} />
+        <h3>No project directory</h3>
+        <p>Start a chat in a project folder to review code changes.</p>
+      </div>
+    );
   let newLine = 0;
   return (
     <div className="repository-panel">
@@ -2179,10 +2223,12 @@ function WorkspacePanel({
           <Icon name="refresh" size={15} />
         </button>
       </div>
-      <div className="branch-line">
-        <span>⑂ {state?.branch ?? "Repository"}</span>
-        <span>{state?.changes?.length ?? 0} changed</span>
-      </div>
+      {!project.scratch && (
+        <div className="branch-line">
+          <span>⑂ {state?.branch ?? "Repository"}</span>
+          <span>{state?.changes?.length ?? 0} changed</span>
+        </div>
+      )}
       {peers.length > 0 && (
         <p className="notice workspace-peers">
           {workspacePeersLabel(peers)}: {peers.map((c) => c.title).join(", ")}.

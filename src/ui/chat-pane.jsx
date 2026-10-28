@@ -406,12 +406,16 @@ export function ChatPane({
     field?.setSelectionRange(left.cursor, left.cursor);
     if (next !== mode) changeMode(next);
   }
-  async function changeDirectory({ project: next, path }) {
+  async function changeDirectory({ project: next, path, directoryless = false }) {
     if (sending.current || uploadingRef.current) return;
+    if (directoryless && (!project || project.scratch)) return;
     sending.current = true;
     setBusy(true);
     try {
-      next ??= await api("/api/projects", { path });
+      next ??= await api(
+        "/api/projects",
+        directoryless ? { directoryless: true } : { path },
+      );
       if (next.id === project?.id) return;
       // Uploads belong to a project. Copy draft attachments before switching,
       // so the new conversation can send them and failures keep the old draft.
@@ -446,7 +450,7 @@ export function ChatPane({
     }
   }
   async function attachFiles(files, pasted = false) {
-    if (!project || sending.current || uploadingRef.current || !files.length)
+    if (sending.current || uploadingRef.current || !files.length)
       return;
     if (attachments.length + files.length > 10) {
       report(new Error("Attach up to 10 files per message."));
@@ -455,6 +459,19 @@ export function ChatPane({
     uploadingRef.current = true;
     setUploading(true);
     try {
+      const projectId =
+        project?.id ??
+        (await ensureChat({
+          provider,
+          model,
+          effort,
+          permissions,
+          mode,
+        })).project_id;
+      if (!chat && !project) {
+        saveDraft(draftKey, "");
+        saveDraftAttachments(draftKey, []);
+      }
       for (const file of files) {
         if (file.size > 20 * 1024 * 1024) {
           report(
@@ -470,7 +487,7 @@ export function ChatPane({
             : file.name || "attachment";
         try {
           const saved = await api(
-            `/api/projects/${project.id}/attachments`,
+            `/api/projects/${projectId}/attachments`,
             file,
             "POST",
             {
@@ -482,6 +499,8 @@ export function ChatPane({
           report(e);
         }
       }
+    } catch (e) {
+      report(e);
     } finally {
       uploadingRef.current = false;
       setUploading(false);
@@ -507,7 +526,6 @@ export function ChatPane({
       return;
     }
     if (
-      !project ||
       busy ||
       sending.current ||
       uploadingRef.current ||
@@ -710,7 +728,7 @@ export function ChatPane({
         {!chat?.messages?.length ? (
           <div className="welcome">
             <h1>{greeting()}</h1>
-            <p>{project ? "Who's on this one?" : "Add a project to begin."}</p>
+            <p>Who's on this one?</p>
             {/* Each card opens its agent's models; choosing one sets the
                 composer up and puts the cursor in it. */}
             <div className="provider-cards">
@@ -936,7 +954,7 @@ export function ChatPane({
           onDragOver={(e) => {
             if (!e.dataTransfer.types.includes("Files")) return;
             e.preventDefault();
-            if (project && !busy && !uploading) setDragging(true);
+            if (!busy && !uploading) setDragging(true);
           }}
           onDragLeave={(e) => {
             if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false);
@@ -958,7 +976,7 @@ export function ChatPane({
             className="attachment-input"
             aria-label="Upload files"
             multiple
-            disabled={!project || busy || uploading}
+            disabled={busy || uploading}
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
               e.target.value = "";
@@ -985,11 +1003,9 @@ export function ChatPane({
             rows={compact ? 1 : 2}
             aria-label="Message your coding agent"
             placeholder={
-              !project
-                ? "Add a project to start a conversation…"
-                : chat?.activeRun
-                  ? "Queues until this turn finishes. /steer redirects it…"
-                  : `Ask ${providerName(provider)} anything…`
+              chat?.activeRun
+                ? "Queues until this turn finishes. /steer redirects it…"
+                : `Ask ${providerName(provider)} anything…`
             }
             value={draft}
             onChange={(e) => {
@@ -1024,7 +1040,6 @@ export function ChatPane({
                 send();
               }
             }}
-            disabled={!project}
           />
           <div className="composer-controls">
             <button
@@ -1033,7 +1048,7 @@ export function ChatPane({
               aria-label="Attach files"
               title="Attach files or paste a screenshot · Up to 10 files, 20 MB each"
               disabled={
-                !project || busy || uploading || attachments.length >= 10
+                busy || uploading || attachments.length >= 10
               }
               onClick={() => fileInput.current?.click()}
             >
@@ -1081,7 +1096,6 @@ export function ChatPane({
                 permissionsBusy ||
                 modeBusy ||
                 (!draft.trim() && !attachments.length) ||
-                !project ||
                 !model ||
                 !selectedModel ||
                 selectedModel.disabled ||
@@ -1157,7 +1171,7 @@ export function ChatPane({
                     {
                       {
                         none: "This conversation",
-                        project: "This project",
+                        project: project?.scratch ? "This conversation" : "This project",
                         all: "All projects",
                       }[chat.scope]
                     }
@@ -1193,7 +1207,7 @@ export function ChatPane({
               {
                 {
                   none: "This conversation",
-                  project: "This project",
+                  project: project?.scratch ? "This conversation" : "This project",
                   all: "All projects",
                 }[chat.scope]
               }

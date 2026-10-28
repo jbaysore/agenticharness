@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomBytes, randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectCodex, runCodex } from "../providers/codex.mjs";
@@ -586,6 +587,10 @@ export class Controller extends EventEmitter {
   // chat began before worktrees were given to every chat. Explicit moves reset
   // the native session before changing this folder.
   async chatFolder(chat, home, run) {
+    if (home.scratch) {
+      await mkdir(home.path, { recursive: true });
+      return home;
+    }
     await this.tidying.get(chat.id);
     let worktree = chat.worktree;
     if (!worktree && this.worktreeRoot && !Object.keys(chat.sessions).length)

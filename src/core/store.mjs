@@ -14,7 +14,7 @@ const projectNoteStopWords = new Set(
 );
 
 // A chat's newest run is its only possible active one: createRun refuses a second.
-const summary = `SELECT c.*, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
+const summary = `SELECT c.*, (SELECT scratch FROM projects WHERE id=c.project_id) AS directoryless, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
   (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals
   FROM conversations c LEFT JOIN runs l ON l.rowid=(SELECT r.rowid FROM runs r WHERE r.conversation_id=c.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)`;
 
@@ -36,6 +36,7 @@ export function chatStatus(row) {
 function summarize({ last_status, last_ended_at, pending_approvals, ...c }) {
   return {
     ...c,
+    directoryless: Boolean(c.directoryless),
     sessions: JSON.parse(c.sessions),
     worktree: c.worktree ? JSON.parse(c.worktree) : null,
     ...chatStatus({ ...c, last_status, last_ended_at, pending_approvals }),
@@ -141,6 +142,10 @@ export class Store {
     // Run on a chat's rebased branch before it lands on the project's branch.
     if (!columns("projects").includes("check_command"))
       this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
+    if (!columns("projects").includes("scratch"))
+      this.db.exec(
+        "ALTER TABLE projects ADD COLUMN scratch INTEGER NOT NULL DEFAULT 0",
+      );
     if (this.setting("project-log-index-version") !== 1) {
       this.db.exec("INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')");
       this.setting("project-log-index-version", 1);
@@ -256,15 +261,17 @@ export class Store {
   project(id) {
     return this.projects().find((p) => p.id === id);
   }
-  addProject(name, path) {
+  addProject(name, path, { scratch = false } = {}) {
     const existing = this.db
       .prepare("SELECT id FROM projects WHERE path=?")
       .get(path);
     if (existing) return this.project(existing.id);
     const id = randomUUID();
     this.db
-      .prepare("INSERT INTO projects(id,name,path,created_at) VALUES(?,?,?,?)")
-      .run(id, name, path, this.now());
+      .prepare(
+        "INSERT INTO projects(id,name,path,created_at,scratch) VALUES(?,?,?,?,?)",
+      )
+      .run(id, name, path, this.now(), Number(scratch));
     return this.project(id);
   }
   setCheckCommand(projectId, command) {
@@ -595,7 +602,10 @@ export class Store {
   replaceMessage(id, text) {
     this.db.prepare("UPDATE messages SET content=? WHERE id=?").run(text, id);
   }
-  search(query, { projectId, conversationId, limit = 30 } = {}) {
+  search(
+    query,
+    { projectId, conversationId, directoryless = false, limit = 30 } = {},
+  ) {
     const terms =
       query
         .trim()
@@ -610,7 +620,8 @@ export class Store {
         `SELECT m.id,m.conversation_id,m.role,m.provider,m.model,m.created_at,c.title,c.project_id,
       snippet(messages_fts,0,'','', ' … ',32) AS excerpt FROM messages_fts
       JOIN messages m ON m.rowid=messages_fts.rowid JOIN conversations c ON c.id=m.conversation_id
-      WHERE messages_fts MATCH ? AND (? IS NULL OR c.project_id=?) AND (? IS NULL OR c.id=?) ORDER BY rank LIMIT ?`,
+      WHERE messages_fts MATCH ? AND (? IS NULL OR c.project_id=?) AND (? IS NULL OR c.id=?)
+      AND (? = 0 OR c.project_id IN (SELECT id FROM projects WHERE scratch=1)) ORDER BY rank LIMIT ?`,
       )
       .all(
         match,
@@ -618,6 +629,7 @@ export class Store {
         projectId ?? null,
         conversationId ?? null,
         conversationId ?? null,
+        Number(directoryless),
         Math.min(limit, 100),
       )
       .map((row) => ({

@@ -114,6 +114,25 @@ export async function createHarness({
     .catch(() => null);
   await mkdir(join(dataDir, "connection-probe"), { recursive: true });
   const store = new Store(join(dataDir, "workspace.sqlite"));
+  // Providers need a cwd even for general conversation. Each directoryless
+  // chat gets a private, persistent workspace without adding a user project.
+  const chatProject = async (projectId, current = null) => {
+    if (projectId != null) {
+      const project = store.project(projectId);
+      if (!project) throw new Error("Project not found");
+      if (
+        !project.scratch ||
+        current?.project_id === project.id ||
+        !store.conversations().some((c) => c.project_id === project.id)
+      )
+        return project;
+    }
+    if (projectId == null && current?.directoryless)
+      return store.project(current.project_id);
+    const path = resolve(dataDir, "chats", randomUUID());
+    await mkdir(path, { recursive: true });
+    return store.addProject("No directory", path, { scratch: true });
+  };
   const openrouter = new OpenRouter(store, dataDir, openrouterOptions);
   if (seedProject)
     store.addProject(basename(seedProject), await projectPath(seedProject));
@@ -540,8 +559,13 @@ export async function createHarness({
             await browseDirectories(url.searchParams.get("path") ?? undefined),
           );
         if (path === "/api/projects" && method === "POST") {
-          const body = await readJson(req),
-            path = await projectPath(body.path),
+          const body = await readJson(req);
+          if (body.directoryless === true) {
+            const project = await chatProject(null);
+            controller.event(null, null, "projects", {});
+            return json(res, 201, project);
+          }
+          const path = await projectPath(body.path),
             project = store.addProject(
               String(body.name ?? basename(path)).slice(0, 100),
               path,
@@ -589,11 +613,10 @@ export async function createHarness({
           );
         }
         if (path === "/api/chats" && method === "POST") {
-          const body = await readJson(req);
-          if (!store.project(body.projectId))
-            throw new Error("Choose a project first");
+          const body = await readJson(req),
+            project = await chatProject(body.projectId);
           const chat = store.createConversation({
-            projectId: body.projectId,
+            projectId: project.id,
             provider: body.provider ?? "codex",
             model: body.model ?? "",
             effort: body.effort ?? null,
@@ -602,6 +625,7 @@ export async function createHarness({
               : "auto",
             mode: CHAT_MODES.includes(body.mode) ? body.mode : "default",
           });
+          if (project.scratch) controller.event(null, null, "projects", {});
           controller.event(chat.id, null, "chat", chat);
           return json(res, 201, chat);
         }
@@ -632,8 +656,20 @@ export async function createHarness({
                 error:
                   "History scope is fixed for this conversation. Change the default for new conversations in Connections & usage.",
               });
-            if (Object.hasOwn(body, "projectId"))
-              store.setConversationProject(id, body.projectId);
+            if (Object.hasOwn(body, "projectId")) {
+              const current = store.conversation(id);
+              if (
+                body.projectId !== current.project_id &&
+                !(body.projectId == null && current.directoryless) &&
+                store.conversationStarted(id)
+              )
+                throw new Error(
+                  "Choose a directory before sending the first message",
+                );
+              const project = await chatProject(body.projectId, current);
+              store.setConversationProject(id, project.id);
+              if (project.scratch) controller.event(null, null, "projects", {});
+            }
             if (body.archived !== undefined) {
               if (controller.active.has(id))
                 throw new Error("Stop the turn before archiving this chat");
@@ -696,6 +732,7 @@ export async function createHarness({
             200,
             store.search(url.searchParams.get("q") ?? "", {
               projectId: url.searchParams.get("projectId") ?? undefined,
+              directoryless: url.searchParams.get("directoryless") === "true",
             }),
           );
         if (path === "/api/repository" && method === "GET")

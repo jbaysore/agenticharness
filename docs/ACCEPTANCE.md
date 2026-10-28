@@ -25,6 +25,13 @@ folders. No credentials, account identifiers or session transcripts are committe
 
 ## Reproduce
 
+Directoryless chat checks added 2026-10-28: `npm run test:directoryless` uses
+simulated providers and Edge to verify starting without a project, attachments,
+failed creation recovery, replies, reloads, scoped search, private workspaces,
+sidebar grouping, the review panel, directory switching with drafts/settings/files
+preserved, and the mobile composer. `npm run test:directory` retains coverage of
+ordinary folder selection. No inference is consumed by these checks.
+
 Context/caching checks added 2026-10-27: `npm run test:context` uses isolated
 fixture providers and Edge to verify live updates, cache details, compaction,
 model changes, draft preservation, reload, two/four panes, keyboard controls,

@@ -473,6 +473,8 @@ export function projectLogContext(notes) {
 // For a chat in its own worktree, `project.path` is the worktree and
 // `project.home` the shared project folder.
 function workspaceInstructions(project) {
+  if (project.scratch)
+    return `No project directory is selected for this chat. ${project.path} is its private Harness-managed workspace for temporary files and generated artifacts. Answer general requests directly; do not assume a repository or require Git setup. Use move_chat only if the user explicitly asks to move to a project directory.`;
   const worktree = project.worktree;
   if (!worktree)
     return `Shared workspace: other Harness chats may be working in this same folder at the same time. A turn begins with a workspace notice when one already is, and one can start later, so always call workspace_activity before you commit. Whenever a notice or workspace_activity reports another chat: ${sharedWorkspaceRules}`;

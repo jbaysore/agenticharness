@@ -33,6 +33,13 @@ checked separately; startup failure restores the previous version. See
 Real editing, test execution and handoff across all three agents pass. The app
 includes streaming chat, native sessions, shared history search, review comments,
 revision requests, file artifacts, decisions, approvals, and PowerShell terminals.
+
+Start a chat from **No directory** in the sidebar without choosing a project
+folder. These chats support attachments and keep their history across restarts.
+Before the first message, the composer's directory picker can switch between
+**No directory** and a project folder. Each directoryless chat uses its own
+private workspace managed by Harness.
+
 Each chat has a context bar with token counts, cache reuse, and measurement
 details. It keeps context occupancy separate from subscription allowance and
 labels estimates or unavailable provider data. Codex context delivery avoids

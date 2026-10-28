@@ -6,7 +6,9 @@ import "./directory-picker.css";
 
 function DirectoryExplorer({ project, projects, onChange, onClose }) {
   const [directory, setDirectory] = useState(null),
-    [location, setLocation] = useState(project?.path ?? ""),
+    [location, setLocation] = useState(
+      project?.scratch ? "" : (project?.path ?? ""),
+    ),
     [loading, setLoading] = useState(true),
     [validated, setValidated] = useState(false),
     [saving, setSaving] = useState(false),
@@ -43,7 +45,7 @@ function DirectoryExplorer({ project, projects, onChange, onClose }) {
     }
   }
   useEffect(() => {
-    navigate(project?.path);
+    navigate(project?.scratch ? undefined : project?.path);
     return () => {
       request.current++;
     };
@@ -97,6 +99,21 @@ function DirectoryExplorer({ project, projects, onChange, onClose }) {
     !loading &&
     !saving &&
     location.trim() === directory.path;
+  async function choose(value) {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      await onChange(value);
+      onClose();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
   return (
     <Modal title="Choose a directory" onClose={close} wide>
       <p>
@@ -132,6 +149,15 @@ function DirectoryExplorer({ project, projects, onChange, onClose }) {
         </form>
         <div className="directory-browser">
           <nav className="directory-shortcuts" aria-label="Directory shortcuts">
+            <h3>Chat</h3>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => choose({ directoryless: true })}
+            >
+              <Icon name="chat" size={15} />
+              <span>No directory</span>
+            </button>
             <h3>Locations</h3>
             {(directory?.roots ?? [{ name: "Home", path: undefined }]).map(
               (root) => (
@@ -248,22 +274,11 @@ function DirectoryExplorer({ project, projects, onChange, onClose }) {
             className="primary"
             disabled={!canUse}
             onClick={async () => {
-              if (!canUse || savingRef.current) return;
-              savingRef.current = true;
-              setSaving(true);
-              setError("");
-              try {
-                await onChange({
+              if (canUse)
+                await choose({
                   project: projects.find((p) => p.path === directory.path),
                   path: directory.path,
                 });
-                onClose();
-              } catch (e) {
-                setError(e.message);
-              } finally {
-                savingRef.current = false;
-                setSaving(false);
-              }
             }}
           >
             {saving ? "Changing directory…" : "Use this folder"}
@@ -291,13 +306,15 @@ export function DirectoryPicker({ project, projects, disabled, onChange }) {
         aria-haspopup="dialog"
         aria-expanded={open}
         title={
-          project ? `Change directory: ${project.path}` : "Choose a directory"
+          project && !project.scratch
+            ? `Change directory: ${project.path}`
+            : "No directory — choose a folder to work in"
         }
         disabled={disabled}
         onClick={() => setOpen(true)}
       >
         <Icon name="folder" size={14} />
-        <span>{project?.name ?? "Choose a directory"}</span>
+        <span>{project?.name ?? "No directory"}</span>
         <span className="directory-chevron" aria-hidden="true">
           ▾
         </span>
