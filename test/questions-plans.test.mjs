@@ -262,6 +262,35 @@ test("native approval uses and persists the current proposal", async (t) => {
   assert.equal(store.conversation(chat.id).mode, "default");
 });
 
+for (const provider of ["codex", "claude", "cursor"])
+  test(`${provider}: declining a plan delivers and saves the user's feedback without leaving Plan`, async (t) => {
+    const { store, controller, chat, start } = fixture(t, provider);
+    let received;
+    const { task } = start(async (ctx) => {
+      received = await ctx.approve({
+        kind: "plan",
+        title: "Build?",
+        plan: "Add caching",
+      });
+      return { status: "completed" };
+    });
+    await waitFor(() => store.pendingApprovals(chat.id).length);
+    assert.equal(received, undefined);
+    const approval = store.pendingApprovals(chat.id)[0];
+    controller.answer(approval.id, {
+      allow: false,
+      reason: "  Include cache invalidation.\nTest expiry.  ",
+    });
+    await task;
+    assert.deepEqual(received, {
+      allow: false,
+      answers: {},
+      reason: "Include cache invalidation.\nTest expiry.",
+    });
+    assert.deepEqual(store.approval(approval.id).response, received);
+    assert.equal(store.conversation(chat.id).mode, "plan");
+  });
+
 test("a proposal streamed in chunks is captured only when its closing tag arrives", async (t) => {
   const { store, chat, start } = fixture(t, "cursor");
   const { run, task } = start(async (ctx) => {

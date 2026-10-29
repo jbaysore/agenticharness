@@ -192,6 +192,31 @@ test("Claude plans in its plan mode, and an approved plan resumes the chat's per
   ]);
 });
 
+test("Claude receives plan feedback while remaining in plan mode", async () => {
+  let decision;
+  const { run } = fakeClaude(
+    {
+      text: "Add caching",
+      mode: "plan",
+      approve: async () => ({
+        allow: false,
+        reason: "Include cache invalidation.\nTest expiry.",
+      }),
+      planApproved: () => assert.fail("The plan was not approved"),
+    },
+    async (options) => {
+      decision = await options.canUseTool("ExitPlanMode", {
+        plan: "Add caching",
+      });
+    },
+  );
+  assert.equal((await run).status, "completed");
+  assert.equal(decision.behavior, "deny");
+  assert.match(decision.message, /Stay in plan mode and revise/);
+  assert.match(decision.message, /Include cache invalidation\.\nTest expiry\./);
+  assert.equal(decision.updatedPermissions, undefined);
+});
+
 test("Claude exposes Harness multiple selection through its real MCP server", async () => {
   const selections = ["Desktop, Windows", "Mobile"];
   const { run } = fakeClaude(
@@ -644,7 +669,7 @@ function fakeCursor(onPlan) {
   return { rpc, calls, responses };
 }
 
-async function runCursorPlan(mode, allow) {
+async function runCursorPlan(mode, allow, reason) {
   const { rpc, calls, responses } = fakeCursor(() => ({
     id: "plan-1",
     method: "cursor/create_plan",
@@ -664,7 +689,7 @@ async function runCursorPlan(mode, allow) {
       billingConfirmation: { fingerprint: "fixture", disabled: true },
       approve: async (request) => {
         requests.push(request);
-        return { allow };
+        return { allow, reason };
       },
       planApproved: () => approved++,
     },
@@ -707,6 +732,7 @@ test("declining a Cursor plan stays in plan mode and does not build", async () =
   const { result, calls, responses, requests, approved } = await runCursorPlan(
     "plan",
     false,
+    "Include cache invalidation.\nTest expiry.",
   );
   assert.equal(result.status, "completed");
   assert.equal(requests[0].kind, "plan");
@@ -719,6 +745,10 @@ test("declining a Cursor plan stays in plan mode and does not build", async () =
   );
   assert.equal(promptTexts(calls).length, 1);
   assert.equal(responses[0].result.outcome.outcome, "rejected");
+  assert.equal(
+    responses[0].result.outcome.reason,
+    "Include cache invalidation.\nTest expiry.",
+  );
 });
 
 test("a Cursor plan outside plan mode stays a permission and does not build", async () => {

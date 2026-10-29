@@ -148,6 +148,8 @@ export function Modal({ title, children, onClose, wide = false }) {
 export function Approval({ approval, onAnswer }) {
   const [responses, setResponses] = useState({}),
     [page, setPage] = useState(0),
+    [revisingPlan, setRevisingPlan] = useState(false),
+    [feedback, setFeedback] = useState(""),
     [submitting, setSubmitting] = useState(false),
     r = approval.request,
     now = useClock(r.kind === "question" && Number.isFinite(r.deadline)),
@@ -243,15 +245,33 @@ export function Approval({ approval, onAnswer }) {
           <pre>{JSON.stringify(r.details, null, 2)}</pre>
         </details>
       )}
+      {r.kind === "plan" && revisingPlan && (
+        <label className="question-custom">
+          What should change?
+          <textarea
+            autoFocus
+            rows={3}
+            value={feedback}
+            disabled={submitting}
+            placeholder="Tell the agent what is wrong or missing in the plan."
+            onChange={(e) => setFeedback(e.target.value)}
+          />
+        </label>
+      )}
       {problem && <p className="error-text">{problem}</p>}
       <div className="approval-buttons">
         <button
           className="secondary"
           disabled={submitting}
-          onClick={() => respond({ allow: false })}
+          onClick={() => {
+            if (r.kind === "plan") setRevisingPlan(!revisingPlan);
+            else respond({ allow: false });
+          }}
         >
           {r.kind === "plan"
-            ? "Keep planning"
+            ? revisingPlan
+              ? "Back"
+              : "Keep planning"
             : r.kind === "mode-change"
               ? "Keep current mode"
               : "Decline"}
@@ -269,11 +289,14 @@ export function Approval({ approval, onAnswer }) {
           className="primary"
           disabled={
             submitting ||
-            (r.kind === "plan" && !r.plan?.trim()) ||
+            (r.kind === "plan" &&
+              (revisingPlan ? !feedback.trim() : !r.plan?.trim())) ||
             (step && !step.primaryEnabled)
           }
           onClick={() => {
-            if (step?.primary === "next") setPage(step.index + 1);
+            if (r.kind === "plan" && revisingPlan)
+              respond({ allow: false, reason: feedback.trim() });
+            else if (step?.primary === "next") setPage(step.index + 1);
             else respond({ allow: true, answers });
           }}
         >
@@ -282,7 +305,9 @@ export function Approval({ approval, onAnswer }) {
               ? "Next"
               : "Send answer"
             : r.kind === "plan"
-              ? "Confirm and build"
+              ? revisingPlan
+                ? "Send feedback"
+                : "Confirm and build"
               : r.kind === "mode-change"
                 ? "Approve mode change"
                 : "Allow once"}

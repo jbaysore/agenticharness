@@ -510,10 +510,11 @@ export function ChatPane({
       input.current?.focus();
     }
   }
-  async function send(override, turnMode = mode) {
+  async function send(override, turnMode = mode, { planFeedback = false } = {}) {
     const text = typeof override === "string" ? override : draft;
-    const prepared = prepareMessage(text);
-    const hasBody = !!prepared.text.trim() || attachments.length > 0;
+    const prepared = planFeedback ? { text } : prepareMessage(text);
+    const files = planFeedback ? [] : attachments;
+    const hasBody = !!prepared.text.trim() || files.length > 0;
     // /ask alone switches mode. /queue or /steer alone does nothing.
     if (!hasBody) {
       if (prepared.delivery || !prepared.mode) return;
@@ -526,7 +527,7 @@ export function ChatPane({
       }
       if (prepared.mode !== mode) await changeMode(prepared.mode);
       setDraft("");
-      return;
+      return false;
     }
     if (
       busy ||
@@ -537,7 +538,7 @@ export function ChatPane({
       !model ||
       (selectedModel?.efforts?.length && !effort)
     )
-      return;
+      return false;
     setBusy(true);
     sending.current = true;
     let c, body;
@@ -560,7 +561,8 @@ export function ChatPane({
         prior &&
         prior.text === text &&
         JSON.stringify(prior.attachments ?? []) ===
-          JSON.stringify(attachments.map((f) => f.id)) &&
+          JSON.stringify(files.map((f) => f.id)) &&
+        Boolean(prior.parsed) === planFeedback &&
         prior.provider === provider &&
         prior.model === model &&
         prior.permissions === permissions &&
@@ -570,23 +572,27 @@ export function ChatPane({
               chatId: c.id,
               actionId: crypto.randomUUID(),
               text,
-              attachments: attachments.map((f) => f.id),
-              attachmentFiles: attachments,
+              attachments: files.map((f) => f.id),
+              attachmentFiles: files,
               provider,
               model,
               effort: effort || null,
               permissions,
               mode: turnMode,
+              ...(planFeedback && { parsed: true }),
             };
       savePending(c.id, body);
       await api(`/api/chats/${c.id}/messages`, body);
       savePending(c.id, null);
-      setDraft("");
-      setAttachments([]);
+      if (!planFeedback) {
+        setDraft("");
+        setAttachments([]);
+      }
       await reload(c.id);
       await refresh();
+      return true;
     } catch (e) {
-      report(e);
+      if (!planFeedback) report(e);
       // A refused message stays in the composer but is no longer unconfirmed.
       if (body && e.status >= 400 && e.status < 500 && !e.unreachable)
         await api("/api/actions/" + encodeURIComponent(body.actionId))
@@ -594,6 +600,7 @@ export function ChatPane({
             if (!run && !input) savePending(c.id, null);
           })
           .catch(() => {});
+      if (planFeedback) throw e;
     } finally {
       sending.current = false;
       setBusy(false);
@@ -878,11 +885,11 @@ export function ChatPane({
               </button>
             </div>
           ))}
-        {/* A finished plan that was not confirmed in the turn uses the same
-            card. Confirming leaves plan mode and builds. Keep planning hides
-            it for that run, including after Cursor declines its plan. */}
+        {/* Finished proposals use the same review and feedback flow as plans
+            awaiting approval during a turn. */}
         {planReady && (
           <Approval
+            key={planReady.id}
             approval={{
               provider: planReady.provider ?? provider,
               request: {
@@ -893,6 +900,15 @@ export function ChatPane({
             }}
             onAnswer={async (answer) => {
               if (!answer.allow) {
+                const sent = await send(
+                  `Revise the plan based on this feedback:\n\n${answer.reason}`,
+                  "plan",
+                  { planFeedback: true },
+                );
+                if (!sent)
+                  throw new Error(
+                    "Wait for the current action to finish and select an available model before sending feedback.",
+                  );
                 setKeptPlans((ids) => new Set(ids).add(planReady.id));
                 return;
               }

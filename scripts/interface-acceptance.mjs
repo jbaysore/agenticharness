@@ -24,9 +24,12 @@ app.controller.providers = ["codex", "claude", "cursor"].map((id) => ({
 let browser,
   scenario,
   builds = 0;
-const errors = [];
+const errors = [],
+  turns = [],
+  planAnswers = [];
 for (const provider of app.controller.providers) {
   app.controller.runners[provider.id] = async (ctx) => {
+    turns.push({ text: ctx.text, mode: ctx.mode });
     if (ctx.mode !== "plan") {
       builds++;
       ctx.emit("text", {
@@ -51,7 +54,7 @@ for (const provider of app.controller.providers) {
       });
       ctx.emit("text", { nativeId: "revised", delta: "plan>" });
     } else {
-      const answer = await ctx.approve({
+      const request = {
         kind: "plan",
         title: "Review the complete proposal",
         ...(scenario === "native"
@@ -59,7 +62,16 @@ for (const provider of app.controller.providers) {
               plan: `# ${provider.id} native proposal\n\nBuild and verify the complete feature.`,
             }
           : {}),
-      });
+      };
+      let answer = await ctx.approve(request);
+      planAnswers.push(answer);
+      if (!answer.allow && answer.reason && scenario === "native") {
+        answer = await ctx.approve({
+          ...request,
+          plan: request.plan + "\n\nInclude the requested revisions.",
+        });
+        planAnswers.push(answer);
+      }
       if (answer.allow) {
         ctx.planApproved();
         builds++;
@@ -100,6 +112,9 @@ try {
         await expect(card).toContainText("The plan is unavailable");
         await expect(confirm).toBeDisabled();
         await card.getByRole("button", { name: "Keep planning" }).click();
+        await card.getByRole("textbox", { name: "What should change?" })
+          .fill("Present the complete proposal first.");
+        await card.getByRole("button", { name: "Send feedback" }).click();
         await expect(card).toHaveCount(0);
         expect(builds).toBe(0);
         expect(app.store.conversation(chat.id).mode).toBe("plan");
@@ -117,6 +132,75 @@ try {
         kind === "fallback" ? "revised behavior" : "complete feature",
       );
       expect(builds).toBe(0);
+
+      const turnCount = turns.length,
+        answerCount = planAnswers.length,
+        feedbackText = "Include invalidation.\nExplain how /default is handled.";
+      await page.getByLabel("Message your coding agent").fill("Unsent draft");
+      await card.getByRole("button", { name: "Keep planning" }).click();
+      const feedback = card.getByRole("textbox", { name: "What should change?" }),
+        sendFeedback = card.getByRole("button", { name: "Send feedback" });
+      await expect(feedback).toBeFocused();
+      await expect(sendFeedback).toBeDisabled();
+      await feedback.fill("   ");
+      await expect(sendFeedback).toBeDisabled();
+      await feedback.fill(feedbackText);
+      // Opening and backing out must not resume the agent or lose the draft.
+      await card.getByRole("button", { name: "Back", exact: true }).click();
+      await expect(confirm).toBeVisible();
+      expect(turns.length).toBe(turnCount);
+      expect(planAnswers.length).toBe(answerCount);
+      await card.getByRole("button", { name: "Keep planning" }).click();
+      await expect(feedback).toHaveValue(feedbackText);
+      if (provider.id === "codex") {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await feedback.scrollIntoViewIfNeeded();
+        expect(await card.evaluate((node) => node.scrollWidth <= node.clientWidth))
+          .toBe(true);
+        await page.screenshot({
+          path: `.local/screenshots/plan-feedback-${kind}-phone.png`,
+          fullPage: true,
+        });
+      }
+      const endpoint = kind === "fallback"
+        ? `**/api/chats/${chat.id}/messages`
+        : "**/api/approvals/*";
+      await page.route(endpoint, (route) => route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Fixture feedback failed" }),
+      }));
+      await sendFeedback.click();
+      await expect(card.getByText("Fixture feedback failed")).toBeVisible();
+      await expect(feedback).toHaveValue(feedbackText);
+      await expect(sendFeedback).toBeEnabled();
+      expect(turns.length).toBe(turnCount);
+      expect(planAnswers.length).toBe(answerCount);
+      await page.unroute(endpoint);
+      await sendFeedback.click();
+      await expect(confirm).toBeVisible();
+      await expect(confirm).toBeEnabled();
+      await expect(card.getByRole("textbox", { name: "What should change?" }))
+        .toHaveCount(0);
+      if (kind === "fallback") {
+        expect(turns.length).toBe(turnCount + 1);
+        expect(turns.at(-1)).toEqual({
+          text: `Revise the plan based on this feedback:\n\n${feedbackText}`,
+          mode: "plan",
+        });
+      } else {
+        expect(turns.length).toBe(turnCount);
+        expect(planAnswers.at(-1)).toEqual({
+          allow: false,
+          answers: {},
+          reason: feedbackText,
+        });
+      }
+      await expect(page.getByLabel("Message your coding agent"))
+        .toHaveValue("Unsent draft");
+      expect(app.store.conversation(chat.id).mode).toBe("plan");
+      expect(builds).toBe(0);
+      await page.setViewportSize({ width: 1512, height: 982 });
       await confirm.click();
       await expect(card).toHaveCount(0);
       await expect.poll(() => builds).toBe(1);
@@ -195,7 +279,7 @@ try {
   });
   expect(errors).toEqual([]);
   console.log(
-    "Interface checks passed: complete native and fallback plans for all providers, revisions and reloads, missing-plan guard, one implementation per approval, independent sidebar doubling and archived limits. Providers were simulated.",
+    "Interface checks passed: complete native and fallback plans for all providers, feedback before resuming, feedback delivery and retry, preserved drafts and Plan mode, phone layout, revisions and reloads, missing-plan guard, one implementation per approval, independent sidebar doubling and archived limits. Providers were simulated; no inference.",
   );
 } finally {
   await browser?.close();

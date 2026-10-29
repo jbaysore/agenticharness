@@ -544,8 +544,9 @@ export async function runClaude(
           if (!answer.allow)
             return {
               behavior: "deny",
-              message:
-                "The user wants to keep planning. Stay in plan mode and ask what to change.",
+              message: answer.reason
+                ? `The user wants to keep planning. Stay in plan mode and revise the plan based on this feedback:\n\n${answer.reason}`
+                : "The user wants to keep planning. Stay in plan mode and ask what to change.",
             };
           // Carrying out a plan inside Goal must not switch the chat to Default.
           if (ctx.mode !== "goal") ctx.planApproved?.();

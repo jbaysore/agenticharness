@@ -1830,6 +1830,13 @@ export class Controller extends EventEmitter {
           ? answer.answers
           : {},
     };
+    if (
+      approval.request.kind === "plan" &&
+      !result.allow &&
+      typeof answer.reason === "string" &&
+      answer.reason.trim()
+    )
+      result.reason = answer.reason.trim();
     if (this.store.resolveApproval(id, result)) {
       this.approvalWaiters.delete(id);
       waiter.resolve(result);

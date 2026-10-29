@@ -85,7 +85,8 @@ Code can only read and search. **Plan** proposes work before changing anything,
 and **Goal** keeps Codex or Claude Code working until a condition is met.
 Plan approval cards include the complete proposal beside **Confirm and build**
 and **Keep planning**, including after a reload. Confirmation is unavailable when
-the proposal cannot be retrieved.
+the proposal cannot be retrieved. **Keep planning** opens a feedback field so you
+can explain what should change before sending the plan back to the agent.
 An agent in Goal stays there until that condition is met. It does not suggest
 another mode, and carrying out a plan does not switch the chat back to Default.
 Permission requests in Goal are decided by the automatic reviewer, including
