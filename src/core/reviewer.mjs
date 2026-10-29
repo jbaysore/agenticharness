@@ -19,20 +19,84 @@ const agentNames = { cursor: "Cursor", codex: "Codex", claude: "Claude Code" };
 const clip = (text, length) =>
   text.length > length ? text.slice(0, length - 1) + "…" : text;
 
+const failure = (category, message) =>
+  Object.assign(new Error(message), { category });
+function failureCategory(error) {
+  if (error.category) return error.category;
+  const message = error.message ?? "";
+  if (/exhausted|usage limit|usage boundary/i.test(message)) return "quota";
+  if (/sign in|authentication|unauthorized|\b401\b|\b403\b/i.test(message))
+    return "authentication";
+  if (error.unavailable) return "unavailable";
+  if (/invalid decision|without a decision/i.test(message))
+    return "invalid_output";
+  if (/timed out/i.test(message)) return "timeout";
+  if (
+    /session ended|connection.*closed|agent exited|socket|ECONNRESET|EPIPE|ETIMEDOUT|fetch failed/i.test(
+      message,
+    ) ||
+    ["ECONNRESET", "EPIPE", "ETIMEDOUT", "ECONNREFUSED"].includes(error.code)
+  )
+    return "transport";
+  return "provider_error";
+}
+
+// Race even an adapter that ignores cancellation. A late result cannot decide
+// an action, and onAbort closes any session still starting or answering.
+async function bounded(operation, signal, timeoutMs, onAbort = () => {}) {
+  const limit = new AbortController();
+  let timer, rejectStopped;
+  const stop = () => {
+    rejectStopped(
+      signal.aborted
+        ? failure("cancelled", "The turn was stopped.")
+        : failure("timeout", "The reviewer timed out."),
+    );
+    limit.abort();
+    onAbort();
+  };
+  const stopped = new Promise((_, reject) => {
+    rejectStopped = reject;
+  });
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    if (signal.aborted) throw failure("cancelled", "The turn was stopped.");
+    if (timeoutMs <= 0)
+      throw failure(
+        "deadline",
+        "The automatic review time budget was exhausted.",
+      );
+    timer = setTimeout(stop, timeoutMs);
+    return await Promise.race([
+      Promise.resolve().then(() => operation(limit.signal)),
+      stopped,
+    ]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", stop);
+  }
+}
+
 export class ActionReviewer {
   constructor({ controller, run, project, chat, text, signal }) {
     Object.assign(this, { controller, run, project, chat, text, signal });
     this.queue = Promise.resolve();
     this.unavailable = new Map();
     this.sessions = new Map();
-    this.policyCache = null;
   }
   async close() {
-    const sessions = [...this.sessions.values()];
-    this.sessions.clear();
-    await Promise.all(
-      sessions.map((session) => session.close().catch(() => {})),
-    );
+    for (const provider of [...this.sessions.keys()]) this.discard(provider);
+  }
+  discard(provider) {
+    const entry = this.sessions.get(provider);
+    if (!entry) return;
+    this.sessions.delete(provider);
+    this.signal.removeEventListener("abort", entry.stop);
+    entry.lifetime.abort();
+    // Cleanup must not turn a failed review into an unbounded wait.
+    try {
+      Promise.resolve(entry.session?.close()).catch(() => {});
+    } catch {}
   }
   review(request) {
     // Parallel requests still get individual decisions, in request order.
@@ -127,7 +191,6 @@ export class ActionReviewer {
       .map(({ request, createdAt }) => ({ request, createdAt }));
   }
   async policies() {
-    if (this.policyCache) return this.policyCache;
     const { project, chat } = this;
     let projectRules = "";
     try {
@@ -135,7 +198,10 @@ export class ActionReviewer {
         .content;
     } catch (error) {
       if (error.code !== "ENOENT")
-        throw new Error("Project instructions could not be read for review.");
+        throw failure(
+          "context",
+          "Project instructions could not be read for review.",
+        );
     }
     const policies = {
       host: agentInstructions(project, chat),
@@ -143,11 +209,10 @@ export class ActionReviewer {
       project: projectRules,
       mode: chat.mode === "ask" ? ASK_INSTRUCTIONS : chat.mode,
     };
-    this.policyCache = {
+    return {
       policies,
       policyHash: textHash(JSON.stringify(policies)),
     };
-    return this.policyCache;
   }
   clipUserMessages() {
     return this.controller.store
@@ -165,7 +230,10 @@ export class ActionReviewer {
   }
   async packet(request) {
     if (!request.details)
-      throw new Error("The agent did not provide the exact action for review.");
+      throw failure(
+        "context",
+        "The agent did not provide the exact action for review.",
+      );
     const { policies, policyHash } = await this.policies();
     const requestText = String(this.text ?? "");
     const action = {
@@ -182,130 +250,165 @@ export class ActionReviewer {
     const followUp = JSON.stringify({ ...action, policyHash });
     // An approval must never be based on an action or instructions cut in half.
     if (initial.length > 64000 || followUp.length > 64000)
-      throw new Error(
+      throw failure(
+        "context",
         "The complete action and context are too large for automatic review.",
       );
-    return { initial, followUp };
+    return { initial, followUp, policyHash };
   }
-  async oneShot(reviewer, task) {
-    const { controller, signal } = this,
-      limit = new AbortController(),
-      stop = () => limit.abort();
-    let timer, onStopped;
-    signal.addEventListener("abort", stop, { once: true });
+  async attempt(reviewer, packet, timeoutMs) {
+    const { controller, signal } = this;
     try {
-      if (signal.aborted) throw new Error("The turn was stopped.");
-      const stopped = new Promise((_, reject) => {
-        onStopped = () =>
-          reject(
-            new Error(
-              signal.aborted
-                ? "The turn was stopped."
-                : "The reviewer timed out.",
-            ),
+      return await bounded(
+        async (attemptSignal) => {
+          if (signal.aborted || attemptSignal.aborted)
+            throw failure("cancelled", "The turn was stopped.");
+          if (typeof controller.openReviewer !== "function")
+            return controller.workers[reviewer.provider]({
+              cwd: this.project.path,
+              model: reviewer.model,
+              effort: reviewer.effort,
+              mode: "review",
+              task: packet.initial,
+              signal: attemptSignal,
+            });
+          const key = JSON.stringify([
+            reviewer.model,
+            reviewer.effort,
+            packet.policyHash,
+          ]);
+          let entry = this.sessions.get(reviewer.provider);
+          if (entry && entry.key !== key) {
+            this.discard(reviewer.provider);
+            entry = null;
+          }
+          const opened = !!entry;
+          if (!entry) {
+            const lifetime = new AbortController(),
+              stop = () => lifetime.abort();
+            entry = { key, lifetime, stop, session: null };
+            this.sessions.set(reviewer.provider, entry);
+            signal.addEventListener("abort", stop, { once: true });
+            const session = await controller.openReviewer({
+              provider: reviewer.provider,
+              cwd: this.project.path,
+              model: reviewer.model,
+              effort: reviewer.effort,
+              signal: lifetime.signal,
+            });
+            if (lifetime.signal.aborted || attemptSignal.aborted) {
+              try {
+                Promise.resolve(session.close()).catch(() => {});
+              } catch {}
+              throw failure("cancelled", "The review session was cancelled.");
+            }
+            entry.session = session;
+          }
+          return entry.session.ask(
+            opened ? packet.followUp : packet.initial,
+            attemptSignal,
           );
-        limit.signal.addEventListener("abort", onStopped, { once: true });
-      });
-      timer = setTimeout(stop, controller.reviewerTimeoutMs);
-      return await Promise.race([
-        controller.workers[reviewer.provider]({
-          cwd: this.project.path,
-          model: reviewer.model,
-          effort: reviewer.effort,
-          mode: "review",
-          task,
-          signal: limit.signal,
-        }),
-        stopped,
-      ]);
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", stop);
-      if (onStopped) limit.signal.removeEventListener("abort", onStopped);
-      limit.abort();
-    }
-  }
-  async attempt(reviewer, packet) {
-    const opener = this.controller.openReviewer;
-    if (typeof opener !== "function")
-      return this.oneShot(reviewer, packet.initial);
-    const opened = this.sessions.has(reviewer.provider);
-    let session = this.sessions.get(reviewer.provider);
-    if (!session) {
-      session = await opener({
-        provider: reviewer.provider,
-        cwd: this.project.path,
-        model: reviewer.model,
-        effort: reviewer.effort,
-        signal: this.signal,
-      });
-      this.sessions.set(reviewer.provider, session);
-    }
-    const limit = new AbortController(),
-      stop = () => limit.abort();
-    this.signal.addEventListener("abort", stop, { once: true });
-    const timer = setTimeout(stop, this.controller.reviewerTimeoutMs);
-    try {
-      if (this.signal.aborted) throw new Error("The turn was stopped.");
-      return await session.ask(
-        opened ? packet.followUp : packet.initial,
-        limit.signal,
+        },
+        signal,
+        timeoutMs,
+        () => this.discard(reviewer.provider),
       );
     } catch (error) {
-      await session.close().catch(() => {});
-      this.sessions.delete(reviewer.provider);
+      this.discard(reviewer.provider);
       throw error;
-    } finally {
-      clearTimeout(timer);
-      this.signal.removeEventListener("abort", stop);
     }
   }
   async decide(request) {
     const { controller, run, chat, signal } = this,
       agent = agentNames[run.provider] ?? run.provider,
       id = randomUUID(),
+      startedAt = Date.now(),
+      deadline = startedAt + controller.reviewerTotalTimeoutMs,
       note = (status, title, reason, extra = {}) =>
         controller.event(chat.id, run.id, "work", {
           kind: "permission-review",
           provider: run.provider,
           status,
           item: { id, title, description: reason },
+          elapsedMs: Date.now() - startedAt,
           ...extra,
         });
     if (signal.aborted)
       return { decision: "deny", reason: "The turn was stopped." };
-    // A refusal from the user could cover even a read, so it goes to review.
-    if (readOnlyGitCommand(request) && !this.userRefusals().length) {
-      const reason = "Read-only Git command; allowed without a model review.";
-      note("allow", `Auto-review allowed ${agent} action`, reason, {
-        decision: "allow",
-      });
-      return { decision: "allow", reason };
-    }
     try {
+      // A refusal from the user could cover even a read, so it goes to review.
+      if (readOnlyGitCommand(request) && !this.userRefusals().length) {
+        const reason = "Read-only Git command; allowed without a model review.";
+        note("allow", `Auto-review allowed ${agent} action`, reason, {
+          decision: "allow",
+        });
+        return { decision: "allow", reason };
+      }
       const settings = readRules(controller.store).review,
         candidates = ["codex", ...(settings.claudeFallback ? ["claude"] : [])],
-        packet = await this.packet(request),
-        reasons = [];
-      for (const provider of candidates) {
+        packet = await bounded(
+          () => this.packet(request),
+          signal,
+          deadline - Date.now(),
+        ),
+        reasons = [],
+        retryable = [];
+      let attempts = 0,
+        retried = false,
+        lastFailure;
+      // One pass through configured providers, then one fresh-session retry
+      // total. A valid decision is final, including a managerial ask.
+      for (let index = 0; index < candidates.length; index++) {
+        const provider = candidates[index];
         if (signal.aborted) throw new Error("The turn was stopped.");
-        try {
-          if (this.unavailable.has(provider))
-            throw new Error(this.unavailable.get(provider));
-          const reviewer = cursorReviewer(
-            controller.providers,
-            settings[provider],
-            provider,
+        if (Date.now() >= deadline)
+          throw failure(
+            "deadline",
+            "The automatic review time budget was exhausted.",
           );
+        let reviewer;
+        const catalog = controller.providers.find((p) => p.id === provider);
+        const availabilityKey = JSON.stringify([
+          settings[provider],
+          catalog?.connected,
+          catalog?.blockReason,
+          catalog?.models,
+        ]);
+        const attemptStartedAt = Date.now();
+        try {
+          const cached = this.unavailable.get(provider);
+          if (cached?.key === availabilityKey) throw cached.error;
+          try {
+            reviewer = cursorReviewer(
+              controller.providers,
+              settings[provider],
+              provider,
+            );
+          } catch (error) {
+            error.category =
+              failureCategory(error) === "quota" ? "quota" : "unavailable";
+            error.unavailable = true;
+            throw error;
+          }
+          attempts++;
           note(
             "running",
             `Auto-reviewing ${agent} action`,
             `${reviewer.name}: ${request.title}`,
-            { reviewer },
+            { reviewer, attempt: attempts },
           );
-          const result = await this.attempt(reviewer, packet);
+          const result = await this.attempt(
+            reviewer,
+            packet,
+            Math.min(controller.reviewerTimeoutMs, deadline - Date.now()),
+          );
           if (signal.aborted) throw new Error("The turn was stopped.");
-          const decision = parseReview(result.text),
+          if (Date.now() >= deadline)
+            throw failure(
+              "deadline",
+              "The automatic review time budget was exhausted.",
+            );
+          const decision = parseReview(result?.text),
             label = {
               allow: "allowed",
               deny: "declined",
@@ -319,19 +422,44 @@ export class ActionReviewer {
               reviewer,
               decision: decision.decision,
               usage: result.usage,
+              attempt: attempts,
+              durationMs: Date.now() - attemptStartedAt,
+              recovered: reasons.length > 0,
             },
           );
           // A valid deny or ask is final. Fallback is only for failed reviews.
           return decision;
         } catch (error) {
           if (signal.aborted) throw error;
-          if (error.unavailable) this.unavailable.set(provider, error.message);
+          this.discard(provider);
+          const category = failureCategory(error);
+          lastFailure = error;
+          if (
+            error.unavailable ||
+            ["quota", "authentication"].includes(category)
+          )
+            this.unavailable.set(provider, { error, key: availabilityKey });
+          if (
+            !error.unavailable &&
+            ["transport", "timeout", "invalid_output"].includes(category)
+          )
+            retryable.push(provider);
           const name = provider === "codex" ? "Codex" : "Claude Code";
           reasons.push(`${name}: ${error.message}`);
-          note("fallback", `${name} could not review`, error.message);
+          note("fallback", `${name} could not review`, error.message, {
+            reviewer,
+            reviewerProvider: provider,
+            failureCategory: category,
+            attempt: attempts,
+            durationMs: Date.now() - attemptStartedAt,
+          });
+        }
+        if (index === candidates.length - 1 && !retried && retryable.length) {
+          retried = true;
+          candidates.push(retryable[0]);
         }
       }
-      throw new Error(reasons.join(" "));
+      throw failure(failureCategory(lastFailure), reasons.join(" "));
     } catch (error) {
       if (signal.aborted) {
         note(
@@ -345,6 +473,7 @@ export class ActionReviewer {
       note("deny", "Auto-review declined: review could not complete", reason, {
         decision: "deny",
         reviewFailed: true,
+        failureCategory: failureCategory(error),
       });
       return { decision: "deny", reason };
     }

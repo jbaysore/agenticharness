@@ -30,7 +30,8 @@ export function checkCodexRoute(config) {
   return null;
 }
 
-export async function openCodex(cwd) {
+export async function openCodex(cwd, { signal } = {}) {
+  signal?.throwIfAborted();
   const command = executable("codex");
   if (!command) throw new Error("Codex CLI is not installed");
   const rpc = new RpcProcess(
@@ -51,7 +52,10 @@ export async function openCodex(cwd) {
     ],
     { cwd, env: subscriptionEnvironment() },
   );
+  const stop = () => rpc.close();
+  signal?.addEventListener("abort", stop, { once: true });
   try {
+    signal?.throwIfAborted();
     await rpc.call("initialize", {
       clientInfo: {
         name: "agentic_harness",
@@ -60,11 +64,14 @@ export async function openCodex(cwd) {
       },
       capabilities: { experimentalApi: true },
     });
+    signal?.throwIfAborted();
     rpc.notify("initialized");
     return rpc;
   } catch (error) {
     rpc.close();
     throw error;
+  } finally {
+    signal?.removeEventListener("abort", stop);
   }
 }
 export async function inspectCodex(cwd) {

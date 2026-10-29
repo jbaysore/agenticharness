@@ -446,13 +446,25 @@ export async function openClaudeReviewer(
     ended ??= error;
     for (const pending of waiting.splice(0)) pending.reject(ended);
   };
-  const auth = await readAuth(),
-    monitor = usageForAccount(auth),
-    { reason } = await monitor.read(() => readUsage(q));
-  if (reason) {
+  const stopStartup = () => {
     input.end();
     q.close();
-    throw new WorkerUnavailable(reason);
+  };
+  signal.addEventListener("abort", stopStartup, { once: true });
+  let monitor;
+  try {
+    if (signal.aborted) throw cancelled();
+    const auth = await readAuth();
+    if (signal.aborted) throw cancelled();
+    monitor = usageForAccount(auth);
+    const { reason } = await monitor.read(() => readUsage(q));
+    if (reason) throw new WorkerUnavailable(reason);
+    if (signal.aborted) throw cancelled();
+  } catch (error) {
+    stopStartup();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", stopStartup);
   }
   const loop = (async () => {
     try {
@@ -496,6 +508,7 @@ export async function openClaudeReviewer(
   const stop = () => {
     if (closed) return;
     closed = true;
+    signal.removeEventListener("abort", stop);
     fail(cancelled());
     input.end();
     q.close();
@@ -531,6 +544,7 @@ export async function openClaudeReviewer(
       const answer = reviewResult(event, model, previousUsage);
       const { reason: after } = await monitor.read(() => readUsage(q));
       if (after) throw new WorkerUnavailable(after);
+      if (signal.aborted || askSignal?.aborted) throw cancelled();
       return answer;
     },
     async close() {
@@ -544,7 +558,7 @@ export async function openCodexReviewer(
   { cwd, model, effort, signal },
   { open = openCodex } = {},
 ) {
-  const rpc = await open(cwd);
+  const rpc = await open(cwd, { signal });
   let threadId,
     turnId,
     text = "",
@@ -559,6 +573,7 @@ export async function openCodexReviewer(
   const stop = () => {
     if (closed) return;
     closed = true;
+    signal.removeEventListener("abort", stop);
     rejectSettle(cancelled());
     rpc.close();
   };
@@ -605,105 +620,116 @@ export async function openCodexReviewer(
       current?.resolve(p.turn);
     }
   });
-  const { account } = await rpc.call("account/read");
-  const blocked = checkCodexBilling(
-    account,
-    await rpc.call("account/rateLimits/read"),
-  );
-  if (blocked) {
-    rpc.close();
-    throw new WorkerUnavailable(blocked);
-  }
-  const { config } = await rpc.call("config/read", { includeLayers: false }),
-    route = checkCodexRoute(config);
-  if (route) {
-    rpc.close();
-    throw new WorkerUnavailable(route);
-  }
-  const started = await rpc.call("thread/start", {
-    cwd,
-    model,
-    modelProvider: "openai",
-    serviceTier: "default",
-    approvalPolicy: "never",
-    sandbox: "read-only",
-    developerInstructions: workerPrompts.review,
-    config: {
-      model_provider: "openai",
-      forced_login_method: "chatgpt",
-      service_tier: "default",
-      ...reviewConfig(config),
-    },
-    ephemeral: true,
-    allowProviderModelFallback: false,
-    baseInstructions: REVIEW_PROMPT,
-    dynamicTools: [],
-  });
-  threadId = started.thread.id;
-  return {
-    async ask(task, askSignal) {
-      if (closed || signal.aborted || askSignal?.aborted) throw cancelled();
-      if (settle) throw new Error("A review is already running");
-      const before = { ...usage };
-      text = "";
-      const onAbort = () => {
-        if (threadId && turnId && !rpc.closed)
-          rpc
-            .call("turn/interrupt", { threadId, turnId }, 5000)
-            .catch(() => {});
-        rejectSettle(new Error("The reviewer timed out."));
-      };
-      askSignal?.addEventListener("abort", onAbort, { once: true });
-      let turn;
-      try {
-        turn = await new Promise((resolve, reject) => {
-          settle = { resolve, reject };
-          rpc
-            .call("turn/start", {
-              threadId,
-              model,
-              effort: effort || undefined,
-              serviceTierForTurn: "default",
-              outputSchema: REVIEW_SCHEMA,
-              input: [{ type: "text", text: task }],
-            })
-            .then((start) => {
-              turnId = start.turn.id;
-            })
-            .catch((error) => {
-              settle = null;
-              reject(error);
-            });
-        });
-      } finally {
-        askSignal?.removeEventListener("abort", onAbort);
-      }
-      if (signal.aborted) throw cancelled();
-      if (turn.status !== "completed" || !text)
-        throw new Error(
-          turn.error?.message ?? "The reviewer ended without a decision",
+  try {
+    if (signal.aborted) throw cancelled();
+    const { account } = await rpc.call("account/read");
+    const blocked = checkCodexBilling(
+      account,
+      await rpc.call("account/rateLimits/read"),
+    );
+    if (blocked) {
+      rpc.close();
+      throw new WorkerUnavailable(blocked);
+    }
+    const { config } = await rpc.call("config/read", { includeLayers: false }),
+      route = checkCodexRoute(config);
+    if (route) {
+      rpc.close();
+      throw new WorkerUnavailable(route);
+    }
+    if (signal.aborted || closed) throw cancelled();
+    const started = await rpc.call("thread/start", {
+      cwd,
+      model,
+      modelProvider: "openai",
+      serviceTier: "default",
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      developerInstructions: workerPrompts.review,
+      config: {
+        model_provider: "openai",
+        forced_login_method: "chatgpt",
+        service_tier: "default",
+        ...reviewConfig(config),
+      },
+      ephemeral: true,
+      allowProviderModelFallback: false,
+      baseInstructions: REVIEW_PROMPT,
+      dynamicTools: [],
+    });
+    threadId = started.thread.id;
+    if (signal.aborted || closed) throw cancelled();
+    return {
+      async ask(task, askSignal) {
+        if (closed || signal.aborted || askSignal?.aborted) throw cancelled();
+        if (settle) throw new Error("A review is already running");
+        const before = { ...usage };
+        text = "";
+        const onAbort = () => {
+          if (threadId && turnId && !rpc.closed)
+            rpc
+              .call("turn/interrupt", { threadId, turnId }, 5000)
+              .catch(() => {});
+          rejectSettle(new Error("The reviewer timed out."));
+        };
+        askSignal?.addEventListener("abort", onAbort, { once: true });
+        let turn;
+        try {
+          turn = await new Promise((resolve, reject) => {
+            settle = { resolve, reject };
+            rpc
+              .call("turn/start", {
+                threadId,
+                model,
+                effort: effort || undefined,
+                serviceTierForTurn: "default",
+                outputSchema: REVIEW_SCHEMA,
+                input: [{ type: "text", text: task }],
+              })
+              .then((start) => {
+                turnId = start.turn.id;
+              })
+              .catch((error) => {
+                settle = null;
+                reject(error);
+              });
+          });
+        } finally {
+          askSignal?.removeEventListener("abort", onAbort);
+        }
+        if (signal.aborted) throw cancelled();
+        if (turn.status !== "completed" || !text)
+          throw new Error(
+            turn.error?.message ?? "The reviewer ended without a decision",
+          );
+        const boundary = checkCodexBilling(
+          account,
+          await rpc.call("account/rateLimits/read"),
         );
-      const boundary = checkCodexBilling(
-        account,
-        await rpc.call("account/rateLimits/read"),
-      );
-      if (boundary) throw new WorkerUnavailable(boundary);
-      return {
-        text,
-        model,
-        usage: {
-          input:
-            usage.input >= before.input ? usage.input - before.input : null,
-          output:
-            usage.output >= before.output ? usage.output - before.output : null,
-        },
-      };
-    },
-    async close() {
-      if (closed) return;
-      stop();
-    },
-  };
+        if (boundary) throw new WorkerUnavailable(boundary);
+        if (signal.aborted || askSignal?.aborted) throw cancelled();
+        return {
+          text,
+          model,
+          usage: {
+            input:
+              usage.input >= before.input ? usage.input - before.input : null,
+            output:
+              usage.output >= before.output
+                ? usage.output - before.output
+                : null,
+          },
+        };
+      },
+      async close() {
+        if (closed) return;
+        stop();
+      },
+    };
+  } catch (error) {
+    stop();
+    throw error;
+  }
 }
 
 export function openReviewer(spec, deps) {

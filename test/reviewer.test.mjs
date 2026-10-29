@@ -9,6 +9,8 @@ import { Controller } from "../src/core/controller.mjs";
 import {
   runCodexWorker,
   WorkerUnavailable,
+  openCodexReviewer,
+  openClaudeReviewer,
 } from "../src/providers/workers.mjs";
 import { REVIEW_SCHEMA } from "../src/core/review-policy.mjs";
 import { saveRules } from "../src/core/rules.mjs";
@@ -540,6 +542,271 @@ function addClaude(f) {
   return calls;
 }
 
+test("transient failures try the fallback before one fresh-session retry with complete policies", async (t) => {
+  const f = await fixture(t);
+  addClaude(f);
+  const opened = [],
+    packets = [],
+    closed = [];
+  f.controller.openReviewer = async ({ provider }) => {
+    const index = opened.push(provider);
+    return {
+      async ask(packet) {
+        packets.push(JSON.parse(packet));
+        if (index === 1)
+          throw Object.assign(new Error("Connection reset"), {
+            code: "ECONNRESET",
+          });
+        if (index === 2) return { text: "malformed" };
+        return decision("allow");
+      },
+      async close() {
+        closed.push(provider);
+      },
+    };
+  };
+  assert.equal((await f.ctx.approve(action())).allow, true);
+  assert.deepEqual(opened, ["codex", "claude", "codex"]);
+  assert.deepEqual(closed, ["codex", "claude"]);
+  assert.ok(
+    packets.every(
+      (p) =>
+        p.policies && p.proposedAction.details.rawInput.command === "npm test",
+    ),
+  );
+  const events = f.store
+    .events()
+    .filter((e) => e.payload.kind === "permission-review")
+    .map((e) => e.payload);
+  assert.deepEqual(
+    events.filter((e) => e.status === "fallback").map((e) => e.failureCategory),
+    ["transport", "invalid_output"],
+  );
+  assert.equal(events.at(-1).recovered, true);
+  assert.equal(events.at(-1).attempt, 3);
+  assert.ok(events.every((e) => e.elapsedMs >= 0));
+});
+
+for (const fallback of [false, true])
+  test(`retries are capped at one total with Claude fallback=${fallback}`, async (t) => {
+    const f = await fixture(t);
+    if (fallback) addClaude(f);
+    f.store.setting("agent-rules", { review: { claudeFallback: fallback } });
+    const opened = [];
+    f.controller.openReviewer = async ({ provider }) => {
+      opened.push(provider);
+      return { ask: async () => ({ text: "invalid" }), close: async () => {} };
+    };
+    assert.equal((await f.ctx.approve(action())).allow, false);
+    assert.deepEqual(
+      opened,
+      fallback ? ["codex", "claude", "codex"] : ["codex", "codex"],
+    );
+    assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
+  });
+
+for (const stage of ["startup", "answer"])
+  test(
+    `the total deadline bounds an uncooperative ${stage} and rejects late answers`,
+    { timeout: 3000 },
+    async (t) => {
+      const f = await fixture(t);
+      addClaude(f);
+      f.controller.reviewerTimeoutMs = 40;
+      f.controller.reviewerTotalTimeoutMs = 65;
+      const late = [],
+        signals = [];
+      let closes = 0;
+      f.controller.openReviewer = async ({ signal }) => {
+        signals.push(signal);
+        const session = {
+          ask: async () =>
+            new Promise((resolve) =>
+              late.push(() => resolve(decision("allow"))),
+            ),
+          close: async () => {
+            closes++;
+          },
+        };
+        return stage === "startup"
+          ? new Promise((resolve) => late.push(() => resolve(session)))
+          : session;
+      };
+      const startedAt = Date.now();
+      assert.equal((await f.ctx.approve(action())).allow, false);
+      assert.ok(Date.now() - startedAt < 1000);
+      assert.equal(
+        signals.length,
+        2,
+        "the overall deadline leaves no retry budget",
+      );
+      assert.ok(signals.every((s) => s.aborted));
+      for (const resolve of late) resolve();
+      await waitFor(() => closes === 2);
+      assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
+      assert.equal(
+        f.store
+          .events()
+          .some(
+            (e) =>
+              e.payload.kind === "permission-review" &&
+              e.payload.decision === "allow",
+          ),
+        false,
+      );
+    },
+  );
+
+test("stopping during session startup closes a late session without reviewing the action", async (t) => {
+  const f = await fixture(t);
+  let resolveOpen,
+    closed = false,
+    asked = false;
+  f.controller.openReviewer = async () =>
+    new Promise((resolve) => {
+      resolveOpen = resolve;
+    });
+  const result = f.ctx.approve(action());
+  await waitFor(() => !!resolveOpen);
+  f.controller.cancel(f.chat.id);
+  assert.equal((await result).allow, false);
+  resolveOpen({
+    ask: async () => {
+      asked = true;
+      return decision("allow");
+    },
+    close: async () => {
+      closed = true;
+    },
+  });
+  await waitFor(() => closed);
+  assert.equal(asked, false);
+});
+
+test("persistent sessions restart after model, effort, standing rules or project rules change", async (t) => {
+  const f = await fixture(t),
+    opens = [],
+    packets = [];
+  f.controller.providers[1].models.push({
+    id: "chosen",
+    efforts: ["low", "high"],
+  });
+  let closes = 0;
+  f.controller.openReviewer = async (spec) => {
+    opens.push(spec);
+    return {
+      ask: async (packet) => {
+        packets.push(JSON.parse(packet));
+        return decision("allow");
+      },
+      close: async () => {
+        closes++;
+      },
+    };
+  };
+  await f.ctx.approve(action());
+  await f.ctx.approve(action());
+  assert.equal(opens.length, 1);
+  assert.equal(packets[1].policies, undefined);
+  for (const effort of ["low", "high"]) {
+    saveRules(
+      f.store,
+      { review: { codex: { model: "chosen", effort } } },
+      f.controller.providers,
+    );
+    await f.ctx.approve(action());
+    assert.equal(opens.at(-1).effort, effort);
+    assert.ok(packets.at(-1).policies);
+  }
+  saveRules(
+    f.store,
+    { instructions: "New standing rule" },
+    f.controller.providers,
+  );
+  await f.ctx.approve(action());
+  assert.equal(packets.at(-1).policies.standing, "New standing rule");
+  await writeFile(join(f.root, "AGENTS.md"), "New project rule");
+  await f.ctx.approve(action());
+  assert.equal(packets.at(-1).policies.project, "New project rule");
+  assert.equal(opens.length, 5);
+  assert.equal(closes, 4);
+});
+
+test("changing an unavailable pinned model lets the next review use the corrected choice", async (t) => {
+  const f = await fixture(t);
+  f.store.setting("agent-rules", {
+    review: { codex: { model: "missing" }, claudeFallback: false },
+  });
+  assert.equal((await f.ctx.approve(action())).allow, false);
+  saveRules(f.store, { review: { codex: null } }, f.controller.providers);
+  assert.equal((await f.ctx.approve(action())).allow, true);
+});
+
+test(
+  "a stuck session cleanup cannot block a fresh retry",
+  { timeout: 3000 },
+  async (t) => {
+    const f = await fixture(t);
+    f.store.setting("agent-rules", { review: { claudeFallback: false } });
+    let opens = 0;
+    f.controller.openReviewer = async () => {
+      const index = ++opens;
+      return {
+        ask: async () =>
+          index === 1 ? { text: "invalid" } : decision("allow"),
+        close: () => new Promise(() => {}),
+      };
+    };
+    assert.equal((await f.ctx.approve(action())).allow, true);
+    assert.equal(opens, 2);
+  },
+);
+
+for (const reason of [
+  "You've hit your usage limit",
+  "Included Codex quota is exhausted.",
+  "Sign in to Codex with ChatGPT.",
+])
+  test(`${reason} is skipped for the rest of the unchanged turn`, async (t) => {
+    const f = await fixture(t);
+    f.store.setting("agent-rules", { review: { claudeFallback: false } });
+    let calls = 0;
+    f.controller.workers.codex = async () => {
+      calls++;
+      throw new Error(reason);
+    };
+    assert.equal((await f.ctx.approve(action())).allow, false);
+    assert.equal((await f.ctx.approve(action())).allow, false);
+    assert.equal(calls, 1);
+  });
+
+test(
+  "the attempt deadline also covers a post-review usage lookup",
+  { timeout: 3000 },
+  async (t) => {
+    const f = await fixture(t),
+      rpc = new FakeCodex(),
+      original = rpc.call.bind(rpc);
+    f.controller.reviewerTimeoutMs = 30;
+    let release;
+    rpc.call = async (method, params) => {
+      if (method === "account/rateLimits/read" && rpc.quotaReads > 0)
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      return original(method, params);
+    };
+    f.controller.openReviewer = (spec) =>
+      openCodexReviewer(spec, { open: async () => rpc });
+    const result = await f.ctx.approve(action());
+    assert.equal(result.allow, false);
+    assert.equal(rpc.closed, true);
+    assert.ok(release);
+    release(includedUsage());
+    assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
+  },
+);
+
 for (const problem of [
   "quota",
   "disconnected",
@@ -793,6 +1060,114 @@ const nativeReview = (rpc) =>
     },
     { open: async () => rpc },
   );
+
+for (const method of ["account/read", "config/read", "thread/start"])
+  test(`persistent Codex startup failure at ${method} closes its process`, async () => {
+    const rpc = new FakeCodex(),
+      original = rpc.call.bind(rpc);
+    rpc.call = async (name, params) => {
+      if (name === method) throw new Error("Startup transport failure");
+      return original(name, params);
+    };
+    await assert.rejects(
+      openCodexReviewer(
+        {
+          cwd: process.cwd(),
+          model: "review",
+          signal: new AbortController().signal,
+        },
+        { open: async () => rpc },
+      ),
+      /Startup transport failure/,
+    );
+    assert.equal(rpc.closed, true);
+  });
+
+test("persistent Codex cancellation during startup closes immediately and never starts inference", async () => {
+  const rpc = new FakeCodex(),
+    original = rpc.call.bind(rpc),
+    abort = new AbortController();
+  let release;
+  rpc.call = async (method, params) =>
+    method === "config/read"
+      ? new Promise((resolve) => {
+          release = resolve;
+        })
+      : original(method, params);
+  const opening = openCodexReviewer(
+    { cwd: process.cwd(), model: "review", signal: abort.signal },
+    {
+      open: async (_cwd, { signal }) => {
+        assert.equal(signal, abort.signal);
+        return rpc;
+      },
+    },
+  );
+  await waitFor(() => !!release);
+  abort.abort();
+  assert.equal(rpc.closed, true);
+  release({ config: { model_provider: "openai" } });
+  await assert.rejects(opening);
+  assert.equal(
+    rpc.calls.some((c) => c.method === "thread/start"),
+    false,
+  );
+});
+
+test("persistent Claude closes its SDK process when startup verification fails", async () => {
+  let closed = false;
+  await assert.rejects(
+    openClaudeReviewer(
+      {
+        cwd: process.cwd(),
+        model: "review",
+        signal: new AbortController().signal,
+      },
+      {
+        baseOptions: () => ({}),
+        queryFn: () => ({
+          close() {
+            closed = true;
+          },
+        }),
+        readAuth: async () => {
+          throw new Error("Auth lookup failed");
+        },
+      },
+    ),
+    /Auth lookup failed/,
+  );
+  assert.equal(closed, true);
+});
+
+test("persistent Claude cancellation closes a process still verifying subscription usage", async () => {
+  let closed = false,
+    release;
+  const abort = new AbortController();
+  const opening = openClaudeReviewer(
+    { cwd: process.cwd(), model: "review", signal: abort.signal },
+    {
+      baseOptions: () => ({}),
+      queryFn: () => ({
+        close() {
+          closed = true;
+        },
+      }),
+      readAuth: async () => ({}),
+      usageForAccount: () => ({
+        read: async () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      }),
+    },
+  );
+  await waitFor(() => !!release);
+  abort.abort();
+  assert.equal(closed, true);
+  release({ reason: null });
+  await assert.rejects(opening);
+});
 
 test("the native reviewer is ephemeral, read-only, schema-constrained and refuses tool requests", async () => {
   const rpc = new FakeCodex();

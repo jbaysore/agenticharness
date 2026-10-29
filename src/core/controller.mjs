@@ -145,6 +145,7 @@ export class Controller extends EventEmitter {
     this.openReviewer = openReviewerOption;
     this.workerTimeoutMs = 5 * 60 * 1000;
     this.reviewerTimeoutMs = 60 * 1000;
+    this.reviewerTotalTimeoutMs = 120 * 1000;
     this.goalQuestionTimeoutMs = GOAL_QUESTION_TIMEOUT_MS;
     this.runCommand = runCommand;
     store.recover();

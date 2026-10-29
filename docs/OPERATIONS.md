@@ -366,6 +366,16 @@ money, publishing or sending something, signing in, or changing the goal, and
 the note explains that choice in plain language. If automatic review cannot run,
 the action is declined automatically with that reason. The agent can continue
 other authorized work without asking you to approve the failed technical action.
+Codex reviews first; when enabled, Claude fallback uses included subscription
+usage if Codex cannot complete a review. Temporary connection failures, timeouts,
+and invalid replies permit one fresh-session retry total, after trying the
+configured fallback. Each attempt has at most 60 seconds, including startup and
+usage verification, within a 120-second total budget. Valid decisions are final;
+quota, sign-in, billing, configuration, and incomplete-context failures are not
+retried. Failed sessions are closed, and new sessions receive complete policies.
+Existing review events include the failure category, provider, timing, and whether
+another attempt recovered the review; `reviewFailed` distinguishes an incomplete
+review denial from a policy denial.
 In Goal, a review that asks you or cannot run is declined and the agent continues.
 **Manual** shows each request for **Allow once**. **Override** allows actions
 without asking. A plan still comes to you as one **Confirm and build** button,
