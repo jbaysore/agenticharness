@@ -91,6 +91,7 @@ export async function createHarness({
     : null,
   startProviders = true,
   selfRestart: enableSelfRestart = startProviders,
+  memoryWeb: enableMemoryWeb = startProviders,
   exitOnRestart = false,
   closeStepMs = 3000,
   seedProject = process.env.HARNESS_INITIAL_PROJECT,
@@ -1075,9 +1076,9 @@ export async function createHarness({
     worktreeRoot: join(dataDir, "worktrees"),
     openReviewer,
     openrouter,
-    memoryWeb: new MemoryWeb(),
+    memoryWeb: enableMemoryWeb ? new MemoryWeb() : null,
   });
-  controller.memoryWeb.startMaintenance();
+  controller.memoryWeb?.startMaintenance();
   controller.providers = [await openrouter.inspect()];
   controller.tidyAll();
   controller.on("event", (event) => {
