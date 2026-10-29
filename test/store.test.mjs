@@ -11,11 +11,30 @@ import {
   handoffContext,
   historyTools,
   promptDelivery,
-  projectLogContext,
   workspaceNotice,
   workspacePeers,
 } from "../src/core/history.mjs";
 import { pathsOverlap } from "../src/core/repository.mjs";
+
+function legacyNote(
+  store,
+  { projectId, conversationId = null, content, evidence },
+) {
+  const id = crypto.randomUUID();
+  store.db
+    .prepare(
+      "INSERT INTO notes(id,project_id,conversation_id,content,evidence,created_at) VALUES(?,?,?,?,?,?)",
+    )
+    .run(
+      id,
+      projectId,
+      conversationId,
+      content,
+      JSON.stringify(evidence),
+      store.now(),
+    );
+  return id;
+}
 
 test("committed partial messages survive restart; pending work and approvals become interrupted, never replayed", async () => {
   const directory = await mkdtemp(join(tmpdir(), "harness-store-")),
@@ -123,13 +142,16 @@ test("history tools enforce none/project/all scopes with source attribution", ()
     historyCall(db, ca2.id, "history_search", { query: "SQLite" }).length,
     1,
   );
-  db.addNote({
+  legacyNote(db, {
     projectId: a.id,
     conversationId: ca.id,
     content: "Another conversation decision",
     evidence: ["source"],
   });
-  assert.equal(historyCall(db, ca2.id, "project_notes", {}).length, 0);
+  assert.throws(
+    () => historyCall(db, ca2.id, "project_notes", {}),
+    /Unknown history tool/,
+  );
   assert.doesNotMatch(
     handoffContext(db, ca2, "claude"),
     /Another conversation decision/,
@@ -144,114 +166,64 @@ test("history tools enforce none/project/all scopes with source attribution", ()
   );
   db.close();
 });
-test("Project Log search ranks active matches and enforces project and conversation scope", () => {
+test("retired Project Log tools are unavailable while conversation and Memory Web tools remain", () => {
   const db = new Store(":memory:"),
-    a = db.addProject("A", "C:\\a"),
-    b = db.addProject("B", "C:\\b"),
-    ca = db.createConversation({ projectId: a.id, scope: "project" }),
-    ca2 = db.createConversation({ projectId: a.id, scope: "none" }),
-    cb = db.createConversation({ projectId: b.id });
-  const matching = db.addNote({
-      projectId: a.id,
-      conversationId: ca.id,
-      content: "Use SQLite FTS for local Project Log retrieval.",
-      evidence: ["harness://conversation/source-a"],
-    }),
-    lessRelevant = db.addNote({
-      projectId: a.id,
-      conversationId: ca.id,
-      content: "Use SQLite for an unrelated local cache.",
-      evidence: ["harness://conversation/source-b"],
-    }),
-    privateNote = db.addNote({
-      projectId: a.id,
-      conversationId: ca2.id,
-      content: "SQLite data only for this conversation.",
-      evidence: ["harness://conversation/private"],
-    }),
-    stale = db.addNote({
-      projectId: a.id,
-      conversationId: ca.id,
-      content: "Old SQLite Project Log retrieval choice.",
-      evidence: ["harness://conversation/stale"],
-    }),
-    otherProject = db.addNote({
-      projectId: b.id,
-      conversationId: cb.id,
-      content: "SQLite FTS for the Project Log in project B.",
-      evidence: ["harness://conversation/project-b"],
-    });
-  db.db.prepare("UPDATE notes SET stale=1 WHERE id=?").run(stale);
+    project = db.addProject("P", "C:/p"),
+    chat = db.createConversation({ projectId: project.id });
+  for (const name of ["project_notes", "project_note_read"]) {
+    assert(!historyTools.some((t) => t.name === name));
+    assert.throws(
+      () => historyCall(db, chat.id, name, {}),
+      /Unknown history tool/,
+    );
+  }
+  for (const name of [
+    "history_search",
+    "history_read",
+    "workspace_activity",
+    "memory_search",
+    "memory_read",
+    "memory_write",
+  ])
+    assert(historyTools.some((t) => t.name === name));
+  db.close();
+});
 
-  const results = historyCall(db, ca.id, "project_notes", {
-    query: "SQLite FTS project log",
-  });
-  assert.equal(results[0].id, matching);
-  assert.ok(results.some((note) => note.id === lessRelevant));
-  assert.ok(
-    results.every((note) => note.id !== stale && note.id !== otherProject),
-  );
-  assert.ok(
-    historyCall(db, ca.id, "project_notes", {
-      query: "SQLite Project Log",
-      includeStale: true,
-    }).some((note) => note.id === stale),
-  );
-  assert.deepEqual(
-    historyCall(db, ca2.id, "project_notes", {}).map((note) => note.id),
-    [privateNote],
-  );
-  assert.throws(
-    () => historyCall(db, ca2.id, "project_note_read", { noteId: matching }),
-    /outside the selected project or history scope/,
-  );
-  assert.throws(
-    () => historyCall(db, ca.id, "project_note_read", { noteId: otherProject }),
-    /outside the selected project or history scope/,
-  );
-  assert.equal(
-    historyCall(db, ca.id, "project_note_read", { noteId: matching }).content,
-    "Use SQLite FTS for local Project Log retrieval.",
-  );
-  assert.ok(historyTools.some((tool) => tool.name === "project_note_read"));
-  db.close();
-});
-test("Project Log index rebuilds existing notes and injected context stays within its budget", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "harness-project-log-")),
+test("legacy decisions survive restart without rebuilding their retired index", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "harness-retired-decisions-")),
     path = join(directory, "db.sqlite");
-  let db = new Store(path),
-    p = db.addProject("P", "C:\\p"),
-    c = db.createConversation({ projectId: p.id });
-  db.addNote({
-    projectId: p.id,
-    conversationId: c.id,
-    content: "SQLite FTS existing decision",
-    evidence: ["harness://conversation/source"],
-  });
-  db.setting("project-log-index-version", 0);
-  db.close();
-  db = new Store(path);
-  assert.equal(
-    db.searchProjectNotes("SQLite FTS", { projectId: p.id }).length,
-    1,
-  );
-  const context = projectLogContext([
-    {
-      content: "SQLite FTS decision. ".repeat(500),
+  let db = new Store(path);
+  try {
+    const project = db.addProject("P", "C:/p"),
+      chat = db.createConversation({ projectId: project.id });
+    const id = legacyNote(db, {
+      projectId: project.id,
+      conversationId: chat.id,
+      content: "Legacy decision",
       evidence: ["harness://conversation/source"],
-    },
-    {
-      content: "Second project log entry.",
-      evidence: ["harness://conversation/second"],
-    },
-  ]);
-  assert.ok(context.length <= 2000);
-  assert.match(context, /Relevant Project Log entries/);
-  assert.match(context, /harness:\/\/conversation\/source/);
-  assert.doesNotMatch(context, /Second project log entry/);
-  db.close();
-  await rm(directory, { recursive: true, force: true });
+    });
+    const before = db.db.prepare("SELECT * FROM notes WHERE id=?").get(id);
+    db.setting("project-log-index-version", 0);
+    db.close();
+    db = new Store(path);
+    assert.deepEqual(
+      db.db.prepare("SELECT * FROM notes WHERE id=?").get(id),
+      before,
+    );
+    assert.equal(db.setting("project-log-index-version"), 0);
+    assert.equal(
+      db.db
+        .prepare("SELECT name FROM sqlite_schema WHERE name='notes_fts'")
+        .get(),
+      undefined,
+    );
+    assert.equal(typeof db.searchProjectNotes, "undefined");
+  } finally {
+    db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
+
 test("search accepts punctuation safely and indexes updated streaming content", () => {
   const db = new Store(":memory:"),
     p = db.addProject("P", "C:\\p"),
@@ -279,7 +251,7 @@ test("handoffs carry transcript attribution without injecting unfiltered project
     content: "Validation passed.",
   });
   db.addMessage({ conversationId: c.id, role: "user", content: "Review it" });
-  db.addNote({
+  legacyNote(db, {
     projectId: p.id,
     conversationId: c.id,
     content: "Use SQLite",

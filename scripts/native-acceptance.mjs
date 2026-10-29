@@ -26,7 +26,7 @@ try {
           r.kind === "permission" &&
           (/Agent|Task|Read|Glob|Grep/.test(r.title) ||
             r.details?.kind === "read" ||
-            /history_search|history_read|project_notes/.test(r.title));
+            /history_search|history_read/.test(r.title));
       console.log(JSON.stringify({ approval: r.title, allow }));
       app.controller.answer(e.payload.id, { allow });
     }

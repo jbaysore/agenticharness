@@ -102,7 +102,7 @@ Session/model provenance and context generations protect against late reads,
 child-agent events, and compaction. Cancellation and recovery mark readings
 outdated. No idle inference, cache warming, or draft-token prediction is used.
 
-Prompt delivery tracks independent skill, Project Log, and workspace blocks.
+Prompt delivery tracks independent skill, Memory Web, and workspace blocks.
 Delivery hashes commit only on acceptance; uncertain delivery remains pending.
 Explicit skill reinvocations are delivered again. Compaction invalidates delivery
 fingerprints. Full tool fingerprints are diagnostic and do not change the legacy

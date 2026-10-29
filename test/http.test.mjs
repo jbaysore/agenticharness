@@ -530,3 +530,65 @@ test("host shutdown finishes when a step hangs or throws", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("retired saved-decision endpoints return 404 and exports retain conversation history only", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-retired-log-http-"));
+  const app = await createHarness({
+    dataDir: dir,
+    port: 0,
+    startProviders: false,
+  });
+  try {
+    const project = app.store.addProject("Personal log", dir);
+    const chat = app.store.createConversation({ projectId: project.id });
+    app.store.addMessage({
+      conversationId: chat.id,
+      role: "user",
+      content: "Keep this conversation",
+    });
+    app.store.db
+      .prepare(
+        "INSERT INTO notes(id,project_id,conversation_id,content,evidence,created_at) VALUES(?,?,?,?,?,?)",
+      )
+      .run(
+        "legacy",
+        project.id,
+        chat.id,
+        "Private old decision",
+        '["source"]',
+        app.store.now(),
+      );
+    for (const [path, method] of [
+      ["/api/notes?projectId=" + project.id, "GET"],
+      ["/api/notes", "POST"],
+      ["/api/notes/legacy/stale", "POST"],
+    ]) {
+      const response = await fetch(app.runtime.origin + path, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Harness-Client": "1",
+        },
+        ...(method === "POST" ? { body: "{}" } : {}),
+      });
+      assert.equal(response.status, 404);
+    }
+    const response = await fetch(app.runtime.origin + "/api/export");
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert(!Object.hasOwn(data, "notes"));
+    assert(
+      data.conversations.some((c) =>
+        c.messages.some((m) => m.content === "Keep this conversation"),
+      ),
+    );
+    assert.equal(
+      app.store.db.prepare("SELECT content FROM notes WHERE id='legacy'").get()
+        .content,
+      "Private old decision",
+    );
+  } finally {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

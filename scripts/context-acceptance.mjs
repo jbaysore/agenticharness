@@ -72,6 +72,18 @@ try {
   await page.goto(url([chats[0].id]));
   const trigger = page.locator(".context-trigger");
   await expect(trigger).toContainText("Context 42%");
+  const retiredRequests = [];
+  page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/notes")) retiredRequests.push(request.url()); });
+  if (!await page.getByRole("complementary", { name: "Work panel" }).isVisible())
+    await page.getByRole("button", { name: "Toggle work panel", exact: true }).click();
+  const workPanel = page.getByRole("complementary", { name: "Work panel" });
+  await workPanel.getByRole("button", { name: "Files", exact: true }).click();
+  await expect(workPanel.getByRole("heading", { name: "Artifacts", exact: true })).toBeVisible();
+  await expect(workPanel.getByRole("heading", { name: "Project decisions", exact: true })).toHaveCount(0);
+  await expect(workPanel.getByRole("textbox", { name: "Save project decision", exact: true })).toHaveCount(0);
+  assert.deepEqual(retiredRequests, []);
+  await workPanel.getByRole("button", { name: "Close work panel", exact: true }).click();
+
   await expect(trigger).toContainText(/84k \/ 200k/i);
   const draft = page.getByLabel("Message your coding agent");
   await draft.fill("Keep this unsent draft\nwith its second line.");

@@ -77,8 +77,6 @@ export const ASK_DENY =
 const ASK_HOST_TOOLS = new Set([
   "history_search",
   "history_read",
-  "project_notes",
-  "project_note_read",
   "memory_search",
   "memory_read",
   "workspace_activity",

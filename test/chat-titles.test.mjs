@@ -161,14 +161,16 @@ test("Claude exposes the silent title tool immediately and calls through the rea
             assert.equal(rename._meta["anthropic/alwaysLoad"], true);
             assert.equal(rename.description, titleTool.description);
             assert.match(rename.description, /Never announce or mention/);
-            assert.match(projectNotes.description, /Project Log/);
-            assert.ok(projectNotes.inputSchema.properties.query);
-            assert.match(projectNoteRead.description, /full Project Log entry/);
-            assert.deepEqual(projectNoteRead.inputSchema.required, ["noteId"]);
+            assert.equal(projectNotes, undefined);
+            assert.equal(projectNoteRead, undefined);
             const memoryWrite = tools.find((t) => t.name === "memory_write");
             assert.match(memoryWrite.description, /Memory Web/);
             assert.equal(memoryWrite._meta["anthropic/alwaysLoad"], true);
-            assert.deepEqual(memoryWrite.inputSchema.required.sort(), ["description", "sources", "title"]);
+            assert.deepEqual(memoryWrite.inputSchema.required.sort(), [
+              "description",
+              "sources",
+              "title",
+            ]);
             assert.ok(tools.some((t) => t.name === "memory_search"));
             assert.ok(tools.some((t) => t.name === "memory_read"));
             const answer = await options.canUseTool(

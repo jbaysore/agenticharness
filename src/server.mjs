@@ -842,26 +842,6 @@ export async function createHarness({
             );
           return json(res, 201, { id });
         }
-        if (path === "/api/notes" && method === "GET")
-          return json(res, 200, store.notes(url.searchParams.get("projectId")));
-        if (path === "/api/notes" && method === "POST") {
-          const body = await readJson(req);
-          if (
-            !store.project(body.projectId) ||
-            !body.content?.trim() ||
-            !Array.isArray(body.evidence) ||
-            !body.evidence.length
-          )
-            throw new Error("A project note needs content and source evidence");
-          return json(res, 201, { id: store.addNote(body) });
-        }
-        if (
-          (match = path.match(/^\/api\/notes\/([^/]+)\/stale$/)) &&
-          method === "POST"
-        ) {
-          store.db.prepare("UPDATE notes SET stale=1 WHERE id=?").run(match[1]);
-          return json(res, 200, { ok: true });
-        }
         if (path === "/api/terminals" && method === "GET")
           return json(res, 200, terminals.list());
         if (path === "/api/terminals" && method === "POST") {
@@ -944,7 +924,6 @@ export async function createHarness({
                 .all(c.id)
                 .map((e) => ({ ...e, payload: JSON.parse(e.payload) })),
             })),
-            notes: store.projects().flatMap((p) => store.notes(p.id)),
             skills: listSkills(store),
           };
           return json(res, 200, data, {

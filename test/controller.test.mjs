@@ -103,7 +103,7 @@ test("a chat starting beside another in the same folder is told about it; an unr
 });
 
 for (const provider of ["codex", "claude", "cursor"])
-  test(`${provider}: relevant Project Log context is shared and unrelated turns add none`, async () => {
+  test(`${provider}: retired Project Log never enters instructions or context`, async () => {
     const store = new Store(":memory:"),
       controller = new Controller(store, {}),
       project = store.addProject("fixture", `C:\\project-log-${provider}`),
@@ -121,13 +121,18 @@ for (const provider of ["codex", "claude", "cursor"])
       ctx.saveSession({ id: `session-${provider}` });
       return { status: "completed" };
     };
-    store.addNote({
-      projectId: project.id,
-      conversationId: chat.id,
-      content:
-        "Persist project decisions in SQLite FTS and cap injected Project Log context.",
-      evidence: ["harness://conversation/project-log-decision"],
-    });
+    store.db
+      .prepare(
+        "INSERT INTO notes(id,project_id,conversation_id,content,evidence,created_at) VALUES(?,?,?,?,?,?)",
+      )
+      .run(
+        "legacy-decision",
+        project.id,
+        chat.id,
+        "Private legacy SQLite FTS decision",
+        '["harness://conversation/project-log-decision"]',
+        store.now(),
+      );
 
     const send = async (actionId, text) => {
       controller.send(chat.id, {
@@ -147,15 +152,16 @@ for (const provider of ["codex", "claude", "cursor"])
         `project-log-unrelated-${provider}`,
         "Write a haiku about ocean tides.",
       );
-    assert.match(relevant.addendum, /Relevant Project Log entries/);
-    assert.match(relevant.addendum, /SQLite FTS/);
-    assert.match(
-      relevant.addendum,
-      /harness:\/\/conversation\/project-log-decision/,
-    );
-    assert.match(relevant.instructions, /project_note_read/);
-    assert.doesNotMatch(unrelated.addendum, /Relevant Project Log entries/);
-    assert.doesNotMatch(unrelated.addendum, /project-log-decision/);
+    for (const ctx of [relevant, unrelated]) {
+      assert.doesNotMatch(
+        ctx.addendum,
+        /Relevant Project Log entries|Private legacy SQLite FTS decision|project-log-decision/,
+      );
+      assert.doesNotMatch(
+        ctx.instructions,
+        /project_notes|project_note_read|Project Log:/,
+      );
+    }
     await controller.close();
     store.close();
   });
@@ -1197,7 +1203,10 @@ test("a Codex thread started with fewer tools is replaced once, with a handoff",
   const store = new Store(":memory:"),
     controller = new Controller(store, {}),
     project = store.addProject("fixture", "C:\codex-tools-fixture"),
-    chat = store.createConversation({ projectId: project.id, provider: "codex" }),
+    chat = store.createConversation({
+      projectId: project.id,
+      provider: "codex",
+    }),
     contexts = [];
   controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
   controller.runners.codex = async (ctx) => {
@@ -1223,7 +1232,10 @@ test("a Codex thread started with fewer tools is replaced once, with a handoff",
     await send("Second");
     assert.equal(contexts[1].session, undefined);
     assert.match(contexts[1].handoff, /S/);
-    assert.deepEqual(store.conversation(chat.id).sessions.codex.tools, hostToolsKey);
+    assert.deepEqual(
+      store.conversation(chat.id).sessions.codex.tools,
+      hostToolsKey,
+    );
     assert.equal(store.conversation(chat.id).sessions.codex.id, "thread-2");
     await send("Third");
     assert.equal(contexts[2].session.id, "thread-2");

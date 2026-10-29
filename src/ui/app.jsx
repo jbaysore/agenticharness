@@ -2029,9 +2029,7 @@ function WorkspacePanel({
     [loading, setLoading] = useState(false),
     [problem, setProblem] = useState("");
   const [savingComment, setSavingComment] = useState(false);
-  const [notes, setNotes] = useState([]),
-    [note, setNote] = useState(""),
-    [reference, setReference] = useState(""),
+  const [reference, setReference] = useState(""),
     [showReference, setShowReference] = useState(false),
     [checkCommand, setCheckCommand] = useState(project.check_command ?? "");
   // A chat in its own worktree shows that worktree as its repository.
@@ -2096,12 +2094,6 @@ function WorkspacePanel({
       return () => window.removeEventListener("harness-activity", onEvent);
     }
   }, [panel, chat?.id]);
-  useEffect(() => {
-    if (panel === "files")
-      api("/api/notes?projectId=" + project.id)
-        .then(setNotes)
-        .catch(report);
-  }, [panel, project.id]);
   const act = (fn) => async () => {
     try {
       await fn();
@@ -2448,52 +2440,6 @@ function WorkspacePanel({
                 Open a file and pin it to keep it with this conversation.
               </p>
             )}
-            <h3>Project decisions</h3>
-            {notes.map((n) => (
-              <div
-                className={"project-note " + (n.stale ? "stale" : "")}
-                key={n.id}
-              >
-                <p>{n.content}</p>
-                <small>
-                  {n.stale
-                    ? "Flagged for refresh"
-                    : "Saved with source evidence"}
-                </small>
-                {!n.stale && (
-                  <button
-                    onClick={act(async () => {
-                      await api("/api/notes/" + n.id + "/stale", {});
-                      setNotes(await api("/api/notes?projectId=" + project.id));
-                    })}
-                  >
-                    Flag stale
-                  </button>
-                )}
-              </div>
-            ))}
-            <textarea
-              aria-label="Save project decision"
-              placeholder="Save a decision from this conversation…"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-            <button
-              className="secondary"
-              disabled={!chat || !note.trim()}
-              onClick={act(async () => {
-                await api("/api/notes", {
-                  projectId: project.id,
-                  conversationId: chat.id,
-                  content: note,
-                  evidence: [`harness://conversation/${chat.id}`],
-                });
-                setNote("");
-                setNotes(await api("/api/notes?projectId=" + project.id));
-              })}
-            >
-              Save with conversation source
-            </button>
             <button
               className="text-button"
               onClick={() => setShowReference(!showReference)}
