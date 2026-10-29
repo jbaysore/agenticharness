@@ -165,6 +165,12 @@ test("Claude exposes the silent title tool immediately and calls through the rea
             assert.ok(projectNotes.inputSchema.properties.query);
             assert.match(projectNoteRead.description, /full Project Log entry/);
             assert.deepEqual(projectNoteRead.inputSchema.required, ["noteId"]);
+            const memoryWrite = tools.find((t) => t.name === "memory_write");
+            assert.match(memoryWrite.description, /Memory Web/);
+            assert.equal(memoryWrite._meta["anthropic/alwaysLoad"], true);
+            assert.deepEqual(memoryWrite.inputSchema.required.sort(), ["description", "sources", "title"]);
+            assert.ok(tools.some((t) => t.name === "memory_search"));
+            assert.ok(tools.some((t) => t.name === "memory_read"));
             const answer = await options.canUseTool(
               "mcp__harness__rename_chat",
               { title: "Fix sidebar flicker" },

@@ -11,6 +11,7 @@ import { readFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncQueue } from "../core/queue.mjs";
 import { historyTools } from "../core/history.mjs";
+import { memoryTools } from "../core/memory-web.mjs";
 import { claudeQuestionAnswers } from "../core/questions.mjs";
 import { proposalText } from "../core/plans.mjs";
 import { goalStopped } from "../core/goals.mjs";
@@ -41,6 +42,60 @@ export const CLAUDE_SESSION_SETTINGS = {
   askUserQuestionTimeout: "never",
   dialogExpiry: "never",
 };
+
+// Memory Web tools are loaded up front: agents are asked to search and save
+// as part of ordinary work, which a tool-discovery round trip discourages.
+function memoryClaudeTools(ctx) {
+  const describe = (name) => memoryTools.find((t) => t.name === name).description;
+  const respond = (name) => async (args) => ({
+    content: [
+      { type: "text", text: JSON.stringify(await ctx.history(name, args)) },
+    ],
+  });
+  const strings = z.array(z.string()).optional();
+  return [
+    tool(
+      "memory_search",
+      describe("memory_search"),
+      {
+        query: z.string().max(500),
+        project: z.string().optional(),
+        limit: z.number().int().min(1).max(10).optional(),
+        includeInactive: z.boolean().optional(),
+      },
+      respond("memory_search"),
+      { alwaysLoad: true },
+    ),
+    tool(
+      "memory_read",
+      describe("memory_read"),
+      { slug: z.string().min(1) },
+      respond("memory_read"),
+      { alwaysLoad: true },
+    ),
+    tool(
+      "memory_write",
+      describe("memory_write"),
+      {
+        title: z.string().max(120),
+        description: z.string().max(300),
+        body: z.string().max(20000).optional(),
+        type: z.enum(["fact", "decision", "lesson", "procedure", "preference", "project", "topic", "episode"]).optional(),
+        projects: strings,
+        tags: strings,
+        aliases: strings,
+        sources: z.array(z.string()),
+        trust: z.enum(["user", "verified", "inferred", "external"]).optional(),
+        expires: z.string().optional(),
+        path: z.string().optional(),
+        slug: z.string().optional(),
+        supersedes: z.string().optional(),
+      },
+      respond("memory_write"),
+      { alwaysLoad: true },
+    ),
+  ];
+}
 
 export function claudeOptions(cwd) {
   const path = executable("claude");
@@ -293,6 +348,7 @@ export async function runClaude(
           ],
         }),
       ),
+      ...memoryClaudeTools(ctx),
       tool(
         "workspace_activity",
         "List the other Harness chats working in this repository right now. Call it before committing.",

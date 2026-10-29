@@ -455,6 +455,16 @@ Both tools respect the conversation's history scope. `history_read` returns
 four messages at a time, each capped at 2,000 characters. Pass a query to get
 short windows around matches. Older text stays in the archive.
 `workspace_activity` lists the other chats working in the same folder.
+
+Memory Web is shared cross-project knowledge that agents read and write. Harness
+loads its library from `%USERPROFILE%\Projects\Memory Web` (or `MEMORY_WEB_PATH`)
+and offers `memory_search`, `memory_read` and `memory_write` to every provider;
+Ask mode allows the first two. Each request also gets a Memory Web block, capped at
+about 2,000 characters: the current project's hub note (or a prompt to create one)
+and up to three relevant notes. Writes record the provider, model, conversation and
+project, and Memory Web commits and pushes its own notes. Harness runs Memory Web's
+safe maintenance at startup and daily. If the library is missing, the tools report
+it and no block is added.
 On a chat's first message the agent is asked to call `rename_chat` with a short
 summary title. It works once and never replaces a title you set yourself; you can
 still rename any chat from its menu.

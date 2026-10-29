@@ -79,6 +79,8 @@ const ASK_HOST_TOOLS = new Set([
   "history_read",
   "project_notes",
   "project_note_read",
+  "memory_search",
+  "memory_read",
   "workspace_activity",
   "rename_chat",
   "suggest_mode",

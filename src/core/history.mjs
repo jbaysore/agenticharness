@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { pathsOverlap } from "./repository.mjs";
 import { attachmentContext, attachmentPath } from "./attachments.mjs";
+import { memoryTools } from "./memory-web.mjs";
 
 const HISTORY_PAGE = 4,
   HISTORY_MESSAGE_CAP = 2000,
@@ -168,6 +169,7 @@ export const historyTools = [
       additionalProperties: false,
     },
   },
+  ...memoryTools,
 ];
 
 // The title a chat gets from its first message until it is renamed.

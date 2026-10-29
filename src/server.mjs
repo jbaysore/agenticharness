@@ -27,6 +27,12 @@ import {
   readRepositoryFile,
 } from "./core/repository.mjs";
 import { historyCall } from "./core/history.mjs";
+import {
+  isMemoryTool,
+  MemoryWeb,
+  memorySources,
+  projectFolder,
+} from "./core/memory-web.mjs";
 import { ASK_DENY, askHostAllowed } from "./core/modes.mjs";
 import { hostTools } from "./core/host-tools.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
@@ -334,6 +340,26 @@ export async function createHarness({
               .requestSelfRestart(chatId)
               .catch((failure) => ({ error: failure.message })),
           );
+        if (isMemoryTool(body.name)) {
+          const run = store.activeRun(chatId),
+            result = controller.memoryWeb
+              ? await controller.memoryWeb.call(body.name, body.arguments ?? {}, {
+                  project: projectFolder(store.project(chat?.project_id)),
+                  author: {
+                    provider: run?.provider ?? chat.provider,
+                    model: run?.model,
+                    conversation: `harness://conversation/${chatId}`,
+                  },
+                })
+              : { error: "Memory Web is not enabled in this Harness." };
+          controller.event(chatId, run?.id ?? null, "work", {
+            kind: "history-tool",
+            name: body.name,
+            scope: chat.scope,
+            sources: memorySources(body.name, result),
+          });
+          return json(res, 200, result);
+        }
         const result = historyCall(
           store,
           chatId,
@@ -1049,7 +1075,9 @@ export async function createHarness({
     worktreeRoot: join(dataDir, "worktrees"),
     openReviewer,
     openrouter,
+    memoryWeb: new MemoryWeb(),
   });
+  controller.memoryWeb.startMaintenance();
   controller.providers = [await openrouter.inspect()];
   controller.tidyAll();
   controller.on("event", (event) => {
