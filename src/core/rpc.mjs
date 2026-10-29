@@ -1,6 +1,46 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 
+// JSON-RPC puts the useful reason in `data` and a generic code name in
+// `message`. Cursor's missing-session failure is message "Invalid params"
+// and data.message `Session "<id>" not found`. Field errors are kept; the
+// rejected value is not, so a bad request cannot echo a token into the chat.
+export function rpcErrorMessage(error = {}) {
+  const message =
+    typeof error.message === "string" && error.message.trim()
+      ? error.message.trim()
+      : "Agent request failed";
+  const detail = rpcErrorDetail(error.data);
+  if (!detail || message.includes(detail)) return message;
+  return `${message}: ${detail}`;
+}
+function rpcErrorDetail(data) {
+  if (typeof data === "string") return clip(data);
+  if (!data || typeof data !== "object") return null;
+  if (typeof data.message === "string" && data.message.trim())
+    return clip(data.message);
+  const fields = zodFieldErrors(data);
+  return fields.length ? clip(fields.join("; ")) : null;
+}
+function zodFieldErrors(data, prefix = "") {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const errors = [];
+  if (Array.isArray(data._errors))
+    for (const item of data._errors)
+      if (typeof item === "string" && item.trim())
+        errors.push(prefix ? `${prefix}: ${item.trim()}` : item.trim());
+  for (const [key, value] of Object.entries(data)) {
+    if (key === "_errors") continue;
+    errors.push(...zodFieldErrors(value, prefix ? `${prefix}.${key}` : key));
+    if (errors.length >= 8) break;
+  }
+  return errors.slice(0, 8);
+}
+function clip(text) {
+  const value = text.trim();
+  return value.length > 300 ? value.slice(0, 300) + "…" : value;
+}
+
 // Both Codex app-server and ACP use newline-delimited JSON, not LSP framing.
 export class RpcProcess extends EventEmitter {
   constructor(command, args = [], options = {}) {
@@ -55,10 +95,9 @@ export class RpcProcess extends EventEmitter {
         this.pending.delete(message.id);
         clearTimeout(pending.timer);
         if (message.error) {
-          const error = new Error(
-            message.error.message ?? "Agent request failed",
-          );
+          const error = new Error(rpcErrorMessage(message.error));
           error.code = message.error.code;
+          error.data = message.error.data;
           pending.reject(error);
         } else pending.resolve(message.result);
       }

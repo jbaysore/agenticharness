@@ -343,6 +343,40 @@ const streamRetries = 2;
 const continuePrompt =
   "Continue where you left off. Your last response was cut off by a dropped connection.";
 
+// session/new writes meta.json immediately. store.db appears only after the
+// session is used, so stopping before the first prompt leaves an id that
+// session/load rejects. Cursor names that "Invalid params" and puts
+// `Session "<id>" not found` in the JSON-RPC data.
+export function cursorSessionMissing(error) {
+  return /Session "[^"]+" not found/.test(String(error?.message ?? ""));
+}
+export async function openCursorSession(rpc, ctx) {
+  const setup = { cwd: ctx.project.path, mcpServers: ctx.mcpServers ?? [] };
+  const saved = ctx.session?.id;
+  if (!saved)
+    return { resumed: false, session: await rpc.call("session/new", setup) };
+  try {
+    return {
+      resumed: true,
+      session: await rpc.call("session/load", {
+        ...setup,
+        sessionId: saved,
+      }),
+    };
+  } catch (error) {
+    if (!cursorSessionMissing(error)) throw error;
+    ctx.emit?.("work", {
+      kind: "session-reset",
+      provider: "cursor",
+      item: {
+        title: "Started a new Cursor session",
+        description:
+          "The previous Cursor session was never stored, so this turn starts a new one. Earlier messages stay with the chat.",
+      },
+    });
+    return { resumed: false, session: await rpc.call("session/new", setup) };
+  }
+}
 export async function runCursor(ctx, deps = {}) {
   const context = contextReporter(ctx, "cursor");
   // Starting Cursor while its status is checked saves a second; nothing is
@@ -536,11 +570,12 @@ export async function runCursor(ctx, deps = {}) {
       ctx.emit("work", { kind: "plan", provider: "cursor", item: p });
   });
   try {
-    const setup = { cwd: ctx.project.path, mcpServers: ctx.mcpServers ?? [] };
-    const session = ctx.session?.id
-      ? await rpc.call("session/load", { ...setup, sessionId: ctx.session.id })
-      : await rpc.call("session/new", setup);
-    sessionId = ctx.session?.id ?? session.sessionId;
+    const opened = await openCursorSession(rpc, ctx);
+    // A saved id that Cursor cannot load must not skip the transcript. The
+    // controller already included one when this turn was a provider switch.
+    if (!opened.resumed) ctx.ensureHandoff?.();
+    const session = opened.session;
+    sessionId = opened.resumed ? ctx.session.id : session.sessionId;
     ctx.saveSession({ id: sessionId });
     context.start(sessionId);
     const model = cursorModels(session).find((m) => m.id === ctx.model);

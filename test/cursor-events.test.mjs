@@ -9,9 +9,11 @@ import {
   cursorModels,
   cursorQuestionOutcome,
   cursorSpeedFollowUp,
+  cursorSessionMissing,
   cursorStreamDropped,
   cursorWorkKind,
   isHarnessTool,
+  openCursorSession,
   runCursor,
 } from "../src/providers/cursor.mjs";
 
@@ -466,4 +468,88 @@ test("a Cursor stream that keeps dropping stops after two retries and fails", as
   assert.equal(prompts.length, 3);
   assert.equal(result.status, "failed");
   assert.match(result.error, /connection dropped/);
+});
+
+const cursorCatalog = {
+  models: { availableModels: [{ modelId: "m", name: "Fixture" }] },
+  configOptions: [{ id: "model", currentValue: "m" }],
+};
+
+test("a Cursor session id that was never stored starts a new session", async () => {
+  assert.equal(
+    cursorSessionMissing(new Error('Invalid params: Session "dead" not found')),
+    true,
+  );
+  assert.equal(cursorSessionMissing(new Error("Invalid params")), false);
+  const calls = [],
+    work = [],
+    saved = [];
+  let handed = false;
+  const rpc = {
+    async call(method, params) {
+      calls.push({ method, params });
+      if (method === "session/load")
+        throw new Error('Invalid params: Session "dead" not found');
+      if (method === "session/new") return { sessionId: "fresh", ...cursorCatalog };
+      if (method === "session/prompt") return { stopReason: "end_turn" };
+      return {};
+    },
+    on() {},
+    notify() {},
+    close() {},
+  };
+  const result = await runCursor(
+    {
+      project: { path: process.cwd() },
+      session: { id: "dead" },
+      signal: new AbortController().signal,
+      emit(type, payload) {
+        if (type === "work") work.push(payload);
+      },
+      saveSession(patch) {
+        saved.push(patch);
+      },
+      ensureHandoff() {
+        handed = true;
+        this.handoff = "Earlier transcript";
+      },
+      text: "Continue",
+      model: "m",
+      mode: "default",
+      billingConfirmation: { fingerprint: "fixture", disabled: true },
+      approve: async () => ({ allow: true }),
+    },
+    {
+      cursorAuth: async () => ({ connected: true, fingerprint: "fixture" }),
+      openCursor: async () => rpc,
+    },
+  );
+  assert.equal(result.status, "completed");
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    ["session/load", "session/new", "session/set_mode", "session/prompt"],
+  );
+  assert.equal(calls.at(-1).params.sessionId, "fresh");
+  assert.match(calls.at(-1).params.prompt[0].text, /Earlier transcript/);
+  assert.equal(handed, true);
+  assert.deepEqual(saved, [{ id: "fresh" }]);
+  assert.equal(work[0].item.title, "Started a new Cursor session");
+});
+
+test("other Cursor parameter errors are not retried as a new session", async () => {
+  const calls = [];
+  const rpc = {
+    async call(method) {
+      calls.push(method);
+      throw new Error("Invalid params: mcpServers: Invalid input");
+    },
+  };
+  await assert.rejects(
+    openCursorSession(rpc, {
+      project: { path: process.cwd() },
+      session: { id: "live" },
+    }),
+    /mcpServers/,
+  );
+  assert.deepEqual(calls, ["session/load"]);
 });

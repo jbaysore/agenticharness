@@ -1459,6 +1459,23 @@ export class Controller extends EventEmitter {
         writeSession({ deliveryGeneration: (saved?.deliveryGeneration ?? 0) + 1 });
       },
       handoff,
+      // Cursor can discard a saved id that was never stored. The transcript
+      // is built only then, so a live session is not resent every turn.
+      ensureHandoff: () => {
+        if (ctx.handoff || messages.length <= 1) return;
+        ctx.handoff = handoffContext(
+          this.store,
+          chat,
+          run.provider,
+          this.dataDir,
+        );
+        this.event(chat.id, run.id, "handoff", {
+          from: lastAgent ?? "archive",
+          to: run.provider,
+          scope: chat.scope,
+          source: `harness://conversation/${chat.id}`,
+        });
+      },
       instructions: delivery.instructions,
       addendum: [delivery.addendum, renameLine].filter(Boolean).join("\n\n"),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
