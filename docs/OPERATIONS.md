@@ -739,8 +739,8 @@ external services, submodules and incomplete reads cannot establish a match.
 Landing checks stay attached to their checked commit. Pinning an old command
 never associates it with the workspace state at the time it was pinned.
 
-Use **Flag reliability issue** on an assistant message or work step to retain an
-explicit user report with its source. Resolve or dismiss reports in the panel.
+Use **Flag reliability issue** from an assistant message’s hover menu, or from a
+work step’s Actions menu, to retain an explicit user report with its source. Resolve or dismiss reports in the panel.
 Records and acknowledgments survive reloads and are included in history exports.
 They stay local; no analytics, model review calls, automatic test executions,
 compaction, or session resets are added by this feature. Active run time includes

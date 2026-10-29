@@ -1102,6 +1102,66 @@ small {
 .steps + .reply {
   margin-top: 14px;
 }
+.reply {
+  position: relative;
+}
+.reply .message-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+}
+.message:hover .reply .message-actions,
+.message:focus-within .reply .message-actions,
+.reply .message-actions.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.reply .message-actions .icon-button {
+  width: 24px;
+  height: 24px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
+.message-actions-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px #0006;
+}
+.message-actions-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.message-actions-menu button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.reply .message-actions .issue-form {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+}
+@media (hover: none) {
+  .reply .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
 /* What each stretch of work did: one quiet line that opens into the steps. */
 .steps {
   margin: 10px 0 0;

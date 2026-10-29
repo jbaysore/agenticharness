@@ -66,7 +66,15 @@ export function Icon({ name, size = 18 }) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d={paths[name] ?? paths.file} />
+      {name === "more" ? (
+        <>
+          <circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none" />
+        </>
+      ) : (
+        <path d={paths[name] ?? paths.file} />
+      )}
     </svg>
   );
 }

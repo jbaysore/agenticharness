@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "./api.mjs";
+import { Icon } from "./components.jsx";
 import { ISSUE_CATEGORIES } from "../core/reliability.mjs";
 
 const base = (id) => `/api/chats/${encodeURIComponent(id)}/reliability`;
@@ -77,70 +78,128 @@ export function useReliability(chat, provider, model, open) {
   return { data: matches ? data : null, error };
 }
 
-export function IssueButton({ chatId, messageId, eventId }) {
+export function IssueButton({ chatId, messageId, eventId, menu = false }) {
   const [open, setOpen] = useState(false),
+    [menuOpen, setMenuOpen] = useState(false),
     [category, setCategory] = useState(ISSUE_CATEGORIES[0]),
     [note, setNote] = useState(""),
     [error, setError] = useState(null),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    box = useRef(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const outside = (event) => {
+        if (!box.current?.contains(event.target)) setMenuOpen(false);
+      },
+      escape = (event) => {
+        if (event.key === "Escape") setMenuOpen(false);
+      };
+    window.addEventListener("pointerdown", outside);
+    window.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("pointerdown", outside);
+      window.removeEventListener("keydown", escape);
+    };
+  }, [menuOpen]);
   if (!chatId || (!messageId && !eventId)) return null;
-  return (
-    <span className="issue-control">
+  const form = open && (
+    <span className="issue-form">
+      <label>
+        Issue category
+        <select value={category} onChange={(e) => setCategory(e.target.value)}>
+          {ISSUE_CATEGORIES.map((c) => (
+            <option key={c}>{c}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Optional issue note
+        <textarea
+          maxLength={2000}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </label>
+      {error && <span role="alert">{error}</span>}
       <button
         type="button"
-        className="text-button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await reliabilityAction(chatId, {
+              kind: "report",
+              category,
+              note,
+              ...(messageId ? { messageId } : { eventId }),
+            });
+            setOpen(false);
+            setNote("");
+          } catch (e) {
+            setError(e.message);
+          } finally {
+            setBusy(false);
+          }
+        }}
       >
-        Flag reliability issue
+        Record issue
       </button>
-      {open && (
-        <span className="issue-form">
-          <label>
-            Issue category
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              {ISSUE_CATEGORIES.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Optional issue note
-            <textarea
-              maxLength={2000}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </label>
-          {error && <span role="alert">{error}</span>}
+    </span>
+  );
+  if (!menu)
+    return (
+      <span className="issue-control">
+        <button
+          type="button"
+          className="text-button"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          Flag reliability issue
+        </button>
+        {form}
+      </span>
+    );
+  return (
+    <span
+      className={"issue-control message-actions" + (open || menuOpen ? " open" : "")}
+      ref={box}
+    >
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Message actions"
+        title="Message actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (open) {
+            setOpen(false);
+            setMenuOpen(false);
+            return;
+          }
+          setMenuOpen(!menuOpen);
+        }}
+      >
+        <Icon name="more" size={14} />
+      </button>
+      {menuOpen && (
+        <span className="message-actions-menu" role="menu" aria-label="Message actions">
           <button
             type="button"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await reliabilityAction(chatId, {
-                  kind: "report",
-                  category,
-                  note,
-                  ...(messageId ? { messageId } : { eventId }),
-                });
-                setOpen(false);
-                setNote("");
-              } catch (e) {
-                setError(e.message);
-              } finally {
-                setBusy(false);
-              }
+            role="menuitem"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              setOpen(true);
             }}
           >
-            Record issue
+            Flag reliability issue
           </button>
         </span>
       )}
+      {form}
     </span>
   );
 }

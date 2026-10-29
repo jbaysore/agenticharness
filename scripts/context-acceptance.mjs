@@ -283,10 +283,11 @@ try {
   await expect(reliabilityDialog).toContainText("Command succeeded");
   await expect(reliabilityDialog).toContainText("Freshness unavailable");
   await page.keyboard.press("Escape");
-  await page
-    .locator(`[id='${messageId}']`)
-    .getByRole("button", { name: "Flag reliability issue" })
-    .first()
+  const reported = page.locator(`[id='${messageId}']`);
+  await reported.hover();
+  await reported.getByRole("button", { name: "Message actions" }).click();
+  await reported
+    .getByRole("menuitem", { name: "Flag reliability issue" })
     .click();
   await page
     .getByLabel("Issue category")

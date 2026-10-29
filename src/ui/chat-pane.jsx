@@ -99,7 +99,7 @@ function Conversation({ chat, onOpenWork }) {
                 id={message === first ? undefined : message.id}
               >
                 <Markdown text={message.content} />
-                <IssueButton chatId={chat.id} messageId={message.id} />
+                <IssueButton chatId={chat.id} messageId={message.id} menu />
               </div>
             )}
             {steps.length > 0 && (
