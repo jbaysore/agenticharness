@@ -205,6 +205,18 @@ for (const change of ["compact", "session", "dispose", "abort"]) {
   });
 }
 
+test("summary context uses the reported working limit when raw capacity is absent", async () => {
+  for (const rawMaxTokens of [undefined, 0]) {
+    const f = fixture();
+    f.reporter.start("s");
+    const sampler = contextSampler({ getContextUsage: async () => ({ totalTokens: 1200, rawMaxTokens, maxTokens: 200000 }) }, f.reporter);
+    await sampler.sample(true);
+    assert.equal(f.reporter.snapshot.windowTokens, 200000);
+    assert.equal(f.reporter.snapshot.usedTokens, 1200);
+    sampler.dispose();
+  }
+});
+
 test("cache expiration does not reset context; compaction changes its generation", () => {
   const f = fixture();
   f.reporter.update({

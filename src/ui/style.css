@@ -1713,6 +1713,7 @@ small {
   box-shadow: inset 0 0 0 1px var(--agent);
 }
 .composer-footer {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -1823,10 +1824,20 @@ small {
     cursor: default;
   }
 }
-.composer-footer .history-scope {
+.composer-footer .context-meter {
   margin-left: auto;
-  flex-shrink: 0;
+  position: static;
+  flex: 1 1 180px;
+  max-width: 350px;
+  min-width: 0;
 }
+.composer-footer .context-trigger { padding: 0; }
+.composer-footer .context-meter.compact { flex: 0 1 auto; }
+.context-meter.compact .context-track,
+.context-meter.compact .context-count,
+.context-meter.compact .context-note { display: none; }
+.context-meter.compact .context-trigger { flex-wrap: nowrap; gap: 5px; }
+.context-meter.compact .reliability-badge { font-size: 10px; }
 .permissions-control select,
 .mode-control select {
   field-sizing: content;

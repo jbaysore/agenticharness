@@ -36,9 +36,8 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   const visit = async (target) => {
     await target.goto(`${app.runtime.origin}/?chat=${existing.id}`);
-    await expect(target.locator(".history-scope")).toHaveText(
-      "History: This project",
-    );
+    await expect(target.locator(".context-trigger")).toBeVisible();
+    await expect(target.locator(".history-scope")).toHaveCount(0);
     await expect(target.getByLabel("Shared history scope")).toHaveCount(0);
   };
   const settings = (target) =>
@@ -86,9 +85,7 @@ try {
   await expect(settings(page)).toHaveValue("none");
   await page.getByRole("button", { name: "Close dialog" }).click();
   await page.locator(".new-chat").click();
-  await expect(page.locator(".history-scope")).toHaveText(
-    "History: This conversation",
-  );
+  await expect(page.locator(".context-trigger")).toBeVisible();
   await expect
     .poll(() => new URL(page.url()).searchParams.get("chat"))
     .not.toBe(existing.id);
@@ -111,9 +108,7 @@ try {
   });
   await phone.getByRole("button", { name: "Close dialog" }).click();
   await phone.locator(".new-chat").click();
-  await expect(phone.locator(".history-scope")).toHaveText(
-    "History: This project",
-  );
+  await expect(phone.locator(".context-trigger")).toBeVisible();
   await expect
     .poll(() => new URL(phone.url()).searchParams.get("chat"))
     .not.toBe(existing.id);
@@ -125,9 +120,8 @@ try {
   await expect(settings(phone)).toBeEnabled();
   await expect(settings(phone)).toHaveValue("all");
   await phone.getByRole("button", { name: "Close dialog" }).click();
-  await expect(phone.locator(".history-scope")).toHaveText(
-    "History: This project",
-  );
+  expect(app.store.conversation(newId).scope).toBe("project");
+  await expect(phone.locator(".context-trigger")).toBeVisible();
   expect(app.store.conversation(existing.id).sessions).toEqual(sessions);
   expect(errors).toEqual([]);
   console.log(

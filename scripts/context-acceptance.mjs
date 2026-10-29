@@ -134,13 +134,13 @@ try {
   await page.goto(url(chats.map((c) => c.id)));
   await expect(page.locator(".context-meter")).toHaveCount(4);
   await expect(
-    page.locator(".context-meter").filter({ hasText: "Context unavailable" }),
+    page.getByRole("button", { name: /^Context unavailable/ }),
   ).toHaveCount(1);
   await expect(
-    page.locator(".context-meter").filter({ hasText: "Context 110%" }),
+    page.getByRole("button", { name: /^Context 110%/ }),
   ).toHaveCount(1);
   await expect(
-    page.locator(".context-meter").filter({ hasText: "≈ Context 42%" }),
+    page.getByRole("button", { name: /^≈ Context 42%/ }),
   ).toHaveCount(1);
   assert.equal(
     await page.evaluate(
@@ -170,7 +170,7 @@ try {
   const mobile = await phone.newPage();
   mobile.on("pageerror", (error) => errors.push(error.message));
   await mobile.goto(url([chats[0].id]));
-  await expect(mobile.locator(".context-trigger")).toContainText("Context 10%");
+  await expect(mobile.locator(".context-trigger")).toHaveAttribute("aria-label", /^Context 10%/);
   await mobile.locator(".context-trigger").click();
   await expect(
     mobile.getByRole("dialog", { name: "Context details" }),

@@ -1110,7 +1110,6 @@ export function ChatPane({
             </button>
           </div>
         </form>
-        <ContextBar chat={chat} provider={provider} model={model} />
         <div className="composer-footer">
           <label
             className={"permissions-control " + permissions}
@@ -1150,7 +1149,7 @@ export function ChatPane({
               ))}
             </select>
           </label>
-          {(compact || mobile) && (chat || peers.length > 0) && (
+          {(compact || mobile) && peers.length > 0 && (
             <details
               className="composer-details"
               onKeyDown={(event) => {
@@ -1162,30 +1161,16 @@ export function ChatPane({
               }}
             >
               <summary
-                aria-label="Conversation details"
-                title="History and workspace details"
+                aria-label="Workspace details"
+                title="Other chats working in this workspace"
               >
                 <Icon name="menu" size={15} />
               </summary>
               <div className="composer-details-popover">
-                {chat && (
-                  <p>
-                    History:{" "}
-                    {
-                      {
-                        none: "This conversation",
-                        project: project?.scratch ? "This conversation" : "This project",
-                        all: "All projects",
-                      }[chat.scope]
-                    }
-                  </p>
-                )}
-                {peers.length > 0 && (
-                  <p>
-                    {workspacePeersLabel(peers)}:{" "}
-                    {peers.map((c) => c.title).join(", ")}
-                  </p>
-                )}
+                <p>
+                  {workspacePeersLabel(peers)}:{" "}
+                  {peers.map((c) => c.title).join(", ")}
+                </p>
               </div>
             </details>
           )}
@@ -1201,21 +1186,7 @@ export function ChatPane({
               {workspacePeersLabel(peers)}
             </span>
           )}
-          {!compact && !mobile && chat && (
-            <span
-              className="history-scope"
-              title="History access is fixed for this conversation. Set the default for new conversations in Connections & usage."
-            >
-              History:{" "}
-              {
-                {
-                  none: "This conversation",
-                  project: project?.scratch ? "This conversation" : "This project",
-                  all: "All projects",
-                }[chat.scope]
-              }
-            </span>
-          )}
+          {chat && <ContextBar chat={chat} provider={provider} model={model} compact={compact || mobile} />}
           {!chat?.messages?.length &&
             !chat?.runs?.length &&
             !Object.keys(chat?.sessions ?? {}).length &&

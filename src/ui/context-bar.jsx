@@ -11,7 +11,7 @@ const short = (n) =>
         maximumFractionDigits: 1,
       }).format(n);
 
-export function ContextBar({ chat, provider, model }) {
+export function ContextBar({ chat, provider, model, compact = false }) {
   const [open, setOpen] = useState(false),
     [placement, setPlacement] = useState({}),
     root = useRef(null),
@@ -25,6 +25,7 @@ export function ContextBar({ chat, provider, model }) {
   const { reading, percent } = view;
   const reuse = cacheReuse(reading?.cache);
   const reliability = useReliability(chat, provider, model, open);
+  const triggerLabel = !compact ? view.label : percent !== null ? view.label.replace("Context ", "") : reading?.state === "compacting" ? "Compacting…" : reading?.state === "unavailable" ? "Not reported" : "Not measured";
   useEffect(() => setOpen(false), [chat?.id, provider, model]);
   useLayoutEffect(() => {
     if (!open) return;
@@ -72,10 +73,10 @@ export function ContextBar({ chat, provider, model }) {
       document.removeEventListener("keydown", escape);
     };
   }, [open]);
-  const description = `${view.label}${view.used !== null && percent !== null ? `, ${count(view.used)} of ${count(view.window)} tokens` : ""}${view.outdated ? ", last reading" : ""}${view.updating ? ", updating" : ""}`;
+  const description = `${view.label}${view.used !== null && percent !== null ? `, ${count(view.used)} of ${count(view.window)} tokens` : ""}${view.outdated ? ", last reading" : ""}${view.updating ? ", updating" : ""}${reliability.data?.notices.length ? `, ${reliability.data.status}` : ""}`;
   return (
     <div
-      className={`context-meter ${view.level}${view.outdated ? " outdated" : ""}`}
+      className={`context-meter ${view.level}${view.outdated ? " outdated" : ""}${compact ? " compact" : ""}`}
       ref={root}
     >
       <button
@@ -83,11 +84,12 @@ export function ContextBar({ chat, provider, model }) {
         className="context-trigger"
         ref={trigger}
         aria-label={description}
+        title={description}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen(!open)}
       >
-        <span className="context-label">{view.label}</span>
+        <span className="context-label">{triggerLabel}</span>
         <span
           className="context-track"
           role="progressbar"
@@ -105,7 +107,7 @@ export function ContextBar({ chat, provider, model }) {
             : "—"}
         </span>
         {view.outdated && <span className="context-note">Last reading</span>}
-        {reliability.data?.notices.length > 0 && <span className="reliability-badge">{reliability.data.status}</span>}
+        {reliability.data?.notices.length > 0 && <span className="reliability-badge" title={reliability.data.status}>{compact ? "Review" : reliability.data.status}</span>}
         {view.updating && (
           <span className="context-updating" aria-hidden="true">
             ↻

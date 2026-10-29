@@ -212,7 +212,7 @@ export function contextSampler(
           reporter.update(
             {
               usedTokens: reading.totalTokens,
-              windowTokens: reading.rawMaxTokens,
+              windowTokens: tokenCount(reading.rawMaxTokens) > 0 ? reading.rawMaxTokens : reading.maxTokens,
               accuracy: "provider-estimated",
               basis: "current-context",
               source: "Claude SDK context summary",
