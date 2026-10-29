@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import { buildSteps, settle } from "./steps.mjs";
 import { provisionalTitle } from "./history.mjs";
 import { blockingGoals, goalStatus, sessionGoals } from "./goals.mjs";
+import { mergeContext } from "./context-usage.mjs";
 
 const historyScopes = ["none", "project", "all"];
 
@@ -29,10 +30,18 @@ export function chatStatus(row) {
 }
 
 function summarize({ last_status, last_ended_at, pending_approvals, ...c }) {
+  let context = null;
+  if (c.context_usage)
+    try {
+      context = JSON.parse(c.context_usage);
+    } catch {
+      context = null;
+    }
   return {
     ...c,
     sessions: JSON.parse(c.sessions),
     worktree: c.worktree ? JSON.parse(c.worktree) : null,
+    context_usage: context,
     ...chatStatus({ ...c, last_status, last_ended_at, pending_approvals }),
   };
 }
@@ -123,6 +132,9 @@ export class Store {
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN usage_stopped_reason TEXT",
       );
+    // Latest context-window reading. Absent until a provider reports one.
+    if (!conversation.includes("context_usage"))
+      this.db.exec("ALTER TABLE conversations ADD COLUMN context_usage TEXT");
     // Run on a chat's rebased branch before it lands on the project's branch.
     if (!columns("projects").includes("check_command"))
       this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
@@ -311,6 +323,17 @@ export class Store {
         "UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL WHERE id=?",
       )
       .run(id);
+    return this.conversation(id);
+  }
+  // Leaves updated_at alone, so a context reading does not reorder the chat.
+  setContextUsage(id, reading) {
+    const current = this.conversation(id);
+    if (!current) return null;
+    const next = mergeContext(current.context_usage, reading);
+    if (!next) return current;
+    this.db
+      .prepare("UPDATE conversations SET context_usage=? WHERE id=?")
+      .run(JSON.stringify(next), id);
     return this.conversation(id);
   }
   createConversation({

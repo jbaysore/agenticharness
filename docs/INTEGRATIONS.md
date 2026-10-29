@@ -54,7 +54,16 @@ already-running turn if the account permits paid fallback.
 The installed Claude SDK is 0.3.292 with Claude Code 2.1.292. Its
 `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET` method reports native
 account quota and `extra_usage` settings without inference. This is actual
-provider telemetry, not a local usage estimate. Cursor 2026.10.01-e373342 returns
+provider telemetry, not a local usage estimate. Context occupancy is a different
+reading. Codex `thread/tokenUsage/updated` carries it in `tokenUsage.last`
+against `modelContextWindow`; `tokenUsage.total` is lifetime thread usage.
+Claude's `Query.getContextUsage({ detail: "summary" })` reports the current
+window, which may be a compaction limit. `modelUsage` on a result is cumulative
+and is not occupancy. `detail: "full"` counts categories with the token-count
+API, so Harness does not call it. Cursor 2026.10.01-e373342 does not emit ACP
+`usage_update` (`used` and `size`). Until it does, the composer says context is
+not reported. Optional `cost` on that update is cumulative session cost and is
+not shown as context. That same Cursor build returns
 bare model ids, including Composer and Grok, when the client advertises
 `parameterizedModelPicker`. Those models default the new session to Fast, so the
 app sets `fast=false` and stops unless Cursor confirms standard speed. Auto is

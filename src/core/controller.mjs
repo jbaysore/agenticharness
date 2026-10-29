@@ -711,6 +711,12 @@ export class Controller extends EventEmitter {
       this.event(chat.id, null, "chat", this.store.conversation(chat.id));
     };
     const emit = (type, payload) => {
+      if (type === "context") {
+        const saved = this.store.setContextUsage(chat.id, payload);
+        if (saved?.context_usage)
+          this.event(chat.id, run.id, "context", saved.context_usage);
+        return;
+      }
       if (type === "proposed-plan") {
         noteActivity();
         saveProposal(proposalText(payload.text));

@@ -1715,9 +1715,34 @@ small {
     cursor: default;
   }
 }
-.composer-footer .history-scope {
+.composer-footer .context-meter {
   margin-left: auto;
+  flex-shrink: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.context-meter-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-meter-bar {
+  width: 42px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--surface-3);
   flex-shrink: 0;
+  overflow: hidden;
+}
+.context-meter-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--text-3);
+}
+.context-meter.stale {
+  opacity: 0.55;
 }
 .permissions-control select,
 .mode-control select {

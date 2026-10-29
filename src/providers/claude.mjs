@@ -27,6 +27,10 @@ import {
   claudeAskAllowed,
   CHAT_MODES,
 } from "../core/modes.mjs";
+import {
+  claudeContextReading,
+  unreportedReading,
+} from "../core/context-usage.mjs";
 export { checkClaudeBilling };
 const exec = promisify(execFile);
 
@@ -570,6 +574,33 @@ export async function runClaude(
         polling = false;
       }
     }, pollIntervalMs);
+    // Summary uses the last response. Full detail calls the token-count API.
+    let contextUnsupported = false;
+    const measureContext = async () => {
+      if (contextUnsupported || stopped || ctx.signal.aborted) return;
+      const fn = q.getContextUsage;
+      if (typeof fn !== "function") {
+        contextUnsupported = true;
+        ctx.emit("context", unreportedReading("claude", ctx.model));
+        return;
+      }
+      while (polling && !stopped && !ctx.signal.aborted)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      if (stopped || ctx.signal.aborted) return;
+      polling = true;
+      try {
+        const usage = await fn.call(q, { detail: "summary" });
+        if (stopped || ctx.signal.aborted) return;
+        ctx.emit(
+          "context",
+          claudeContextReading({ usage, requestedModel: ctx.model }),
+        );
+      } catch {
+        ctx.emit("context", unreportedReading("claude", ctx.model));
+      } finally {
+        polling = false;
+      }
+    };
     for await (const event of q) {
       if (event.session_id) ctx.saveSession({ id: event.session_id });
       if (["assistant", "stream_event", "user"].includes(event.type))
@@ -643,6 +674,8 @@ export async function runClaude(
             }),
             item: block,
           });
+        if (!event.parent_tool_use_id && event.message.stop_reason)
+          await measureContext();
       }
       if (event.type === "user" && event.tool_use_result) {
         // The result names its tool call, so the chat can mark that step done or failed.
@@ -661,6 +694,17 @@ export async function runClaude(
           }),
           item: event.tool_use_result,
         });
+      }
+      if (event.type === "system" && event.subtype === "compact_boundary") {
+        const post = event.compact_metadata?.post_tokens;
+        if (Number.isInteger(post) && post >= 0)
+          ctx.emit("context", {
+            kind: "used",
+            provider: "claude",
+            model: ctx.model,
+            used: post,
+          });
+        await measureContext();
       }
       if (
         event.type === "system" &&
@@ -698,6 +742,7 @@ export async function runClaude(
           estimatedCostUsd: event.total_cost_usd,
           label: "Provider token/cost estimate; not a charge or quota meter",
         });
+        await measureContext();
         const result = {
           status: ctx.signal.aborted
             ? "cancelled"

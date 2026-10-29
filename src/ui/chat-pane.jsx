@@ -28,6 +28,40 @@ import {
   workspacePeersLabel,
 } from "./status.mjs";
 import { elapsed, greeting, providerName, workingLine } from "./voice.mjs";
+import { contextMeterView } from "../core/context-usage.mjs";
+
+function ContextMeter({ reading, provider, model, resolvedModel, compact }) {
+  const view = contextMeterView({
+    reading,
+    provider,
+    model,
+    resolvedModel,
+    compact,
+  });
+  return (
+    <span
+      className={"context-meter" + (view.dimmed ? " stale" : "")}
+      role={view.percentage != null ? "meter" : "status"}
+      aria-label={view.aria}
+      title={view.title}
+      {...(view.percentage != null
+        ? {
+            "aria-valuemin": 0,
+            "aria-valuemax": 100,
+            "aria-valuenow": Math.min(100, view.percentage),
+            "aria-valuetext": view.aria,
+          }
+        : {})}
+    >
+      <span className="context-meter-label">{view.text}</span>
+      {view.percentage != null && !compact && (
+        <span className="context-meter-bar" aria-hidden="true">
+          <span style={{ width: Math.min(100, view.percentage) + "%" }} />
+        </span>
+      )}
+    </span>
+  );
+}
 import { StepSummary } from "./steps.jsx";
 import { interleave } from "../core/steps.mjs";
 import { blockingGoals } from "../core/goals.mjs";
@@ -1026,7 +1060,7 @@ export function ChatPane({
               ))}
             </select>
           </label>
-          {compact && (chat || peers.length > 0) && (
+          {compact && peers.length > 0 && (
             <details
               className="composer-details"
               onKeyDown={(event) => {
@@ -1038,30 +1072,16 @@ export function ChatPane({
               }}
             >
               <summary
-                aria-label="Conversation details"
-                title="History and workspace details"
+                aria-label="Workspace details"
+                title="Other chats working in this workspace"
               >
                 <Icon name="menu" size={15} />
               </summary>
               <div className="composer-details-popover">
-                {chat && (
-                  <p>
-                    History:{" "}
-                    {
-                      {
-                        none: "This conversation",
-                        project: "This project",
-                        all: "All projects",
-                      }[chat.scope]
-                    }
-                  </p>
-                )}
-                {peers.length > 0 && (
-                  <p>
-                    {workspacePeersLabel(peers)}:{" "}
-                    {peers.map((c) => c.title).join(", ")}
-                  </p>
-                )}
+                <p>
+                  {workspacePeersLabel(peers)}:{" "}
+                  {peers.map((c) => c.title).join(", ")}
+                </p>
               </div>
             </details>
           )}
@@ -1077,20 +1097,14 @@ export function ChatPane({
               {workspacePeersLabel(peers)}
             </span>
           )}
-          {!compact && chat && (
-            <span
-              className="history-scope"
-              title="History access is fixed for this conversation. Set the default for new conversations in Connections & usage."
-            >
-              History:{" "}
-              {
-                {
-                  none: "This conversation",
-                  project: "This project",
-                  all: "All projects",
-                }[chat.scope]
-              }
-            </span>
+          {chat && (
+            <ContextMeter
+              reading={chat.context_usage}
+              provider={provider}
+              model={model}
+              resolvedModel={selectedModel?.resolvedModel}
+              compact={compact}
+            />
           )}
           {!chat?.messages?.length &&
             !chat?.runs?.length &&

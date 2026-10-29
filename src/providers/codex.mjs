@@ -11,6 +11,7 @@ import {
   goalStopped,
   goalStatus as normalizeGoalStatus,
 } from "../core/goals.mjs";
+import { codexContextReading } from "../core/context-usage.mjs";
 
 export function checkCodexRoute(config) {
   // config/read includes the official default even when the user set no override.
@@ -340,7 +341,20 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     }
   });
   rpc.on("notification", ({ method, params: p }) => {
-    if (finished) return;
+    if (finished) {
+      // The final occupancy notice can arrive as the turn is closing.
+      if (
+        method === "thread/tokenUsage/updated" &&
+        (!p?.threadId || !threadId || p.threadId === threadId)
+      ) {
+        const reading = codexContextReading({
+          tokenUsage: p.tokenUsage,
+          model: ctx.model,
+        });
+        if (reading) ctx.emit("context", reading);
+      }
+      return;
+    }
     if (p?.threadId && threadId && p.threadId !== threadId) {
       if (
         ["item/started", "item/completed", "thread/status/changed"].includes(
@@ -434,8 +448,19 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       });
     if (method === "turn/plan/updated")
       ctx.emit("work", { kind: "plan", ...p });
-    if (method === "thread/tokenUsage/updated")
-      ctx.emit("work", { kind: "token-usage", ...p });
+    if (method === "item/started" && p.item?.type === "contextCompaction")
+      ctx.emit("context", {
+        kind: "compacting",
+        provider: "codex",
+        model: ctx.model,
+      });
+    if (method === "thread/tokenUsage/updated") {
+      const reading = codexContextReading({
+        tokenUsage: p.tokenUsage,
+        model: ctx.model,
+      });
+      if (reading) ctx.emit("context", reading);
+    }
     if (method === "error") ctx.emit("work", { kind: "error", error: p.error });
     if (method === "turn/completed") {
       if (p.turn.id && turnId && p.turn.id !== turnId) return;

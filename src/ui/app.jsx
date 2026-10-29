@@ -533,6 +533,18 @@ function App() {
           };
         });
       if (
+        e.type === "context" &&
+        e.id > (floors.current[e.conversationId] ?? 0)
+      )
+        setChats((all) => {
+          const c = all[e.conversationId];
+          if (!c) return all;
+          return {
+            ...all,
+            [c.id]: { ...c, context_usage: e.payload },
+          };
+        });
+      if (
         e.type === "work" &&
         e.runId &&
         e.id > (floors.current[e.conversationId] ?? 0)

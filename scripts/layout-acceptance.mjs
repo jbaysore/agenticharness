@@ -272,16 +272,12 @@ try {
   await expect
     .poll(async () => (await compactDraft.boundingBox()).height)
     .toBe(96);
-  await paneFor("Second chat").getByLabel("Conversation details").click();
+  await expect(paneFor("Second chat").locator(".context-meter")).toHaveText(
+    "Not measured",
+  );
   await expect(
-    paneFor("Second chat").locator(".composer-details-popover"),
-  ).toContainText("History:");
-  await paneFor("Second chat")
-    .getByLabel("Conversation details")
-    .press("Escape");
-  await expect(
-    paneFor("Second chat").locator(".composer-details-popover"),
-  ).toBeHidden();
+    paneFor("Second chat").getByLabel("Workspace details"),
+  ).toHaveCount(0);
   await compactDraft.fill("");
   await page.screenshot({ path: ".local/screenshots/four-panes-compact.png" });
   await page.setViewportSize({ width: 1920, height: 1000 });

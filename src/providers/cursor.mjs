@@ -12,6 +12,7 @@ import { cursorPrompt } from "./attachments.mjs";
 import { historyTools } from "../core/history.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
 import { modeSuggestionTool } from "../core/modes.mjs";
+import { cursorContextReading } from "../core/context-usage.mjs";
 const exec = promisify(execFile);
 
 // Harness's history and browser tools need no prompt of Cursor's, as with
@@ -491,19 +492,30 @@ export async function runCursor(ctx, deps = {}) {
           provider: "cursor",
           item: update,
         });
+      if (update.sessionUpdate === "usage_update") {
+        const reading = cursorContextReading({ update, model: ctx.model });
+        if (reading) ctx.emit("context", reading);
+      }
       if (update.sessionUpdate === "config_option_update") {
         const drift = cursorConfigDrift(update.configOptions, ctx.model);
         if (drift) {
+          const model =
+            update.configOptions?.find((c) => c.id === "model")
+              ?.currentValue ?? ctx.model;
           ctx.emit("work", {
             kind: "model-change",
-            model:
-              update.configOptions?.find((c) => c.id === "model")
-                ?.currentValue ?? ctx.model,
+            model,
             reason:
               drift === "fast"
                 ? "Provider turned Fast on; stopped for review."
                 : "Provider changed the selected model; stopped for review.",
           });
+          if (drift === "model")
+            ctx.emit("context", {
+              kind: "retarget",
+              provider: "cursor",
+              model,
+            });
           cancel();
         }
       }
