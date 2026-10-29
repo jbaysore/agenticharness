@@ -206,6 +206,7 @@ export function ChatPane({
   report,
   onOpenConnections,
   onOpenWork,
+  onOpenFile,
   onDismissUsage,
 }) {
   const draftKey = chat?.id ?? "new:" + (project?.id ?? "");
@@ -653,15 +654,31 @@ export function ChatPane({
       report(e);
     }
   };
-  // Links to other chats open in a pane instead of replacing the whole workspace.
+  // Chat links open in a pane. File links open that document in the Files panel.
   const followLink = (e) => {
-    const link = e.target.closest?.('a[href^="/?chat="]');
+    const link = e.target.closest?.("a[href]");
     if (!link) return;
-    const url = new URL(link.href),
-      id = url.searchParams.get("chat");
-    if (!id || id.includes(",")) return;
+    const raw = link.getAttribute("href") ?? "";
+    let url;
+    try {
+      url = new URL(link.href, window.location.origin);
+    } catch {
+      return;
+    }
+    if (raw.startsWith("/?chat=")) {
+      const id = url.searchParams.get("chat");
+      if (!id || id.includes(",")) return;
+      e.preventDefault();
+      onOpenChat(id, e.ctrlKey || e.metaKey, url.hash.slice(1));
+      return;
+    }
+    if (!raw.startsWith("/?file=")) return;
     e.preventDefault();
-    onOpenChat(id, e.ctrlKey || e.metaKey, url.hash.slice(1));
+    const line = Number(url.searchParams.get("line"));
+    onOpenFile?.({
+      file: url.searchParams.get("file") ?? "",
+      line: Number.isInteger(line) && line > 0 ? line : null,
+    });
   };
   const title = chat?.title ?? "New conversation",
     marker = chatMarker(chat);

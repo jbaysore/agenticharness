@@ -5,6 +5,7 @@ import "@fontsource-variable/newsreader/opsz.css";
 import "@fontsource-variable/newsreader/opsz-italic.css";
 import "./style.css";
 import { api } from "./api.mjs";
+import { resolveFileLink } from "./file-links.mjs";
 import { mergeContextSnapshots } from "./context.mjs";
 import { serverClock } from "./clock.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
@@ -127,6 +128,7 @@ function App() {
       () => document.visibilityState === "visible",
     );
   const [panel, setPanel] = useState("review"),
+    [fileOpen, setFileOpen] = useState(null),
     [overlayPanel, setOverlayPanel] = useState(false),
     [sidebar, setSidebar] = useState(false),
     [modal, setModal] = useState(null),
@@ -1558,6 +1560,23 @@ function App() {
                   setPanel("activity");
                   setShowPanel(true);
                 }}
+                onOpenFile={(target) => {
+                  setView((v) => focusPane(v, p.key));
+                  const root = paneProject(p);
+                  const opened = resolveFileLink(target.file, {
+                    line: target.line,
+                    worktree: (p.chatId && chats[p.chatId]?.worktree?.path) || "",
+                    project: root?.path ?? "",
+                    references: root?.repositories ?? [],
+                  });
+                  if (!opened) {
+                    report(new Error("That file is outside this project."));
+                    return;
+                  }
+                  setPanel("files");
+                  setShowPanel(true);
+                  setFileOpen({ ...opened, id: crypto.randomUUID() });
+                }}
               />
             ),
           )}
@@ -1626,6 +1645,7 @@ function App() {
               panel={panel}
               project={project}
               chat={chat}
+              fileOpen={fileOpen}
               peers={workspacePeers(state.conversations, project.id, chat?.id)}
               onRevision={(text) => paneRefs.current[current.key]?.send(text)}
               onChatRefresh={() => chat && reload(chat.id)}
@@ -2014,6 +2034,7 @@ function WorkspacePanel({
   panel,
   project,
   chat,
+  fileOpen,
   peers,
   onRevision,
   onChatRefresh,
@@ -2031,6 +2052,11 @@ function WorkspacePanel({
     [loading, setLoading] = useState(false),
     [problem, setProblem] = useState("");
   const [savingComment, setSavingComment] = useState(false);
+  const preview = useRef(null);
+  // Declared before the open effect so a repository change caused by opening
+  // a file applies that file after the query reset. A later manual repository
+  // change does not reopen it, because the pending open is cleared once applied.
+  const pendingOpen = useRef(null);
   const [reference, setReference] = useState(""),
     [showReference, setShowReference] = useState(false),
     [checkCommand, setCheckCommand] = useState(project.check_command ?? "");
@@ -2065,13 +2091,28 @@ function WorkspacePanel({
     }
   }, [query, project.scratch]);
   useEffect(() => {
-    setSelectedFile("");
     setDiff(null);
     setFile(null);
     setState(null);
     setProblem("");
+    const open = pendingOpen.current;
+    if (open && open.repo === repo) {
+      setSelectedFile(open.file);
+      if (open.line) setLine(open.line);
+      pendingOpen.current = null;
+    } else setSelectedFile("");
     refresh();
   }, [query]);
+  useEffect(() => {
+    if (!fileOpen) return;
+    pendingOpen.current = fileOpen;
+    if (repo !== fileOpen.repo) setRepo(fileOpen.repo);
+    else {
+      setSelectedFile(fileOpen.file);
+      if (fileOpen.line) setLine(fileOpen.line);
+      pendingOpen.current = null;
+    }
+  }, [fileOpen]);
   useEffect(() => {
     if (!selectedFile) return;
     (panel === "review"
@@ -2083,6 +2124,15 @@ function WorkspacePanel({
         ).then(setFile)
     ).catch(report);
   }, [selectedFile, panel, query]);
+  useEffect(() => {
+    const pre = preview.current;
+    if (!pre || !fileOpen?.line || fileOpen.file !== selectedFile) return;
+    const style = getComputedStyle(pre);
+    const lineHeight = parseFloat(style.lineHeight);
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+    const pad = parseFloat(style.paddingTop) || 0;
+    pre.scrollTop = pad + (fileOpen.line - 1) * lineHeight;
+  }, [file, fileOpen, selectedFile]);
   useEffect(() => {
     if (panel === "activity" && chat) {
       api("/api/activity?chatId=" + chat.id)
@@ -2411,7 +2461,7 @@ function WorkspacePanel({
                   Pin artifact
                 </button>
               </header>
-              <pre>{file.content}</pre>
+              <pre ref={preview}>{file.content}</pre>
             </div>
           )}
           <section className="saved-context">

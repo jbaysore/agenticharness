@@ -5,6 +5,7 @@ import { providerName } from "./voice.mjs";
 import { secondsRemaining, serverClock } from "./clock.mjs";
 import { QuestionField, questionId, questionAnswer } from "./question-form.jsx";
 import { questionPage } from "../core/questions.mjs";
+import { rewriteHarnessLinks } from "./file-links.mjs";
 
 function useClock(active) {
   const [now, setNow] = useState(() => serverClock.now());
@@ -82,12 +83,7 @@ export function Markdown({ text }) {
   const html = useMemo(
     () =>
       DOMPurify.sanitize(
-        marked
-          .parse(text ?? "", { breaks: true })
-          .replace(
-            /href="harness:\/\/conversation\/([^"#]+)(#[^"]*)?"/g,
-            'href="/?chat=$1$2"',
-          ),
+        rewriteHarnessLinks(marked.parse(text ?? "", { breaks: true })),
       )
         // Code blocks get a header naming the language, with a copy button.
         .replace(
