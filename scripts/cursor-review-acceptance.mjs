@@ -36,6 +36,7 @@ app.controller.providers = [
 const outcomes = [],
   jobs = [],
   errors = [];
+app.controller.openReviewer = null;
 app.controller.workers.codex = async (job) => {
   const command = JSON.parse(job.task).proposedAction.details.rawInput.command;
   jobs.push(command);

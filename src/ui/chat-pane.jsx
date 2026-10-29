@@ -148,7 +148,7 @@ const permissionModes = [
   [
     "auto",
     "Auto-review",
-    "The reviewer allows or declines commands, edits, and browser actions. It asks you only for a managerial choice, and explains why. If review cannot run, the action comes to you.",
+    "The reviewer allows or declines commands, edits, and browser actions. It asks you only for a managerial choice, and explains why. If review cannot complete, the action is declined automatically.",
   ],
   ["manual", "Manual review", "You approve each action the agent asks about."],
   [

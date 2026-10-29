@@ -277,7 +277,20 @@ for (const provider of ["codex", "claude", "cursor"])
       answers = [];
     controller.providers = [
       { id: provider, models: [{ id: "m", efforts: [] }] },
+      {
+        id: "codex",
+        connected: true,
+        models: [{ id: "m", efforts: [], isDefault: true }],
+      },
     ];
+    // Exercise a completed managerial review, rather than a failed review.
+    if (provider === "codex") controller.providers.shift();
+    controller.workers.codex = async () => ({
+      text: JSON.stringify({
+        decision: "ask",
+        reason: "Confirm the requested scope.",
+      }),
+    });
     controller.runners[provider] = async (ctx) => {
       contexts.push(ctx);
       ctx.saveSession({ id: "same-native-session" });
@@ -286,7 +299,11 @@ for (const provider of ["codex", "claude", "cursor"])
         text: "Progress",
       });
       answers.push(
-        await ctx.approve({ kind: "permission", title: "Change a file" }),
+        await ctx.approve({
+          kind: "permission",
+          title: "Change a file",
+          details: { command: "change-file" },
+        }),
       );
       if (ctx.signal.aborted) return { status: "cancelled" };
       answers.push(
@@ -395,6 +412,7 @@ for (const stop of ["cancel", "close"])
       chat = store.createConversation({
         projectId: store.addProject("fixture", "C:\\permissions-stop-fixture")
           .id,
+        permissions: "manual",
       });
     let starts = 0;
     controller.providers = [

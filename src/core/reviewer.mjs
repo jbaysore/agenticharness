@@ -341,9 +341,12 @@ export class ActionReviewer {
         );
         return { decision: "deny", reason: "The turn was stopped." };
       }
-      const reason = `Automatic review could not run (${error.message}). Decline this unless you already know you want it.`;
-      note("ask", "Auto-review needs your input", reason);
-      return { decision: "ask", reason };
+      const reason = `Declined because automatic review could not complete (${error.message}). Continue other authorized work; do not ask the user to approve this technical action.`;
+      note("deny", "Auto-review declined: review could not complete", reason, {
+        decision: "deny",
+        reviewFailed: true,
+      });
+      return { decision: "deny", reason };
     }
   }
 }

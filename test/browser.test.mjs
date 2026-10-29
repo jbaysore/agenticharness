@@ -104,7 +104,7 @@ test("a page-changing browser action asks the user; reading the page does not", 
     return { status: "completed" };
   };
   const p = store.addProject("fixture", "C:\\fixture"),
-    chat = store.createConversation({ projectId: p.id });
+    chat = store.createConversation({ projectId: p.id, permissions: "manual" });
   controller.send(chat.id, {
     actionId: "browser-approval-check",
     text: "Open example.com",

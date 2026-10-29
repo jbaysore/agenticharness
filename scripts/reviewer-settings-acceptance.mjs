@@ -56,6 +56,7 @@ let ctx,
   browser;
 const jobs = [],
   errors = [];
+app.controller.openReviewer = null;
 for (const provider of ["codex", "claude"])
   app.controller.workers[provider] = async (job) => {
     jobs.push({ provider, ...job });
@@ -216,17 +217,15 @@ try {
   await phone
     .getByRole("button", { name: "Collapse sidebar", exact: true })
     .click();
-  const answer = ctx.approve(request("No reviewer remains"));
-  const approval = phone.locator(".approval").filter({
-    has: phone.getByRole("heading", {
-      name: "No reviewer remains",
-      exact: true,
-    }),
-  });
-  await expect(approval).toBeVisible();
-  await expect(approval).toContainText("Codex included usage exhausted");
-  await approval.getByRole("button", { name: "Decline", exact: true }).click();
-  expect((await answer).allow).toBe(false);
+  const answer = await ctx.approve(request("No reviewer remains"));
+  expect(answer.allow).toBe(false);
+  expect(answer.reason).toContain("Codex included usage exhausted");
+  expect(
+    app.store.pendingApprovals(chat.id).map((a) => a.request.title),
+  ).toEqual(["Fixture question"]);
+  await expect(
+    phone.getByRole("heading", { name: "No reviewer remains", exact: true }),
+  ).toHaveCount(0);
   expect(jobs.filter((job) => job.provider === "claude")).toHaveLength(2);
   await phone.getByLabel("Stop work").click();
   await expect.poll(() => app.store.activeRun(chat.id)).toBeFalsy();

@@ -386,6 +386,12 @@ test("a command needs approval; short output comes back whole and long output as
 
 test("goal decides a handed-off command without waiting for approval", async () => {
   const f = await fixture();
+  f.controller.workers.codex = async () => ({
+    text: JSON.stringify({
+      decision: "ask",
+      reason: "Confirm publishing this release.",
+    }),
+  });
   f.controller.waitApproval = async () => {
     throw new Error("Goal should not wait for a handed-off command");
   };

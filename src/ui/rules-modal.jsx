@@ -165,7 +165,7 @@ function ReviewerSettings({ value, providers, onChange }) {
   }
   if (!route)
     route =
-      "No reviewer is available; you will be asked to approve actions. " +
+      "No reviewer is available; actions will be declined automatically. " +
       reasons.join(" ");
   return (
     <section className="connection">
@@ -178,9 +178,8 @@ function ReviewerSettings({ value, providers, onChange }) {
         Codex passes on. It decides coding and command questions, and asks you
         only for a managerial choice it explains. If Codex cannot review, the
         Claude model below takes over using its included subscription usage.
-        Both
-        receive the task, recent user instructions and refusals, project rules,
-        the agent's recent actions, and exact action details.
+        Both receive the task, recent user instructions and refusals, project
+        rules, the agent's recent actions, and exact action details.
       </p>
       {["codex", "claude"].map((id) => {
         const automatic = reviewerModel(providers, id, null),
@@ -227,9 +226,8 @@ function ReviewerSettings({ value, providers, onChange }) {
         Pinned choices stay fixed until you change them. Saving applies to the
         next review, including during an active turn. A reviewer&rsquo;s deny is
         final, as is a request for a managerial choice. If neither reviewer can
-        run, you approve the action yourself. API billing and paid extra usage
-        remain
-        disabled.
+        complete, the action is declined automatically. API billing and paid
+        extra usage remain disabled.
       </p>
     </section>
   );

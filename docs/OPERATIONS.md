@@ -364,7 +364,8 @@ and browser actions. It decides coding and command questions itself. It asks you
 only for a managerial choice the task did not already settle, such as spending
 money, publishing or sending something, signing in, or changing the goal, and
 the note explains that choice in plain language. If automatic review cannot run,
-the action comes to you with that reason; decline it if you are not sure.
+the action is declined automatically with that reason. The agent can continue
+other authorized work without asking you to approve the failed technical action.
 In Goal, a review that asks you or cannot run is declined and the agent continues.
 **Manual** shows each request for **Allow once**. **Override** allows actions
 without asking. A plan still comes to you as one **Confirm and build** button,
@@ -714,6 +715,7 @@ Stopping the task leaves its detached desktop host running. Once all chats and
 terminals are finished, use **Stop Harness.vbs** or
 `node scripts/launch.mjs --stop` to stop that host. To remove the startup task,
 run `Unregister-ScheduledTask -TaskName 'Agentic Harness' -Confirm:$false`.
+
 # Context and reliability
 
 Open the context meter beneath the composer for context history, continuity

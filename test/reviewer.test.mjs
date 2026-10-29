@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
@@ -322,6 +322,25 @@ for (const provider of ["codex", "claude", "cursor"])
     assert.equal(f.jobs.length, 1);
   });
 
+for (const provider of ["codex", "claude", "cursor"])
+  test(`${provider} incomplete reviews deny commands and browser actions without user input`, async (t) => {
+    const f = await fixture(t, "auto", provider),
+      calls = fakeBrowser(f);
+    f.controller.workers.codex = async () => {
+      throw new WorkerUnavailable("Quota exhausted");
+    };
+    if (provider === "claude")
+      f.controller.workers.claude = async () => {
+        throw new WorkerUnavailable("Quota exhausted");
+      };
+    assert.equal((await f.ctx.approve(action())).allow, false);
+    const result = await f.ctx.browser("browser_click", { element: "Save" });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /automatic review could not complete/);
+    assert.deepEqual(calls, []);
+    assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
+  });
+
 test("a declined browser action tells the agent why, and its earlier browser steps inform the next review", async (t) => {
   const f = await fixture(t, "auto", "codex"),
     calls = fakeBrowser(f);
@@ -385,15 +404,15 @@ for (const mode of ["manual", "override"])
   });
 
 for (const problem of [
-  "ask",
   "malformed",
   "unavailable",
   "disconnected",
   "timeout",
   "large",
   "missing",
+  "rules",
 ])
-  test(`${problem} review falls back to a manual approval with its reason`, async (t) => {
+  test(`${problem} review is automatically denied with its reason`, async (t) => {
     const f = await fixture(t);
     let calls = 0,
       stopped = false;
@@ -419,23 +438,28 @@ for (const problem of [
     const request = action();
     if (problem === "large") request.details.content = "x".repeat(64000);
     if (problem === "missing") delete request.details;
-    const response = f.ctx.approve(request);
-    await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
-    const approval = f.store.pendingApprovals(f.chat.id)[0];
-    assert.ok(approval.request.reviewReason);
-    assert.equal(approval.request.title, "npm test");
-    f.controller.answer(approval.id, { allow: false });
-    assert.equal((await response).allow, false);
+    if (problem === "rules") {
+      await rm(join(f.root, "AGENTS.md"));
+      await mkdir(join(f.root, "AGENTS.md"));
+    }
+    const response = await f.ctx.approve(request);
+    assert.equal(response.allow, false);
+    assert.match(response.reason, /automatic review could not complete/);
+    assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
+    const last = f.store
+      .events()
+      .filter((e) => e.payload.kind === "permission-review")
+      .at(-1).payload;
+    assert.equal(last.status, "deny");
+    assert.equal(last.reviewFailed, true);
     if (problem === "timeout") assert.equal(stopped, true);
-    if (["disconnected", "large", "missing"].includes(problem))
+    if (["disconnected", "large", "missing", "rules"].includes(problem))
       assert.equal(calls, 0);
     if (problem === "unavailable") {
-      const retry = f.ctx.approve(action("another action"));
-      await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
-      f.controller.answer(f.store.pendingApprovals(f.chat.id)[0].id, {
-        allow: false,
-      });
-      await retry;
+      assert.equal(
+        (await f.ctx.approve(action("another action"))).allow,
+        false,
+      );
       assert.equal(
         calls,
         1,
@@ -596,7 +620,7 @@ for (const verdict of ["deny", "ask"])
     assert.equal(claude.length, 0);
   });
 
-test("both providers exhausted ask the user and are not retried that turn", async (t) => {
+test("both providers exhausted automatically deny and are not retried that turn", async (t) => {
   const f = await fixture(t);
   addClaude(f);
   let calls = 0;
@@ -606,15 +630,12 @@ test("both providers exhausted ask the user and are not retried that turn", asyn
       throw new WorkerUnavailable(provider + " exhausted");
     };
   for (let n = 0; n < 2; n++) {
-    const response = f.ctx.approve(action());
-    await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
-    const approval = f.store.pendingApprovals(f.chat.id)[0];
-    assert.match(approval.request.reviewReason, /could not run/);
-    assert.match(approval.request.reviewReason, /codex exhausted/);
-    assert.match(approval.request.reviewReason, /claude exhausted/);
-    assert.match(approval.request.reviewReason, /Decline this unless/);
-    f.controller.answer(approval.id, { allow: false });
-    assert.equal((await response).allow, false);
+    const response = await f.ctx.approve(action());
+    assert.match(response.reason, /could not complete/);
+    assert.match(response.reason, /codex exhausted/);
+    assert.match(response.reason, /claude exhausted/);
+    assert.equal(response.allow, false);
+    assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
   }
   assert.equal(calls, 2);
 });
@@ -628,12 +649,8 @@ test("Claude fallback can be switched off", async (t) => {
     f.controller.providers,
   );
   f.controller.providers[1].blockReason = "No Codex quota";
-  const response = f.ctx.approve(action());
-  await waitFor(() => f.store.pendingApprovals(f.chat.id).length === 1);
-  f.controller.answer(f.store.pendingApprovals(f.chat.id)[0].id, {
-    allow: false,
-  });
-  await response;
+  assert.equal((await f.ctx.approve(action())).allow, false);
+  assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
   assert.equal(claude.length, 0);
 });
 
