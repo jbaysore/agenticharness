@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { presentTense, summarize, verbLabels } from "../core/steps.mjs";
+import { IssueButton, TrackCheckButton } from "./reliability.jsx";
 
 const duration = (ms) =>
   ms == null ? "" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
@@ -14,7 +15,7 @@ function Delta({ added, removed }) {
 }
 
 // One quiet line saying what a turn did; it opens into the individual steps.
-export function StepSummary({ steps, active, onOpenWork }) {
+export function StepSummary({ steps, active, onOpenWork, chatId }) {
   const [open, setOpen] = useState(false);
   if (!steps?.length) return null;
   const current = active ? steps.findLast((s) => s.status === "running") : null;
@@ -68,6 +69,10 @@ export function StepSummary({ steps, active, onOpenWork }) {
                     duration(s.ms)
                   )}
                 </span>
+                {chatId && s.sourceEventId && <details className="step-actions"><summary>Actions</summary>
+                  {s.status !== "running" && s.verb === "run" && <TrackCheckButton chatId={chatId} targetId={s.id} />}
+                  <IssueButton chatId={chatId} eventId={s.sourceEventId} />
+                </details>}
               </li>
             ))}
           </ol>

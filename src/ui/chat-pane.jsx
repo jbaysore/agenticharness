@@ -36,6 +36,7 @@ import {
   workingLine,
 } from "./voice.mjs";
 import { StepSummary } from "./steps.jsx";
+import { IssueButton } from "./reliability.jsx";
 import { interleave } from "../core/steps.mjs";
 import { blockingGoals, resumableGoals } from "../core/goals.mjs";
 
@@ -98,11 +99,13 @@ function Conversation({ chat, onOpenWork }) {
                 id={message === first ? undefined : message.id}
               >
                 <Markdown text={message.content} />
+                <IssueButton chatId={chat.id} messageId={message.id} />
               </div>
             )}
             {steps.length > 0 && (
               <StepSummary
                 steps={steps}
+                chatId={chat.id}
                 active={active && i === lastWork}
                 onOpenWork={onOpenWork}
               />

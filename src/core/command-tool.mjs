@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath, lstat, unlink } from "node:fs/promises";
 import { resolve, relative, isAbsolute, sep, join, dirname } from "node:path";
 import { commandShell } from "./command-shells.mjs";
+import { workspaceFingerprint } from "./repository.mjs";
 
 export const commandTool = {
   name: "run_command",
@@ -103,12 +104,18 @@ export async function executeCommand(
   }
   const id = randomUUID(),
     started = Date.now();
+  const trackedCheck =
+    input.command.trim() === project.check_command?.trim() && cwd === root;
+  const before = trackedCheck ? await workspaceFingerprint(root) : null;
   const step = (status, extra = {}) =>
     emit("work", {
       kind: "host-command",
       id,
       command: input.command,
       shell: selected.name,
+      cwd,
+      startedAt: new Date(started).toISOString(),
+      trackedCheck,
       status,
       ...extra,
     });
@@ -132,10 +139,20 @@ export async function executeCommand(
       exitCode: result.exitCode,
       timedOut: result.timedOut,
       ms: Date.now() - started,
+      endedAt: new Date().toISOString(),
+      ...(trackedCheck && {
+        workspaceBefore: before,
+        workspaceAfter: await workspaceFingerprint(root),
+      }),
     });
     return result;
   } catch (error) {
-    step("failed", { error: error.message, ms: Date.now() - started });
+    step("failed", {
+      error: error.message,
+      cancelled: signal.aborted,
+      ms: Date.now() - started,
+      endedAt: new Date().toISOString(),
+    });
     throw error;
   }
 }

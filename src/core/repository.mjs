@@ -5,14 +5,106 @@ import {
   mkdtemp,
   writeFile,
   rm,
+  lstat,
+  readlink,
 } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { resolve, relative, isAbsolute, sep, join } from "node:path";
+import { resolve, relative, isAbsolute, sep, join, dirname } from "node:path";
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 
 const exec = promisify(execFile);
+
+// Read-only evidence, never a guarantee about ignored configuration or services.
+// Incomplete/racing reads have no hash and cannot certify a workspace match.
+export async function workspaceFingerprint(
+  root,
+  { maxBytes = 64 * 1024 * 1024, maxFiles = 12000 } = {},
+) {
+  const observedAt = new Date().toISOString();
+  try {
+    root = await realpath(root);
+    const deadline = Date.now() + 10000;
+    const header = async () =>
+      Promise.all([
+        git(root, ["rev-parse", "HEAD"], { timeout: 10000 }),
+        git(root, ["ls-files", "--stage", "-z"], { timeout: 10000 }),
+        git(root, ["ls-files", "-co", "--exclude-standard", "-z"], {
+          timeout: 10000,
+        }),
+      ]);
+    const before = await header();
+    const files = [...new Set(before[2].split("\0").filter(Boolean))].sort();
+    if (files.length > maxFiles)
+      throw new Error("Workspace exceeds evidence file limit");
+    const hash = createHash("sha256");
+    hash.update(JSON.stringify([root, ...before.slice(0, 2)]));
+    let bytes = 0;
+    for (const file of files) {
+      if (Date.now() > deadline)
+        throw new Error("Workspace evidence read timed out");
+      const target = resolve(root, file);
+      const rel = relative(root, target);
+      if (isAbsolute(rel) || rel === ".." || rel.startsWith(".." + sep))
+        throw new Error("Invalid evidence path");
+      hash.update(JSON.stringify(file));
+      const info = await lstat(target).catch((e) =>
+        e.code === "ENOENT" ? null : Promise.reject(e),
+      );
+      if (!info) {
+        hash.update("deleted");
+        continue;
+      }
+      if (!info.isFile() && !info.isSymbolicLink())
+        throw new Error("Directory or submodule evidence is unavailable");
+      if ((bytes += info.size) > maxBytes)
+        throw new Error("Workspace exceeds evidence byte limit");
+      const parent = await realpath(dirname(target));
+      const parentRel = relative(root, parent);
+      if (
+        isAbsolute(parentRel) ||
+        parentRel === ".." ||
+        parentRel.startsWith(".." + sep)
+      )
+        throw new Error("Evidence path leaves workspace");
+      hash.update(JSON.stringify([info.mode, info.size]));
+      if (info.isSymbolicLink()) hash.update(await readlink(target));
+      else {
+        let size = 0;
+        for await (const chunk of createReadStream(target, {
+          highWaterMark: 65536,
+        })) {
+          size += chunk.length;
+          if (Date.now() > deadline || bytes - info.size + size > maxBytes)
+            throw new Error("Workspace evidence read exceeded its limits");
+          hash.update(chunk);
+        }
+        if (size !== info.size)
+          throw new Error("Workspace changed during evidence read");
+      }
+      const after = await lstat(target);
+      if (
+        after.size !== info.size ||
+        after.mtimeMs !== info.mtimeMs ||
+        after.ctimeMs !== info.ctimeMs
+      )
+        throw new Error("Workspace changed during evidence read");
+    }
+    if (JSON.stringify(before) !== JSON.stringify(await header()))
+      throw new Error("Workspace changed during evidence read");
+    return {
+      root,
+      hash: hash.digest("hex"),
+      head: before[0].trim(),
+      observedAt,
+      state: "ready",
+    };
+  } catch (error) {
+    return { root, state: "unavailable", observedAt, reason: error.message };
+  }
+}
 export async function git(root, args, { timeout = 20000 } = {}) {
   const result = await exec("git", ["-C", root, "--no-pager", ...args], {
     windowsHide: true,

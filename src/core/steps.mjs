@@ -172,7 +172,7 @@ function cursorStep(p, existing) {
 
 // Folds one work event into the list of steps, returning a new list. A new
 // step remembers the reply it followed, so the chat can place it in the turn.
-export function applyWork(steps, p, after = null) {
+export function applyWork(steps, p, after = null, sourceEventId = null) {
   if (!p || p.parentId) return steps;
   let step = null;
   const merge = (next) => {
@@ -232,7 +232,7 @@ export function applyWork(steps, p, after = null) {
   } else if (p.provider === "cursor" && p.item?.toolCallId) {
     step = cursorStep(p, steps.find((s) => s.id === "cursor:" + p.item.toolCallId));
   }
-  return step ? merge(step) : steps;
+  return step ? merge({ ...step, ...(sourceEventId && { sourceEventId }) }) : steps;
 }
 
 // Takes work payloads, or saved events where a text event marks the reply
@@ -244,7 +244,7 @@ export const buildSteps = (items) => {
       after = item.payload?.messageId ?? after;
       return steps;
     }
-    return applyWork(steps, item.type === "work" ? item.payload : item, after);
+    return applyWork(steps, item.type === "work" ? item.payload : item, after, item.id);
   }, []);
 };
 

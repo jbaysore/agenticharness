@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { contextView, cacheReuse } from "./context.mjs";
+import { ReliabilityPanel, useReliability } from "./reliability.jsx";
 
 const count = (n) => (n == null ? "Unavailable" : n.toLocaleString("en-US"));
 const short = (n) =>
@@ -23,6 +24,7 @@ export function ContextBar({ chat, provider, model }) {
   });
   const { reading, percent } = view;
   const reuse = cacheReuse(reading?.cache);
+  const reliability = useReliability(chat, provider, model, open);
   useEffect(() => setOpen(false), [chat?.id, provider, model]);
   useLayoutEffect(() => {
     if (!open) return;
@@ -103,6 +105,7 @@ export function ContextBar({ chat, provider, model }) {
             : "—"}
         </span>
         {view.outdated && <span className="context-note">Last reading</span>}
+        {reliability.data?.notices.length > 0 && <span className="reliability-badge">{reliability.data.status}</span>}
         {view.updating && (
           <span className="context-updating" aria-hidden="true">
             ↻
@@ -116,7 +119,7 @@ export function ContextBar({ chat, provider, model }) {
           role="dialog"
           aria-label="Context details"
         >
-          <strong>Conversation context</strong>
+          <strong>Context &amp; reliability</strong>
           {reading?.state === "compacting" && (
             <p>
               Updating after compaction. These are the last values reported
@@ -128,7 +131,8 @@ export function ContextBar({ chat, provider, model }) {
               Last recorded reading. Waiting for a new provider measurement.
             </p>
           )}
-          <dl>
+          <ReliabilityPanel chatId={chat.id} data={reliability.data} error={reliability.error} reading={reading} />
+          <details className="context-measurement"><summary>Measurement details</summary><dl>
             <dt>Model</dt>
             <dd>
               {reading?.resolvedModel ??
@@ -205,6 +209,7 @@ export function ContextBar({ chat, provider, model }) {
             Unsent drafts and unprocessed attachments are excluded. Measurements
             update when the provider reports them.
           </p>
+          </details>
         </div>
       )}
     </div>

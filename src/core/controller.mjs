@@ -61,6 +61,7 @@ import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { commandInstructions } from "./command-shells.mjs";
 import { executeCommand } from "./command-tool.mjs";
+import { Reliability } from "./reliability-service.mjs";
 import { browserGateway, browserTitle } from "./browser.mjs";
 import { checkQuestions, QUESTION_INSTRUCTIONS } from "./questions.mjs";
 import { proposalText, taggedProposal, PLAN_INSTRUCTIONS } from "./plans.mjs";
@@ -147,10 +148,12 @@ export class Controller extends EventEmitter {
     this.goalQuestionTimeoutMs = GOAL_QUESTION_TIMEOUT_MS;
     this.runCommand = runCommand;
     store.recover();
+    this.reliability = new Reliability(this);
   }
   event(chatId, runId, type, payload) {
     const e = this.store.appendEvent(chatId, runId, type, payload);
     this.emit("event", e);
+    this.reliability?.observe(e);
     return e;
   }
   async refreshProviders() {
@@ -1211,6 +1214,8 @@ export class Controller extends EventEmitter {
       }
       emit("work", {
         kind: "land-result",
+        result: { landed: result.landed, checked: result.checked, commit: result.commit },
+        root: project.path,
         item: result.landed
           ? {
               title: `Landed on ${result.branch} · ${result.commit.slice(0, 7)}`,

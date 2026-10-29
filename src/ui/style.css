@@ -1388,6 +1388,28 @@ small {
 .context-popover dt { color: var(--text-3); }
 .context-popover p { margin: 10px 0 0; line-height: 1.5; }
 .context-categories { border-top: 1px solid var(--line); padding-top: 12px; }
+.context-trigger { flex-wrap: wrap; }
+.reliability-badge { font-size: 10px; color: #946719; }
+.reliability-panel h4 { font-size: 12px; margin: 18px 0 8px; color: var(--text); }
+.reliability-panel details, .context-measurement { margin-top: 12px; }
+.reliability-panel summary, .context-measurement summary { cursor: pointer; }
+.reliability-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: 11px; }
+.reliability-notice, .recorded-check { padding: 9px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.recorded-check code { display: block; white-space: pre-wrap; margin-top: 5px; }
+.reliability-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.context-history { display: block; width: 100%; height: 64px; color: var(--agent); margin-top: 12px; }
+.issue-control, .check-control { display: inline-flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.issue-control > button, .check-control > button { font-size: 10px; }
+.issue-form { display: flex; flex-direction: column; gap: 8px; width: min(300px, 100%); padding: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.issue-form label { display: flex; flex-direction: column; gap: 5px; }
+.issue-form select, .issue-form textarea { width: 100%; min-width: 0; }
+.issue-form textarea { min-height: 60px; }
+.steps-list .step { flex-wrap: wrap; }
+.steps-list .step .issue-control { flex-basis: 100%; }
+.step-actions { font-size: 10px; }
+.step-actions[open] { flex-basis: 100%; }
+.step-actions summary { cursor: pointer; }
+.step-actions .check-control { margin-right: 12px; }
 .queued-messages {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

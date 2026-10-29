@@ -656,6 +656,16 @@ export async function createHarness({
           controller.event(chat.id, null, "chat", chat);
           return json(res, 201, chat);
         }
+        if ((match = path.match(/^\/api\/chats\/([^/]+)\/reliability(?:\/(actions|evidence\/(\d+)))?$/))) {
+          const id = match[1];
+          if (!store.conversation(id)) return json(res, 404, { error: "Conversation not found" });
+          try {
+            if (method === "GET" && !match[2]) return json(res, 200, await controller.reliability.read(id, { provider: url.searchParams.get("provider") ?? undefined, model: url.searchParams.get("model") ?? undefined, refresh: url.searchParams.get("refresh") === "1" }));
+            if (method === "POST" && match[2] === "actions") return json(res, 200, await controller.reliability.action(id, await readJson(req)));
+            if (method === "GET" && match[3]) return json(res, 200, controller.reliability.evidence(id, Number(match[3])));
+            return json(res, 405, { error: "Method not supported" });
+          } catch (error) { return json(res, 400, { error: error.message }); }
+        }
         if ((match = path.match(/^\/api\/chats\/([^/]+)$/))) {
           const id = match[1];
           if (!store.conversation(id))
@@ -908,6 +918,7 @@ export async function createHarness({
             conversations: store.conversations().map((c) => ({
               ...c,
               messages: store.messages(c.id),
+              reliabilityActions: store.reliabilityData(c.id).actions,
               comments: store.comments(c.id),
               runs: store.db
                 .prepare(

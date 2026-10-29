@@ -245,9 +245,100 @@ try {
     release.resolve();
     await page.unroute(chatRoute);
   }
+  // Reliability is driven by evidence, not context occupancy or model calls.
+  const fixtureRun = app.store.conversationSnapshot(chats[0].id).runs[0];
+  const messageId = app.store.addMessage({
+    conversationId: chats[0].id,
+    runId: fixtureRun.id,
+    role: "assistant",
+    provider: "codex",
+    model: "fixture",
+    content: "Fixture completion claim for a user-reported issue.",
+  });
+  app.controller.event(chats[0].id, fixtureRun.id, "work", {
+    kind: "host-command",
+    id: "verification-fixture",
+    command: "echo fixture check",
+    cwd: process.cwd(),
+    status: "ok",
+    exitCode: 0,
+  });
+  await page.goto(url([chats[0].id]));
+  await page.locator(".context-trigger").click();
+  const reliabilityDialog = page.getByRole("dialog", {
+    name: "Context details",
+  });
+  await expect(reliabilityDialog).toContainText("Context & reliability");
+  await expect(reliabilityDialog).toContainText("Review recommended");
+  await reliabilityDialog
+    .getByRole("button", { name: "Mark reviewed" })
+    .click();
+  await expect(page.locator(".reliability-badge")).toHaveCount(0);
+  await reliabilityDialog
+    .getByText("Other completed commands", { exact: true })
+    .click();
+  await reliabilityDialog
+    .getByRole("button", { name: "Track as check" })
+    .click();
+  await expect(reliabilityDialog).toContainText("Command succeeded");
+  await expect(reliabilityDialog).toContainText("Freshness unavailable");
+  await page.keyboard.press("Escape");
+  await page
+    .locator(`[id='${messageId}']`)
+    .getByRole("button", { name: "Flag reliability issue" })
+    .first()
+    .click();
+  await page
+    .getByLabel("Issue category")
+    .selectOption("Unsupported completion claim");
+  await page
+    .getByLabel("Optional issue note")
+    .fill("No supporting execution evidence was provided.");
+  await page.getByRole("button", { name: "Record issue" }).click();
+  await expect(page.locator(".reliability-badge")).toContainText(
+    "Review recommended",
+  );
+  await page.reload();
+  await page.locator(".context-trigger").click();
+  await expect(reliabilityDialog).toContainText(
+    "Reported by you: Unsupported completion claim",
+  );
+  await reliabilityDialog
+    .getByRole("button", { name: "Resolve issue" })
+    .click();
+  await expect(page.locator(".reliability-badge")).toHaveCount(0);
+  publish({ generation: 2, state: "compacting" });
+  publish({ generation: 2, state: "ready", usedTokens: 18000 });
+  await expect(page.locator(".reliability-badge")).toContainText(
+    "Review recommended",
+  );
+  await reliabilityDialog
+    .getByText("Measurement details", { exact: true })
+    .click();
+  await expect(reliabilityDialog).toContainText("Observed compactions");
+  await reliabilityDialog.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await page.screenshot({
+    path: resolve(local, "screenshots/reliability-desktop.png"),
+  });
+  await mobile.reload();
+  await mobile.locator(".context-trigger").click();
+  await expect(
+    mobile.getByRole("dialog", { name: "Context details" }),
+  ).toContainText("Review recommended");
+  assert.equal(
+    await mobile.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
+  await mobile.screenshot({
+    path: resolve(local, "screenshots/reliability-mobile.png"),
+  });
   assert.deepEqual(errors, []);
   console.log(
-    "Context bar verified: live updates, cache detail, compaction, model changes, drafts, reload, two/four panes, keyboard, mobile, bounded popovers and stale HTTP snapshot ordering.",
+    "Context and reliability verified: live measurements, compaction acknowledgment and recurrence, recorded command checks, user issue reporting/resolution, evidence freshness labels, reload persistence, two/four panes, keyboard, mobile, bounded popovers and stale snapshot ordering. No provider inference.",
   );
 } finally {
   await browser?.close();

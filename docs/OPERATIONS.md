@@ -714,3 +714,34 @@ Stopping the task leaves its detached desktop host running. Once all chats and
 terminals are finished, use **Stop Harness.vbs** or
 `node scripts/launch.mjs --stop` to stop that host. To remove the startup task,
 run `Unregister-ScheduledTask -TaskName 'Agentic Harness' -Confirm:$false`.
+# Context and reliability
+
+Open the context meter beneath the composer for context history, continuity
+notices, recorded checks, and conversation timing. The 75% and 90% colors describe
+capacity; session age and occupancy do not estimate hallucination probability.
+Task requirements and source correctness remain **Not assessed** in this release.
+
+Compaction, model-session handoffs, and interruptions produce nonblocking notices.
+**Mark reviewed** records your acknowledgment; it does not certify retained facts.
+Dismissals apply to that occurrence, so a new transition can produce a new notice.
+
+Harness automatically records its direct executions of the project's configured
+check command in the chat's working directory. Other completed commands can be
+tracked from their step's **Actions** menu or the context panel. A successful exit
+is execution evidence, not a judgment of test quality. Native-provider outcomes
+remain explicitly provider-reported, and unavailable exit codes stay unknown.
+
+Configured checks capture read-only Git/workspace fingerprints before and after
+execution. Freshness refreshes at turn completion, conversation resume, and panel
+opening, with concurrent reads coalesced. Comparisons cover HEAD, the index,
+working files and nonignored untracked files; ignored configuration, dependencies,
+external services, submodules and incomplete reads cannot establish a match.
+Landing checks stay attached to their checked commit. Pinning an old command
+never associates it with the workspace state at the time it was pinned.
+
+Use **Flag reliability issue** on an assistant message or work step to retain an
+explicit user report with its source. Resolve or dismiss reports in the panel.
+Records and acknowledgments survive reloads and are included in history exports.
+They stay local; no analytics, model review calls, automatic test executions,
+compaction, or session resets are added by this feature. Active run time includes
+provider, tool and approval waits. Imported or interrupted timing is incomplete.

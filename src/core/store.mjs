@@ -54,6 +54,9 @@ export class Store {
       CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content ON messages BEGIN INSERT INTO messages_fts(messages_fts,rowid,content) VALUES ('delete',old.rowid,old.content); INSERT INTO messages_fts(rowid,content) VALUES (new.rowid,new.content); END;
       CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT, run_id TEXT, type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS events_conversation ON events(conversation_id,id);
+      CREATE INDEX IF NOT EXISTS events_conversation_type ON events(conversation_id,type,id);
+      CREATE INDEX IF NOT EXISTS events_run_type_time ON events(run_id,type,created_at);
+      CREATE TABLE IF NOT EXISTS reliability_actions(action_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, payload TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS conversation_context(conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, provider TEXT NOT NULL, payload TEXT NOT NULL, last_event_id INTEGER NOT NULL, PRIMARY KEY(conversation_id,provider));
       CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,created_at);
       CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL, request TEXT NOT NULL, status TEXT NOT NULL, response TEXT, created_at TEXT NOT NULL);
@@ -849,13 +852,21 @@ export class Store {
       );
   }
   appendEvent(conversationId, runId, type, payload) {
+    if (type === "run" && payload.status === "interrupted")
+      this.insertEvent(conversationId, runId, "reliability-transition", { kind: "interruption", key: "interruption:" + runId, provider: payload.provider });
     if (type !== "context-usage")
       return this.insertEvent(conversationId, runId, type, payload);
     this.db.exec("SAVEPOINT context_event");
     try {
+      const prior = this.db.prepare("SELECT payload FROM conversation_context WHERE conversation_id=? ORDER BY last_event_id DESC LIMIT 1").get(conversationId);
+      const previous = prior ? JSON.parse(prior.payload) : null;
       const event = this.insertEvent(conversationId, runId, type, payload);
       this.db.prepare("INSERT INTO conversation_context(conversation_id,provider,payload,last_event_id) VALUES(?,?,?,?) ON CONFLICT(conversation_id,provider) DO UPDATE SET payload=excluded.payload,last_event_id=excluded.last_event_id")
         .run(conversationId, payload.provider, JSON.stringify(payload), event.id);
+      if (previous && (previous.provider !== payload.provider || previous.sessionId !== payload.sessionId))
+        this.insertEvent(conversationId, runId, "reliability-transition", { kind: "handoff", key: "handoff:" + event.id, provider: payload.provider, sessionId: payload.sessionId });
+      if (payload.state === "compacting" && (!previous || previous.provider !== payload.provider || previous.sessionId !== payload.sessionId || previous.model !== payload.model || previous.generation !== payload.generation))
+        this.insertEvent(conversationId, runId, "reliability-transition", { kind: "compaction", key: `compaction:${payload.provider}:${payload.sessionId}:${payload.model}:${payload.generation}`, provider: payload.provider, sessionId: payload.sessionId });
       this.db.exec("RELEASE context_event");
       return event;
     } catch (error) {
@@ -903,6 +914,28 @@ export class Store {
   latestEventId() {
     return this.db.prepare("SELECT COALESCE(MAX(id),0) AS id FROM events").get()
       .id;
+  }
+  reliabilityData(id) {
+    const chat = this.conversation(id);
+    if (!chat) throw new Error("Conversation not found");
+    chat.timingIncomplete = !!this.db.prepare("SELECT 1 FROM messages WHERE conversation_id=? AND run_id IS NULL LIMIT 1").get(id);
+    const runs = this.db.prepare(`SELECT r.*, (SELECT MAX(e.created_at) FROM events e WHERE e.run_id=r.id AND e.type IN ('text','work','context-usage')) AS last_progress_at FROM runs r WHERE conversation_id=? ORDER BY created_at,rowid`).all(id);
+    const events = this.db.prepare(`SELECT * FROM events WHERE conversation_id=? AND (
+      type='reliability-transition' OR
+      (type='context-usage' AND id IN (SELECT MAX(id) FROM events WHERE conversation_id=? AND type='context-usage' AND json_extract(payload,'$.state')='ready' GROUP BY run_id)) OR
+      (type='work' AND (json_extract(payload,'$.kind')='host-command' OR (run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30) AND json_extract(payload,'$.kind') IN ('tool','tool-result','tool_call','tool_call_update','land-result'))))
+    ) ORDER BY id`).all(id, id, id).map((e) => ({ id: e.id, type: e.type, payload: JSON.parse(e.payload), runId: e.run_id, createdAt: e.created_at }));
+    const actions = this.db.prepare("SELECT payload,created_at FROM reliability_actions WHERE conversation_id=? ORDER BY rowid").all(id).map((a) => ({ ...JSON.parse(a.payload), createdAt: a.created_at }));
+    return { chat, runs, events, actions, lastEventId: this.latestEventId() };
+  }
+  saveReliabilityAction(id, action) {
+    const previous = this.db.prepare("SELECT conversation_id,payload FROM reliability_actions WHERE action_id=?").get(action.actionId);
+    if (previous) {
+      if (previous.conversation_id !== id || previous.payload !== JSON.stringify(action)) throw new Error("Action ID was already used for a different action");
+      return false;
+    }
+    this.db.prepare("INSERT INTO reliability_actions VALUES(?,?,?,?)").run(action.actionId, id, JSON.stringify(action), this.now());
+    return true;
   }
   addApproval(conversationId, runId, provider, request) {
     const id = randomUUID();
@@ -1010,7 +1043,7 @@ export class Store {
     for (const e of this.db
       .prepare(
         // A reply's first text event is enough to place the steps after it.
-        `SELECT e.run_id, e.type, e.payload, r.status FROM events e JOIN runs r ON r.id=e.run_id
+        `SELECT e.id, e.run_id, e.type, e.payload, r.status FROM events e JOIN runs r ON r.id=e.run_id
         WHERE e.run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
         AND ((e.type='work' AND json_extract(e.payload,'$.kind') NOT IN ('command-output','token-usage'))
           OR e.id IN (SELECT MIN(id) FROM events WHERE conversation_id=? AND type='text'
@@ -1020,7 +1053,7 @@ export class Store {
       )
       .all(conversationId, conversationId, conversationId)) {
       const run = (byRun[e.run_id] ??= { status: e.status, payloads: [] });
-      run.payloads.push({ type: e.type, payload: JSON.parse(e.payload) });
+      run.payloads.push({ id: e.id, type: e.type, payload: JSON.parse(e.payload) });
     }
     return Object.fromEntries(
       Object.entries(byRun).map(([runId, { status, payloads }]) => {

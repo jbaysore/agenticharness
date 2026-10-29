@@ -564,6 +564,8 @@ function App() {
         !watchingBrowserRef.current
       )
         setBrowserUnseen(true);
+      if (["run", "reliability-update", "reliability-transition"].includes(e.type) || (e.type === "context-usage" && e.payload.state === "compacting"))
+        window.dispatchEvent(new CustomEvent("harness-reliability", { detail: e }));
       if (!tracked.current.has(e.conversationId)) return;
       if (e.type === "context-usage" && e.id > (floors.current[e.conversationId] ?? 0))
         setChats((all) => {
@@ -615,7 +617,7 @@ function App() {
             reply = c?.messages.findLast(
               (m) => m.role === "assistant" && m.run_id === e.runId,
             ),
-            next = c && applyWork(steps, e.payload, reply?.id ?? null);
+            next = c && applyWork(steps, e.payload, reply?.id ?? null, e.id);
           if (!c || next === steps) return all;
           return {
             ...all,
