@@ -1105,6 +1105,23 @@ small {
 .reply {
   position: relative;
 }
+/* The action button fades into this corner. Keep the corner out of the
+   line boxes so the first line wraps beside the button instead of running
+   under it, and so hovering does not reflow the reply. */
+.reply::before {
+  content: "";
+  float: right;
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+}
+/* A code card or table lays out as its own block and would shrink for its
+   whole height to sit beside that corner. Place it below the reservation. */
+.reply .markdown > .code-block,
+.reply .markdown > pre,
+.reply .markdown > table {
+  clear: right;
+}
 .reply .message-actions {
   position: absolute;
   top: 0;
@@ -1122,7 +1139,11 @@ small {
 .reply .message-actions .icon-button {
   width: 24px;
   height: 24px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  background: var(--bg);
+}
+.reply .message-actions .icon-button:hover,
+.reply .message-actions .icon-button:focus-visible {
+  background: var(--surface-3);
 }
 .message-actions-menu {
   position: absolute;
