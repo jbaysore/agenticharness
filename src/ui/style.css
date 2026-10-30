@@ -3004,10 +3004,12 @@ button:has(> .tab-dot) {
   letter-spacing: 0.02em;
 }
 /* Rows share fixed columns so the values and countdowns line up and the
-   header doesn't shift as the numbers change. */
+   header doesn't shift as the numbers change. The value column is 5ch
+   because ch follows the proportional zero, while these digits are tabular:
+   "100%" is wider than 4.5ch and was clipped against the reset time. */
 .usage-chip-rows {
   display: grid;
-  grid-template-columns: 2.2em 48px 4.5ch 6.4em;
+  grid-template-columns: 2.2em 48px 5ch 6.4em;
   align-items: center;
   row-gap: 3px;
 }
@@ -3076,7 +3078,7 @@ button:has(> .tab-dot) {
     font-size: 12px;
   }
   .usage-chip-rows {
-    grid-template-columns: 2.2em 64px 4.5ch 6.4em;
+    grid-template-columns: 2.2em 64px 5ch 6.4em;
   }
 }
 @container topbar (max-width: 600px) {
@@ -3091,7 +3093,7 @@ button:has(> .tab-dot) {
     display: none;
   }
   .usage-chip-rows {
-    grid-template-columns: 1.7em 4.5ch 6.4em;
+    grid-template-columns: 1.7em 5ch 6.4em;
   }
   .usage-chip-reset {
     gap: 3px;
