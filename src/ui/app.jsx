@@ -37,7 +37,7 @@ import {
   workspacePeers,
   workspacePeersLabel,
 } from "./status.mjs";
-import { readAllPending } from "./outbox.mjs";
+import { keepPendingMessages, readAllPending } from "./outbox.mjs";
 import { unusedClosedChats } from "./discard.mjs";
 import { applyWork, verbLabels } from "../core/steps.mjs";
 import { ResizeHandle, useSidebarLayout } from "./sidebar-layout.jsx";
@@ -246,8 +246,54 @@ function App() {
     if (next.lastEventId < (floors.current[next.id] ?? 0)) return next;
     floors.current[next.id] = next.lastEventId;
     tracked.current.add(next.id);
-    setChats((all) => ({ ...all, [next.id]: { ...next, contextByProvider: mergeContextSnapshots(all[next.id]?.contextByProvider, next.contextByProvider, next.lastEventId) } }));
+    setChats((all) => {
+      const prev = all[next.id];
+      const merged = keepPendingMessages(prev, next);
+      return {
+        ...all,
+        [next.id]: {
+          ...merged,
+          contextByProvider: mergeContextSnapshots(
+            prev?.contextByProvider,
+            next.contextByProvider,
+            next.lastEventId,
+          ),
+        },
+      };
+    });
     return next;
+  }, []);
+  // The composer clears immediately. The row stays until a snapshot confirms it.
+  const stageSend = useCallback((chatId, actionId, spec) => {
+    setChats((all) => {
+      const chat = all[chatId];
+      if (!chat) return all;
+      const messages = (chat.messages ?? []).filter(
+        (message) => !(message.pending && message.actionId === actionId),
+      );
+      const queue = (chat.queue ?? []).filter(
+        (item) => !(item.pending && item.actionId === actionId),
+      );
+      if (spec?.queued)
+        queue.push({
+          id: "pending:" + actionId,
+          pending: true,
+          actionId,
+          text: spec.text || "Attachment",
+        });
+      else if (spec)
+        messages.push({
+          id: "pending:" + actionId,
+          pending: true,
+          actionId,
+          role: "user",
+          content: spec.text ?? "",
+          attachments: spec.attachments ?? [],
+          run_id: spec.runId ?? null,
+          created_at: new Date().toISOString(),
+        });
+      return { ...all, [chatId]: { ...chat, messages, queue } };
+    });
   }, []);
   const reload = useCallback(
     async (id) => {
@@ -1549,6 +1595,7 @@ function App() {
                 skills={state.skills ?? []}
                 onOpenSkills={() => setModal("skills")}
                 reload={reload}
+                stageSend={stageSend}
                 refresh={refresh}
                 report={report}
                 onOpenConnections={() => setModal("connections")}

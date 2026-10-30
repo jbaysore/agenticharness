@@ -597,7 +597,9 @@ export async function runClaude(
     stopped = null,
     goalStatus =
       ctx.mode === "goal" ? "unknown" : (ctx.session?.goal?.status ?? null),
-    pendingResult = null;
+    pendingResult = null,
+    sawModel = false,
+    retriedUnread = false;
   const cancel = () => {
     q.interrupt().catch(() => q.close());
     killTimer ??= setTimeout(() => q.close(), 8000);
@@ -611,7 +613,7 @@ export async function runClaude(
     if (initial.reason) throw new Error(initial.reason);
     if (ctx.signal.aborted)
       throw new Error("Cancelled before the turn started");
-    input.push({
+    const promptMessage = {
       type: "user",
       message: {
         role: "user",
@@ -619,7 +621,8 @@ export async function runClaude(
       },
       parent_tool_use_id: null,
       session_id: ctx.session?.id ?? "",
-    });
+    };
+    input.push(promptMessage);
     accepting = true;
     ctx.attachSteer?.((item) => {
       if (!accepting) throw new Error("Claude's turn has ended");
@@ -683,11 +686,13 @@ export async function runClaude(
         if (
           event.event.type === "content_block_delta" &&
           event.event.delta.type === "text_delta"
-        )
+        ) {
+          sawModel = true;
           ctx.emit("text", {
             nativeId: currentId,
             delta: event.event.delta.text,
           });
+        }
       }
       if (event.type === "assistant") {
         if (!event.parent_tool_use_id && !event.agent_id) {
@@ -712,11 +717,15 @@ export async function runClaude(
             .filter((c) => c.type === "text")
             .map((c) => c.text)
             .join("\n");
-          if (text) ctx.emit("text", { nativeId: event.message.id, text });
+          if (text) {
+            sawModel = true;
+            ctx.emit("text", { nativeId: event.message.id, text });
+          }
         }
         for (const block of event.message.content.filter(
           (c) => c.type === "tool_use",
-        ))
+        )) {
+          if (!event.parent_tool_use_id && !event.agent_id) sawModel = true;
           ctx.emit("work", {
             kind:
               block.name === "Agent" || block.name === "Task"
@@ -728,6 +737,7 @@ export async function runClaude(
             }),
             item: block,
           });
+        }
       }
       if (event.type === "user" && event.tool_use_result) {
         // The result names its tool call, so the chat can mark that step done or failed.
@@ -781,7 +791,36 @@ export async function runClaude(
         void contextRead.sample(true);
       }
       if (event.type === "result") {
-        if (!event.is_error) ctx.promptAccepted?.();
+        // A resumed session can emit a leftover background-task result before
+        // it reads the new prompt. That result is not this turn.
+        const queuedFollows =
+          !event.is_error && (event.queued_turn_count ?? 0) > 0;
+        const resultText =
+          typeof event.result === "string" ? event.result.trim() : "";
+        const unread =
+          !event.is_error &&
+          !sawModel &&
+          !resultText &&
+          event.duration_api_ms === 0;
+        if (queuedFollows) continue;
+        if (unread && !retriedUnread) {
+          retriedUnread = true;
+          input.push(promptMessage);
+          continue;
+        }
+        if (unread)
+          return {
+            status: "failed",
+            error:
+              "Claude closed the turn before it read this message. Send it again.",
+          };
+        if (!event.is_error && !sawModel && resultText) {
+          sawModel = true;
+          ctx.emit("text", {
+            nativeId: event.uuid || currentId,
+            text: event.result,
+          });
+        }
         context.totals(Object.fromEntries(Object.entries(event.modelUsage ?? {}).map(([model, usage]) => [model, claudeUsage(usage)])), "query-including-native-children");
         await contextRead.sample(true);
         ctx.emit("work", {
@@ -806,9 +845,17 @@ export async function runClaude(
           pendingResult = result;
           continue;
         }
+        if (!event.is_error && result.status === "completed")
+          ctx.promptAccepted?.();
         return result;
       }
     }
+    if (retriedUnread && !sawModel)
+      return {
+        status: "failed",
+        error:
+          "Claude closed the turn before it read this message. Send it again.",
+      };
     throw new Error(stopped || "Claude ended without a final result");
   } catch (error) {
     if (stopped) return { status: "failed", error: stopped };

@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readAllPending, readPending, savePending } from "../src/ui/outbox.mjs";
+import {
+  keepPendingMessages,
+  readAllPending,
+  readPending,
+  savePending,
+} from "../src/ui/outbox.mjs";
 import {
   readDraft,
   saveDraft,
@@ -106,4 +111,80 @@ test("attachment drafts and unconfirmed sends preserve file references without s
   assert.deepEqual(readDraftAttachments("a", storage), []);
   assert.deepEqual(readDraftAttachments("a", blocked), []);
   assert.equal(saveDraftAttachments("a", files, blocked), false);
+});
+
+test("a local send stays until the snapshot has that same message", () => {
+  const pending = {
+    id: "pending:action-1",
+    pending: true,
+    actionId: "action-1",
+    role: "user",
+    content: "CI failed on two",
+    run_id: null,
+  };
+  const kept = keepPendingMessages(
+    { messages: [pending], queue: [] },
+    { messages: [{ id: "older", role: "user", content: "earlier", run_id: "run-0" }], queue: [], runs: [] },
+  );
+  assert.deepEqual(kept.messages.at(-1), pending);
+  const confirmed = keepPendingMessages(
+    { messages: [{ ...pending, run_id: "run-1" }], queue: [] },
+    {
+      messages: [
+        {
+          id: "saved",
+          role: "user",
+          content: "CI failed on two",
+          run_id: "run-1",
+        },
+      ],
+      queue: [],
+      runs: [{ id: "run-1", action_id: "action-1" }],
+    },
+  );
+  assert.equal(confirmed.messages.some((message) => message.pending), false);
+  const matchedByAction = keepPendingMessages(
+    { messages: [pending], queue: [] },
+    {
+      messages: [
+        {
+          id: "saved",
+          role: "user",
+          content: "CI failed on two",
+          run_id: "run-1",
+        },
+      ],
+      queue: [],
+      runs: [{ id: "run-1", action_id: "action-1" }],
+    },
+  );
+  assert.equal(matchedByAction.messages.some((message) => message.pending), false);
+});
+
+test("a local queued send stays until that action is in the snapshot", () => {
+  const pending = {
+    id: "pending:action-2",
+    pending: true,
+    actionId: "action-2",
+    text: "next",
+  };
+  const waiting = keepPendingMessages(
+    { messages: [], queue: [pending] },
+    { messages: [], queue: [], runs: [] },
+  );
+  assert.deepEqual(waiting.queue, [pending]);
+  const queued = keepPendingMessages(
+    { messages: [], queue: [pending] },
+    { messages: [], queue: [{ id: "q1", action_id: "action-2", text: "next" }], runs: [] },
+  );
+  assert.equal(queued.queue.some((item) => item.pending), false);
+  const started = keepPendingMessages(
+    { messages: [], queue: [pending] },
+    {
+      messages: [{ id: "saved", role: "user", content: "next", run_id: "run-2" }],
+      queue: [],
+      runs: [{ id: "run-2", action_id: "action-2" }],
+    },
+  );
+  assert.equal(started.queue.some((item) => item.pending), false);
 });

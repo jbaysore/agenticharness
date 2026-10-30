@@ -556,6 +556,133 @@ test("Claude reads root context through summary mode and cannot adopt a child se
   assert.equal(reading.usageTotals["resolved-m"].inputTokens, 80000);
 });
 
+const claudeDeps = (turns, pushes) => ({
+  baseOptions: () => ({}),
+  readAuth: async () => ({
+    loggedIn: true,
+    authMethod: "claude.ai",
+    apiProvider: "firstParty",
+    subscriptionType: "pro",
+  }),
+  usageForAccount: () => ({ read: async () => ({ usage: {}, reason: null }) }),
+  queryFn: ({ prompt }) => {
+    const push = prompt.push.bind(prompt);
+    prompt.push = (value) => {
+      pushes.count++;
+      return push(value);
+    };
+    return {
+      close() {},
+      interrupt: async () => {},
+      async *[Symbol.asyncIterator]() {
+        await prompt.next();
+        for (const event of turns) yield event;
+      },
+    };
+  },
+});
+
+test("Claude waits out a resume bookkeeping result and answers the queued prompt", async () => {
+  const events = [],
+    pushes = { count: 0 };
+  let accepted = 0;
+  const result = await runClaude(
+    {
+      project: { path: process.cwd() },
+      model: "opus",
+      mode: "default",
+      text: "CI failed on two",
+      signal: new AbortController().signal,
+      emit: (type, value) => events.push({ type, value }),
+      saveSession() {},
+      promptAccepted: () => accepted++,
+    },
+    claudeDeps(
+      [
+        {
+          type: "system",
+          subtype: "task_notification",
+          status: "stopped",
+          summary:
+            "Background shell command didn't finish before the previous session ended",
+        },
+        {
+          type: "result",
+          is_error: false,
+          duration_api_ms: 0,
+          queued_turn_count: 1,
+          result: "",
+        },
+        {
+          type: "assistant",
+          message: {
+            id: "reply",
+            content: [{ type: "text", text: "Two checks failed." }],
+          },
+        },
+        {
+          type: "result",
+          is_error: false,
+          duration_api_ms: 40,
+          queued_turn_count: 0,
+          result: "Two checks failed.",
+        },
+      ],
+      pushes,
+    ),
+  );
+  assert.equal(result.status, "completed");
+  assert.equal(pushes.count, 1);
+  assert.equal(accepted, 1);
+  assert.equal(
+    events.find((event) => event.type === "text")?.value.text,
+    "Two checks failed.",
+  );
+});
+
+test("Claude reports a clear failure when a resume result never reads the prompt", async () => {
+  const pushes = { count: 0 };
+  let accepted = 0;
+  const result = await runClaude(
+    {
+      project: { path: process.cwd() },
+      model: "opus",
+      mode: "default",
+      text: "CI failed on two",
+      signal: new AbortController().signal,
+      emit() {},
+      saveSession() {},
+      promptAccepted: () => accepted++,
+    },
+    claudeDeps(
+      [
+        {
+          type: "result",
+          is_error: false,
+          duration_api_ms: 0,
+          queued_turn_count: 0,
+          result: "",
+        },
+        {
+          type: "result",
+          is_error: false,
+          duration_api_ms: 0,
+          queued_turn_count: 0,
+          result: "",
+        },
+      ],
+      pushes,
+    ),
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(
+    result.error,
+    "Claude closed the turn before it read this message. Send it again.",
+  );
+  assert.equal(pushes.count, 2);
+  assert.equal(accepted, 0);
+});
+
 test("Cursor accepts native usage updates for its own session only", async () => {
   const rpc = new EventEmitter(),
     events = [];

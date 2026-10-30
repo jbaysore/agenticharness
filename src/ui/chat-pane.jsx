@@ -202,6 +202,7 @@ export function ChatPane({
   skills = [],
   onOpenSkills,
   reload,
+  stageSend,
   refresh,
   report,
   onOpenConnections,
@@ -542,7 +543,7 @@ export function ChatPane({
       return false;
     setBusy(true);
     sending.current = true;
-    let c, body;
+    let c, body, accepted = false;
     try {
       c =
         chat ??
@@ -583,17 +584,47 @@ export function ChatPane({
               ...(planFeedback && { parsed: true }),
             };
       savePending(c.id, body);
-      await api(`/api/chats/${c.id}/messages`, body);
+      const visible = prepared.text.trim();
+      const showQueued =
+        !!c.activeRun && prepared.delivery !== "steer";
+      flushSync(() => {
+        stageSend?.(c.id, body.actionId, {
+          text: visible,
+          attachments: files,
+          queued: showQueued,
+          runId:
+            prepared.delivery === "steer" ? c.activeRun?.id ?? null : null,
+        });
+        if (!planFeedback) {
+          setDraft("");
+          setAttachments([]);
+        }
+      });
+      const response = await api(`/api/chats/${c.id}/messages`, body);
+      accepted = true;
+      stageSend?.(c.id, body.actionId, {
+        text: visible,
+        attachments: files,
+        queued: !!response.queued,
+        runId: response.queued
+          ? null
+          : response.steered
+            ? c.activeRun?.id ?? null
+            : response.id ?? null,
+      });
       savePending(c.id, null);
-      if (!planFeedback) {
-        setDraft("");
-        setAttachments([]);
-      }
       await reload(c.id);
       await refresh();
       return true;
     } catch (e) {
-      if (!planFeedback) report(e);
+      if (!accepted && body?.actionId) stageSend?.(c.id, body.actionId, null);
+      if (!planFeedback) {
+        if (!accepted) {
+          setDraft(text);
+          setAttachments(files);
+        }
+        report(e);
+      }
       // A refused message stays in the composer but is no longer unconfirmed.
       if (body && e.status >= 400 && e.status < 500 && !e.unreachable)
         await api("/api/actions/" + encodeURIComponent(body.actionId))
@@ -964,16 +995,22 @@ export function ChatPane({
             {chat.queue.map((item) => (
               <li key={item.id}>
                 <span>{item.text || "Attachment"}</span>
-                <button
-                  type="button"
-                  className="text-button"
-                  aria-label="Remove queued message"
-                  onClick={act(() =>
-                    api(`/api/chats/${chat.id}/queue/${item.id}`, {}, "DELETE"),
-                  )}
-                >
-                  Remove
-                </button>
+                {!item.pending && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    aria-label="Remove queued message"
+                    onClick={act(() =>
+                      api(
+                        `/api/chats/${chat.id}/queue/${item.id}`,
+                        {},
+                        "DELETE",
+                      ),
+                    )}
+                  >
+                    Remove
+                  </button>
+                )}
               </li>
             ))}
           </ul>
