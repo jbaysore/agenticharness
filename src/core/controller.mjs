@@ -146,6 +146,7 @@ export class Controller extends EventEmitter {
     this.openReviewer = openReviewerOption;
     this.planReviewJobs = new Map();
     this.planReviewTasks = new Set();
+    this.planReviewFolders = new Map();
     this.workerTimeoutMs = 5 * 60 * 1000;
     this.reviewerTimeoutMs = 60 * 1000;
     this.reviewerTotalTimeoutMs = 120 * 1000;
@@ -738,9 +739,10 @@ export class Controller extends EventEmitter {
   tidy(chatId) {
     const chat = this.store.conversation(chatId),
       home = chat && this.store.project(chat.project_id);
-    if (!chat?.worktree || !home || this.active.has(chatId)) return;
+    if (!chat?.worktree || !home || this.active.has(chatId) || this.reviewingPlans(chatId)) return;
     const done = (this.tidying.get(chatId) ?? Promise.resolve())
-      .then(() => tidyWorktree(home.path, chat.worktree))
+      .then(() => this.active.has(chatId) || this.reviewingPlans(chatId)
+        ? false : tidyWorktree(home.path, chat.worktree))
       .catch(() => false)
       .finally(() => {
         if (this.tidying.get(chatId) === done) this.tidying.delete(chatId);
@@ -1754,12 +1756,30 @@ export class Controller extends EventEmitter {
     }
     return answer;
   }
+  reviewingPlans(chatId) {
+    return [...this.planReviewJobs.values()].some((job) => job.chatId === chatId);
+  }
   reviewFolder(chat) {
+    // Several plans in one chat can be reviewed together. Share restoration,
+    // and keep cleanup away until the last review releases the folder.
+    if (!this.planReviewFolders.has(chat.id))
+      this.planReviewFolders.set(chat.id, this.prepareReviewFolder(chat));
+    return this.planReviewFolders.get(chat.id);
+  }
+  async prepareReviewFolder(chat) {
+    // An idle chat's landed worktree may already be removed or being removed.
+    await this.tidying.get(chat.id);
     const home = this.store.project(chat.project_id);
     if (!home) throw new Error("Project not found");
-    return chat.worktree?.path
-      ? { ...home, path: chat.worktree.path, home: home.path, worktree: chat.worktree }
-      : home;
+    try {
+      if (chat.worktree?.path) {
+        await restoreWorktree(home.path, chat.worktree);
+        return { ...home, path: await projectPath(chat.worktree.path), home: home.path, worktree: chat.worktree };
+      }
+      return { ...home, path: await projectPath(home.path) };
+    } catch (error) {
+      throw new Error(`The plan review folder could not be prepared: ${error.message}`);
+    }
   }
   planText(chat, run, approvalId) {
     if (approvalId) {
@@ -1788,7 +1808,7 @@ export class Controller extends EventEmitter {
     if (typeof plan !== "string" || !plan.trim())
       throw new Error("The complete plan must be available before review");
     const abort = new AbortController();
-    this.planReviewJobs.set(run.id, abort);
+    this.planReviewJobs.set(run.id, { chatId: chat.id, abort });
     this.recordPlanReview(chat, run, {
       status: "running",
       reviewer: null,
@@ -1799,8 +1819,12 @@ export class Controller extends EventEmitter {
     this.planReviewTasks.add(task);
     task.finally(() => {
       this.planReviewTasks.delete(task);
-      if (this.planReviewJobs.get(run.id) === abort)
+      if (this.planReviewJobs.get(run.id)?.abort === abort)
         this.planReviewJobs.delete(run.id);
+      if (!this.reviewingPlans(chat.id)) {
+        this.planReviewFolders.delete(chat.id);
+        this.tidy(chat.id);
+      }
     });
     return this.store.planReview(chat.id, run.id);
   }
@@ -1850,7 +1874,7 @@ export class Controller extends EventEmitter {
       const reviewed = await new PlanReviewer({
         controller: this,
         run,
-        project: this.reviewFolder(chat),
+        project: await this.reviewFolder(chat),
         chat,
         plan,
         signal: abort.signal,
@@ -2008,7 +2032,7 @@ export class Controller extends EventEmitter {
     clearTimeout(this.providerTimer);
     this.openrouter?.off("change", this.openrouterChanged);
     this.openrouter?.close();
-    for (const abort of this.planReviewJobs.values()) abort.abort();
+    for (const { abort } of this.planReviewJobs.values()) abort.abort();
     const active = [...this.active.values()];
     for (const work of active) {
       work.cancelled = true;

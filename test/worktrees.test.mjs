@@ -365,3 +365,108 @@ test("the shared-folder banner leaves out chats working in their own worktree", 
   );
   assert.deepEqual(uiPeers(chats, "p", "own"), []);
 });
+
+test("plan review restores an idle worktree and holds it through concurrent reviews", async (t) => {
+  for (const removing of [false, true]) await t.test(removing ? "cleanup in progress" : "already removed", async () => {
+    const f = fixture(),
+      store = new Store(":memory:"),
+      controller = new Controller(store, { worktreeRoot: f.root });
+    let finishCleanup, finishReviews;
+    try {
+      commit(f.project, "AGENTS.md", "Instructions from the chat's branch\n");
+      const project = store.addProject("fixture", f.project),
+        chat = store.createConversation({ projectId: project.id }),
+        worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: chat.id });
+      store.updateConversation(chat.id, { worktree });
+      if (removing) {
+        // Simulate removal already past tidy's busy check when review starts.
+        const gate = new Promise((resolve) => { finishCleanup = resolve; });
+        controller.tidying.set(chat.id, gate.then(() => tidyWorktree(f.project, worktree)));
+      } else {
+        await controller.tidy(chat.id);
+        assert.equal(existsSync(worktree.path), false);
+      }
+      // Restoring the chat's branch must not review another chat's dirty files.
+      writeFileSync(join(f.project, "AGENTS.md"), "Other chat's unfinished instructions\n");
+      controller.providers = [{
+        id: "codex", connected: true,
+        models: [{ id: "m", name: "Fixture", isDefault: true, efforts: [] }],
+      }];
+      const reviewing = new Promise((resolve) => { finishReviews = resolve; }),
+        calls = [], plans = [];
+      controller.workers.codex = async (job) => {
+        calls.push(job);
+        assert.equal(job.cwd, worktree.path);
+        assert.equal(job.project.home, f.project);
+        assert.match(job.task, /Instructions from the chat's branch/);
+        assert.doesNotMatch(job.task, /Other chat's unfinished instructions/);
+        await reviewing;
+        assert.equal(existsSync(job.cwd), true);
+        return { text: JSON.stringify({ assessment: "sound", summary: "Ready.", concerns: [], improvements: [], questions: [] }) };
+      };
+      for (let n = 0; n < 2; n++) {
+        const run = store.createRun({ conversationId: chat.id, actionId: "review-" + n, provider: "claude", model: "m", text: "Plan a change" });
+        store.setRun(run.id, "completed");
+        const approval = store.addApproval(chat.id, run.id, "claude", { kind: "plan", plan: "Change a.txt" });
+        plans.push({ run, approval });
+        controller.reviewPlan({ chatId: chat.id, runId: run.id, approvalId: approval.id });
+      }
+      assert.equal(controller.tidy(chat.id), undefined);
+      if (removing) {
+        assert.equal(calls.length, 0);
+        finishCleanup();
+      }
+      const deadline = Date.now() + 10000;
+      while (calls.length < 2) {
+        assert.ok(Date.now() < deadline, "Reviews did not start in the restored worktree");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      await controller.tidyAll();
+      assert.equal(existsSync(worktree.path), true);
+      finishReviews();
+      await Promise.all(controller.planReviewTasks);
+      await Promise.all(controller.tidying.values());
+      for (const { run, approval } of plans) {
+        assert.equal(store.planReview(chat.id, run.id).status, "done");
+        assert.equal(store.approval(approval.id).status, "pending");
+      }
+      assert.equal(controller.planReviewFolders.size, 0);
+      assert.equal(existsSync(worktree.path), false);
+    } finally {
+      finishCleanup?.();
+      finishReviews?.();
+      await controller.close();
+      await Promise.all(controller.tidying.values());
+      store.close();
+      f.done();
+    }
+  });
+});
+
+test("an unavailable review folder fails before either provider launches", async () => {
+  const f = fixture(), store = new Store(":memory:"), controller = new Controller(store, {});
+  try {
+    const project = store.addProject("fixture", f.project),
+      chat = store.createConversation({ projectId: project.id }),
+      run = store.createRun({ conversationId: chat.id, actionId: "bad-review-folder", provider: "codex", model: "m", text: "Plan a change" });
+    store.updateConversation(chat.id, { worktree: { path: join(f.dir, "missing"), branch: "harness/missing", base: "missing-base" } });
+    store.setRun(run.id, "completed");
+    const approval = store.addApproval(chat.id, run.id, "codex", { kind: "plan", plan: "Change a.txt" });
+    controller.workers = {
+      codex: async () => assert.fail("Codex must not launch"),
+      claude: async () => assert.fail("Claude must not launch"),
+    };
+    controller.reviewPlan({ chatId: chat.id, runId: run.id, approvalId: approval.id });
+    await Promise.all(controller.planReviewTasks);
+    const review = store.planReview(chat.id, run.id);
+    assert.equal(review.status, "failed");
+    assert.match(review.error, /plan review folder could not be prepared/);
+    assert.doesNotMatch(review.error, /ENOENT|libc|binary/);
+    assert.equal(store.approval(approval.id).status, "pending");
+  } finally {
+    await controller.close();
+    await Promise.all(controller.tidying.values());
+    store.close();
+    f.done();
+  }
+});

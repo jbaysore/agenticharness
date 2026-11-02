@@ -390,6 +390,9 @@ you choose **Send review to agent**, which fills the Keep planning feedback box
 for you to edit first. Confirm and Keep planning stay available while a review
 runs. The review is saved on that plan and shown again after a reload. Goal
 still carries a plan out without this card.
+If Harness cleaned up the chat's idle worktree, review restores it before
+starting either provider and keeps it available until all reviews finish.
+An unavailable folder is reported as a workspace preparation error.
 
 Agents are told to ask only a managerial question,
 and to explain why they cannot decide it. In Goal that question waits 60 seconds
