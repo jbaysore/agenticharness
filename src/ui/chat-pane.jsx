@@ -25,6 +25,8 @@ import {
 import {
   chatMarker,
   chatMarkerLabel,
+  continuationProviders,
+  continuationUnavailableTitle,
   providerStatusLabel,
   workspacePeersLabel,
 } from "./status.mjs";
@@ -674,6 +676,35 @@ export function ChatPane({
       setBusy(false);
     }
   }
+  // Picking a model sends the continuation. The draft stays put, and the
+  // host writes the prompt for the new provider.
+  async function continueAfterUsage(choice) {
+    if (!chat || busy || sending.current || chat.activeRun || !choice?.model)
+      return;
+    setProvider(choice.provider);
+    setModel(choice.model);
+    setEffort(choice.effort ?? "");
+    setBusy(true);
+    sending.current = true;
+    try {
+      await api(`/api/chats/${chat.id}/messages`, {
+        actionId: crypto.randomUUID(),
+        provider: choice.provider,
+        model: choice.model,
+        effort: choice.effort || null,
+        permissions,
+        mode: chat.mode ?? mode,
+        continueAfterUsage: true,
+      });
+      await reload(chat.id);
+      await refresh();
+    } catch (e) {
+      report(e);
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
+  }
   useImperativeHandle(ref, () => ({
     send,
     focus: () => input.current?.focus(),
@@ -719,6 +750,18 @@ export function ChatPane({
     (goal) =>
       goal.provider !== "cursor" &&
       (chat.mode === "goal" || chat.runs?.[0]?.id === goal.runId),
+  );
+  const continuationOptions = {
+    stoppedProvider: chat?.provider,
+    mode: chat?.mode ?? mode,
+  };
+  const continuationChoices = continuationProviders(
+    providers,
+    continuationOptions,
+  );
+  const continuationTitle = continuationUnavailableTitle(
+    providers,
+    continuationOptions,
   );
   const finishedPlan = chat?.runs?.[0];
   const hasPlanOutput = Boolean(
@@ -884,13 +927,44 @@ export function ChatPane({
             <strong>This turn stopped because usage ran out.</strong>{" "}
             {chat.usage_stopped_reason} Come back after it resets, or continue
             with another agent.
-            <button
-              type="button"
-              className="notice-dismiss"
-              onClick={() => onDismissUsage?.()}
-            >
-              Dismiss
-            </button>
+            <div className="notice-actions">
+              {continuationChoices.length > 0 ? (
+                <ModelPicker
+                  className="notice-continue"
+                  providers={continuationChoices}
+                  provider={provider}
+                  model={model}
+                  effort={effort}
+                  onChange={continueAfterUsage}
+                  onOpenConnections={onOpenConnections}
+                  renderTrigger={(props) => (
+                    <button
+                      {...props}
+                      className="notice-action"
+                      disabled={busy || modeBusy || permissionsBusy}
+                    >
+                      Continue with a new provider
+                    </button>
+                  )}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="notice-action"
+                  disabled
+                  title={continuationTitle}
+                >
+                  Continue with a new provider
+                </button>
+              )}
+              <button
+                type="button"
+                className="notice-dismiss"
+                onClick={() => onDismissUsage?.()}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
         {!chat?.activeRun &&

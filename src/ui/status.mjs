@@ -50,6 +50,41 @@ export function chatMarkerLabel(marker) {
     }[marker] ?? ""
   );
 }
+// Another model on the provider that just stopped would meet the same
+// included-usage limit. Goal mode can only move to Codex or Claude Code.
+function continuationCandidate(provider, stoppedProvider) {
+  return (
+    provider &&
+    provider.id !== stoppedProvider &&
+    provider.connected &&
+    !provider.blockReason &&
+    (provider.models ?? []).some((model) => !model.disabled)
+  );
+}
+export function continuationProviders(providers, { stoppedProvider, mode } = {}) {
+  return (providers ?? []).filter((provider) => {
+    if (!continuationCandidate(provider, stoppedProvider)) return false;
+    if (mode === "goal" && ["cursor", "openrouter"].includes(provider.id))
+      return false;
+    return true;
+  });
+}
+export function continuationUnavailableTitle(
+  providers,
+  options = {},
+) {
+  if (continuationProviders(providers, options).length) return "";
+  const others = (providers ?? []).filter((provider) =>
+    continuationCandidate(provider, options.stoppedProvider),
+  );
+  if (
+    options.mode === "goal" &&
+    others.length > 0 &&
+    others.every((provider) => ["cursor", "openrouter"].includes(provider.id))
+  )
+    return "Cursor and OpenRouter cannot take a Goal.";
+  return "No other connected agent has usage left.";
+}
 // Pinned chats lead, most recently pinned first. The rest stay in
 // newest-activity order. Pinning does not change that activity time.
 export function sidebarOrder(conversations) {

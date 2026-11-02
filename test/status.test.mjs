@@ -5,6 +5,8 @@ import {
   attentionCount,
   chatMarker,
   chatMarkerLabel,
+  continuationProviders,
+  continuationUnavailableTitle,
   pinnedChats,
   providerStatusLabel,
   recentChats,
@@ -348,4 +350,62 @@ test("reset timestamps accept seconds, milliseconds and ISO dates without invent
   }
   for (const value of [null, undefined, "", "invalid", 0, -1, "-1", NaN, Infinity, 9e15, false, {}])
     assert.equal(resetTimestamp(value), null);
+});
+
+test("a usage continuation offers other connected agents, and not the one that stopped", () => {
+  const providers = [
+    { id: "codex", connected: true, models: [{ id: "gpt" }] },
+    {
+      id: "claude",
+      connected: true,
+      models: [{ id: "haiku" }, { id: "retired", disabled: true }],
+    },
+    { id: "cursor", connected: true, models: [{ id: "composer" }] },
+    { id: "openrouter", connected: true, models: [{ id: "free" }] },
+    { id: "offline", connected: false, models: [{ id: "x" }] },
+  ];
+  const ids = (mode) =>
+    continuationProviders(providers, { stoppedProvider: "codex", mode }).map(
+      (provider) => provider.id,
+    );
+  assert.deepEqual(ids("default"), ["claude", "cursor", "openrouter"]);
+  assert.deepEqual(ids("goal"), ["claude"]);
+  assert.equal(
+    continuationUnavailableTitle(providers, {
+      stoppedProvider: "codex",
+      mode: "default",
+    }),
+    "",
+  );
+  const blocked = [
+    providers[0],
+    { ...providers[1], blockReason: "A Claude included-usage limit is exhausted." },
+  ];
+  assert.deepEqual(
+    continuationProviders(blocked, { stoppedProvider: "codex", mode: "default" }),
+    [],
+  );
+  assert.equal(
+    continuationUnavailableTitle(blocked, {
+      stoppedProvider: "codex",
+      mode: "default",
+    }),
+    "No other connected agent has usage left.",
+  );
+  const disabled = [
+    providers[0],
+    { id: "claude", connected: true, models: [{ id: "haiku", disabled: true }] },
+  ];
+  assert.deepEqual(
+    continuationProviders(disabled, { stoppedProvider: "codex", mode: "ask" }),
+    [],
+  );
+  const cursorOnly = [providers[0], providers[2], providers[3]];
+  assert.equal(
+    continuationUnavailableTitle(cursorOnly, {
+      stoppedProvider: "codex",
+      mode: "goal",
+    }),
+    "Cursor and OpenRouter cannot take a Goal.",
+  );
 });

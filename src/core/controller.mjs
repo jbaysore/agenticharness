@@ -49,6 +49,8 @@ import {
   checkMode,
   goalQuestionAnswers,
   questionKey,
+  usageContinuationText,
+  usageGoalPrompt,
 } from "./modes.mjs";
 import {
   invokedSkills,
@@ -306,10 +308,12 @@ export class Controller extends EventEmitter {
       mode,
       parsed = false,
       resumeGoal = false,
+      continueAfterUsage = false,
     },
   ) {
     const chat = this.store.conversation(chatId);
     if (!chat) throw new Error("Conversation not found");
+    let continuedGoalObjective, continuedGoalPrompt;
     // Resuming reactivates the saved Goal; the message only marks the turn.
     if (resumeGoal) {
       if (!resumableGoals(chat).some((g) => g.provider === provider))
@@ -319,6 +323,37 @@ export class Controller extends EventEmitter {
       mode = "goal";
       parsed = true;
       if (typeof text !== "string" || !text.trim()) text = GOAL_RESUME_TEXT;
+    }
+    // A usage stop continues on another provider. The host writes the prompt
+    // so the next agent is told to pick up, and a Goal keeps its objective.
+    if (continueAfterUsage) {
+      if (resumeGoal)
+        throw new Error(
+          "Resume the Goal or continue with a new provider, not both.",
+        );
+      if (!chat.usage_stopped_at)
+        throw new Error("This chat is not stopped because usage ran out");
+      if (provider === chat.provider)
+        throw new Error(
+          "Choose a different provider. This one is out of included usage.",
+        );
+      parsed = true;
+      mode = mode ?? chat.mode;
+      const from =
+        this.providers.find((p) => p.id === chat.provider)?.name ||
+        chat.provider;
+      const objective =
+        resumableGoals(chat).find((goal) => goal.provider === chat.provider)
+          ?.objective || null;
+      text = usageContinuationText({ from, mode, objective });
+      if (mode === "goal") {
+        continuedGoalObjective = objective || text;
+        continuedGoalPrompt = usageGoalPrompt({
+          from,
+          objective,
+          fallback: text,
+        });
+      }
     }
     if (typeof text !== "string" || text.length > 250000)
       throw new Error("Enter a message under 250,000 characters");
@@ -384,6 +419,9 @@ export class Controller extends EventEmitter {
       permissions,
       mode,
       resumeGoal: Boolean(resumeGoal),
+      continueAfterUsage: Boolean(continueAfterUsage),
+      continuedGoalObjective,
+      continuedGoalPrompt,
     };
   }
   startTurn(prepared) {
@@ -405,6 +443,9 @@ export class Controller extends EventEmitter {
       abort,
       pendingSteers: [],
       resumeGoal: prepared.resumeGoal,
+      continueAfterUsage: prepared.continueAfterUsage,
+      continuedGoalObjective: prepared.continuedGoalObjective,
+      continuedGoalPrompt: prepared.continuedGoalPrompt,
     });
     const entry = this.active.get(chatId);
     entry.flushSteer = () => this.flushSteers(chatId);
@@ -783,8 +824,9 @@ export class Controller extends EventEmitter {
       this.releaseQueue(chat.id);
       return;
     }
-    const resumeGoal =
-      chat.mode === "goal" && Boolean(this.active.get(chat.id)?.resumeGoal);
+    const activeEntry = this.active.get(chat.id);
+    const resumeGoal = chat.mode === "goal" && Boolean(activeEntry?.resumeGoal);
+    const continueAfterUsage = Boolean(activeEntry?.continueAfterUsage);
     const savedGoal = chat.sessions[run.provider]?.goal;
     if (
       chat.mode === "goal" ||
@@ -796,11 +838,14 @@ export class Controller extends EventEmitter {
         run.id,
         "starting",
         // A new Goal message replaces the objective; resuming or continuing
-        // keeps the saved one until the provider reports its own.
+        // keeps the saved one until the provider reports its own. A usage
+        // handoff keeps the stopped Goal's objective instead of the prompt.
         modeChange?.mode === "goal" && chat.mode === "goal"
           ? modeChange.objective
           : chat.mode === "goal" && !resumeGoal && !continuing
-            ? text
+            ? continueAfterUsage
+              ? activeEntry.continuedGoalObjective
+              : text
             : undefined,
       );
     let actualModel =
@@ -1436,7 +1481,9 @@ export class Controller extends EventEmitter {
         ? modeChange.objective
         : resumeGoal
           ? savedGoal?.objective
-          : undefined,
+          : continueAfterUsage && chat.mode === "goal" && !continuing
+            ? activeEntry?.continuedGoalPrompt
+            : undefined,
       // An approved plan ends plan mode, so the chat goes on to build it.
       planApproved: () => {
         effectiveMode = "default";

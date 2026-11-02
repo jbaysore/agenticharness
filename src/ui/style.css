@@ -2015,6 +2015,28 @@ small {
   text-decoration: underline;
   cursor: pointer;
 }
+.notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  margin-top: 8px;
+}
+.notice-actions .notice-dismiss {
+  display: inline;
+  margin-top: 0;
+}
+.notice-continue {
+  display: flex;
+  min-width: 0;
+}
+.notice-action {
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: 13px;
+}
 .notice.goal-paused .goal-objective {
   display: -webkit-box;
   margin: 4px 0;

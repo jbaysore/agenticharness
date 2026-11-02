@@ -17,6 +17,12 @@ app.controller.providers = [
     connected: true,
     models: [{ id: "fixture", name: "Fixture", efforts: [] }],
   },
+  {
+    id: "claude",
+    name: "Claude Code",
+    connected: true,
+    models: [{ id: "fixture", name: "Fixture", efforts: [] }],
+  },
 ];
 const reason = "Included Codex quota is exhausted.",
   errors = [];
@@ -37,6 +43,14 @@ app.controller.runners.codex = async (ctx) => {
   }
   if (scenario === "unrelated")
     return { status: "failed", error: "Provider unavailable" };
+  return { status: "completed" };
+};
+app.controller.runners.claude = async (ctx) => {
+  ctx.emit("nativeTurn", { id: "native-continue" });
+  ctx.emit("text", {
+    nativeId: "reply-continue",
+    text: "Picking up the work.",
+  });
   return { status: "completed" };
 };
 const run = async (chat, kind) => {
@@ -115,10 +129,44 @@ try {
       "This turn stopped because usage ran out.",
     );
   }
+  const continued = app.store.createConversation({
+    projectId: project.id,
+    title: "Continue with Claude",
+    provider: "codex",
+    model: "fixture",
+  });
+  app.store.setUsageStop(continued.id, reason);
+  await page.goto(
+    `${app.runtime.origin}/?chat=${continued.id}#pair=${app.auth.pairing()}`,
+  );
+  const continuedNotice = page.locator(".notice.failed");
+  await expect(continuedNotice).toContainText(
+    "This turn stopped because usage ran out.",
+  );
+  await continuedNotice
+    .getByRole("button", { name: "Continue with a new provider", exact: true })
+    .click();
+  const menu = page.locator(".model-popup");
+  await menu.getByRole("menuitem", { name: "Claude Code", exact: true }).click();
+  await menu.getByRole("menuitemradio", { name: "Fixture", exact: true }).click();
+  await expect(page.getByText("Picking up the work.")).toBeVisible();
+  await expect(page.getByText(/Included usage ran out on Codex/)).toBeVisible();
+  await expect(continuedNotice).toHaveCount(0);
+  expect(app.store.conversation(continued.id).provider).toBe("claude");
+  expect(app.store.conversation(continued.id).usage_stopped_at).toBeNull();
+  expect(
+    app.store
+      .messages(continued.id)
+      .some(
+        (message) =>
+          message.role === "user" &&
+          message.content.startsWith("Included usage ran out on Codex."),
+      ),
+  ).toBe(true);
   await page.screenshot({ path: ".local/screenshots/usage-stop.png" });
   expect(errors).toEqual([]);
   console.log(
-    "Usage stop checks passed: resumed Goal completion, genuine quota stop, banner/sidebar dismissal, disconnected stream, persistence after reload, and visibility of later failures. Providers were simulated.",
+    "Usage stop checks passed: resumed Goal completion, genuine quota stop, banner/sidebar dismissal, disconnected stream, persistence after reload, visibility of later failures, and continuing on another provider. Providers were simulated.",
   );
 } finally {
   await browser?.close();

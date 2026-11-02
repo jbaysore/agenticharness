@@ -1268,3 +1268,100 @@ test("a Codex thread started with fewer tools is replaced once, with a handoff",
     store.close();
   }
 });
+
+test("a usage stop can continue on another provider without replacing a Goal", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  controller.providers = [
+    { id: "codex", name: "Codex", models: [{ id: "m", efforts: [] }] },
+    { id: "claude", name: "Claude Code", models: [{ id: "m", efforts: [] }] },
+  ];
+  const project = store.addProject("fixture", "C:\\usage-continue"),
+    chat = store.createConversation({
+      projectId: project.id,
+      provider: "codex",
+      model: "m",
+      title: "Usage continuation",
+    });
+  const send = (extra) =>
+    controller.prepareSend(chat.id, {
+      text: "",
+      provider: "claude",
+      model: "m",
+      continueAfterUsage: true,
+      ...extra,
+    });
+  assert.throws(
+    () => send({ actionId: "usage-continue-not-stopped" }),
+    /not stopped because usage ran out/,
+  );
+  store.setUsageStop(chat.id, "Included Codex quota is exhausted.");
+  assert.throws(
+    () =>
+      controller.prepareSend(chat.id, {
+        actionId: "usage-continue-same-provider",
+        text: "",
+        provider: "codex",
+        model: "m",
+        continueAfterUsage: true,
+      }),
+    /different provider/,
+  );
+  const ask = send({ actionId: "usage-continue-ask", mode: "ask" });
+  assert.match(ask.text, /Included usage ran out on Codex\./);
+  assert.match(ask.text, /Stay in ask mode\./);
+  assert.equal(ask.continueAfterUsage, true);
+  assert.equal(ask.continuedGoalObjective, undefined);
+  store.updateConversation(chat.id, { mode: "goal" });
+  store.setGoalState(
+    chat.id,
+    "codex",
+    "prior-run",
+    "usageLimited",
+    "Ship the parser",
+  );
+  store.addMessage({
+    conversationId: chat.id,
+    role: "assistant",
+    provider: "codex",
+    model: "m",
+    content: "Started the parser.",
+  });
+  let seen;
+  controller.runners.claude = async (ctx) => {
+    seen = {
+      text: ctx.text,
+      goalObjective: ctx.goalObjective,
+      handoff: ctx.handoff,
+      stored: store.conversation(chat.id).sessions.claude.goal.objective,
+    };
+    ctx.emit("text", { nativeId: "continued", text: "On it." });
+    return { status: "completed" };
+  };
+  try {
+    const run = controller.send(chat.id, {
+      actionId: "usage-continue-goal-run",
+      text: "",
+      provider: "claude",
+      model: "m",
+      mode: "goal",
+      continueAfterUsage: true,
+    });
+    await controller.active.get(chat.id).task;
+    assert.equal(store.run(run.id).status, "completed");
+    assert.equal(store.conversation(chat.id).provider, "claude");
+    assert.equal(store.conversation(chat.id).usage_stopped_at, null);
+    assert.equal(seen.stored, "Ship the parser");
+    assert.match(seen.text, /The goal is still:\nShip the parser/);
+    assert.match(seen.goalObjective, /^Ship the parser\n\nIncluded usage ran out on Codex\./);
+    assert.match(seen.goalObjective, /do not repeat completed work/);
+    assert.match(seen.handoff, /Started the parser/);
+    assert.equal(
+      store.messages(chat.id).find((message) => message.role === "user").content,
+      seen.text,
+    );
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
