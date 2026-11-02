@@ -155,6 +155,7 @@ export function Approval({ approval, onAnswer }) {
     [revisingPlan, setRevisingPlan] = useState(false),
     [feedback, setFeedback] = useState(""),
     [submitting, setSubmitting] = useState(false),
+    [copied, setCopied] = useState(false),
     r = approval.request,
     now = useClock(r.kind === "question" && Number.isFinite(r.deadline)),
     remaining = secondsRemaining(r.deadline, now);
@@ -179,6 +180,11 @@ export function Approval({ approval, onAnswer }) {
       setSubmitting(false);
     }
   };
+  const copyPlan = () =>
+    navigator.clipboard?.writeText(r.plan).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
   return (
     <section className={"approval " + (approval.provider ?? "")}>
       <div className="eyebrow">
@@ -264,6 +270,11 @@ export function Approval({ approval, onAnswer }) {
       )}
       {problem && <p className="error-text">{problem}</p>}
       <div className="approval-buttons">
+        {r.kind === "plan" && r.plan && (
+          <button className="secondary copy-plan" onClick={copyPlan}>
+            {copied ? "Copied" : "Copy plan"}
+          </button>
+        )}
         <button
           className="secondary"
           disabled={submitting}

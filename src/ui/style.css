@@ -3452,6 +3452,9 @@ button:has(> .tab-dot) {
 .approval-buttons button {
   font-size: 13px;
 }
+.approval-buttons .copy-plan {
+  margin-right: auto;
+}
 .approval-buttons .primary {
   background: var(--signal);
   color: #2b2400;

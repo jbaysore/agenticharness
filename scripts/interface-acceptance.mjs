@@ -84,6 +84,7 @@ try {
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const page = await browser.newPage({
     viewport: { width: 1512, height: 982 },
+    permissions: ["clipboard-read", "clipboard-write"],
   });
   page.on("pageerror", (error) => errors.push(error.message));
   for (const provider of app.controller.providers) {
@@ -111,6 +112,7 @@ try {
       if (kind === "missing") {
         await expect(card).toContainText("The plan is unavailable");
         await expect(confirm).toBeDisabled();
+        await expect(card.getByRole("button", { name: "Copy plan" })).toHaveCount(0);
         await card.getByRole("button", { name: "Keep planning" }).click();
         await card.getByRole("textbox", { name: "What should change?" })
           .fill("Present the complete proposal first.");
@@ -127,6 +129,12 @@ try {
         "Old proposal",
       );
       await expect(confirm).toBeEnabled();
+      const copyPlan = card.getByRole("button", { name: "Copy plan" });
+      await copyPlan.click();
+      await expect(card.getByRole("button", { name: "Copied" })).toBeVisible();
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+        kind === "fallback" ? "complete proposal" : "native proposal",
+      );
       await page.reload();
       await expect(card.locator(".plan-body")).toContainText(
         kind === "fallback" ? "revised behavior" : "complete feature",
