@@ -946,6 +946,10 @@ export function ChatPane({
                 plan: chat.proposedPlans?.[planReady.id],
               },
             }}
+            review={chat.planReviews?.[planReady.id]}
+            onReview={() =>
+              api(`/api/plans/${planReady.id}/review`, { chatId: chat.id })
+            }
             onAnswer={async (answer) => {
               if (!answer.allow) {
                 const sent = await send(
@@ -969,6 +973,18 @@ export function ChatPane({
           <Approval
             key={a.id}
             approval={a}
+            review={
+              a.request?.kind === "plan" ? chat.planReviews?.[a.run_id] : null
+            }
+            onReview={
+              a.request?.kind === "plan"
+                ? () =>
+                    api(`/api/plans/${a.run_id}/review`, {
+                      chatId: chat.id,
+                      approvalId: a.id,
+                    })
+                : undefined
+            }
             onAnswer={async (answer) => {
               const saved = await api("/api/approvals/" + a.id, answer);
               if (a.request?.kind === "plan" && !answer.allow)

@@ -218,6 +218,129 @@ try {
       await expect(page.getByLabel("Stop work")).toHaveCount(0);
     }
   }
+  // Independent review advises without deciding. Providers stay simulated.
+  app.controller.openReviewer = null;
+  const soundReview = {
+    assessment: "sound",
+    summary: "The plan covers the requested interface work.",
+    concerns: [
+      {
+        severity: "low",
+        confidence: "low",
+        title: "Heading wrap",
+        scenario: "A long heading wraps on a phone.",
+        evidence: "The plan says complete proposal.",
+        suggestion: "Shorten the heading.",
+      },
+    ],
+    improvements: [
+      {
+        title: "Name the reload",
+        detail: "Say which screen is reloaded after save.",
+      },
+    ],
+    questions: ["Should the phone layout stay wrapped?"],
+  };
+  let releaseReview = () => {};
+  const reviewAnswer = (signal) =>
+    new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      signal.addEventListener(
+        "abort",
+        () => {
+          if (!settled) {
+            settled = true;
+            reject(new Error("The plan review was cancelled."));
+          }
+        },
+        { once: true },
+      );
+      releaseReview = () =>
+        finish({
+          text: JSON.stringify(soundReview),
+          usage: { input: 3, output: 2 },
+        });
+      if (signal.aborted) {
+        settled = true;
+        reject(new Error("The plan review was cancelled."));
+      }
+    });
+  app.controller.workers = {
+    codex: ({ signal }) => reviewAnswer(signal),
+    claude: ({ signal }) => reviewAnswer(signal),
+  };
+  scenario = "fallback";
+  const reviewed = app.store.createConversation({
+    projectId: project.id,
+    title: "Independent review",
+    provider: "claude",
+    model: "fixture",
+    mode: "plan",
+    permissions: "override",
+  });
+  await page.goto(
+    `${app.runtime.origin}/?chat=${reviewed.id}#pair=${app.auth.pairing()}`,
+  );
+  await page.getByLabel("Message your coding agent").fill("Propose a small change");
+  await page.getByLabel("Send message").click();
+  const reviewedCard = page.locator(".approval");
+  await reviewedCard.getByRole("button", { name: "Get independent review" }).click();
+  await expect(reviewedCard.getByText(/Reviewing with Codex/)).toBeVisible();
+  await expect(
+    reviewedCard.getByRole("button", { name: "Confirm and build" }),
+  ).toBeEnabled();
+  releaseReview();
+  await expect(reviewedCard.getByText("No significant concerns found")).toBeVisible();
+  await expect(reviewedCard.getByText("Heading wrap", { exact: true })).toHaveCount(0);
+  await reviewedCard.getByRole("button", { name: "Show 1 minor note" }).click();
+  await expect(reviewedCard.getByText("Heading wrap", { exact: true })).toBeVisible();
+  await expect(reviewedCard.getByText("Name the reload")).toBeVisible();
+  await expect(
+    reviewedCard.getByText("Should the phone layout stay wrapped?"),
+  ).toBeVisible();
+  await page.reload();
+  await expect(reviewedCard.getByText("No significant concerns found")).toBeVisible();
+  await reviewedCard.getByRole("button", { name: "Send review to agent" }).click();
+  const reviewedFeedback = reviewedCard.getByRole("textbox", {
+    name: "What should change?",
+  });
+  await expect(reviewedFeedback).toHaveValue(/Independent review \(Sound\)/);
+  await expect(reviewedFeedback).toHaveValue(/Name the reload/);
+  await expect(reviewedFeedback).toHaveValue(/Heading wrap/);
+  await reviewedCard.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(reviewedCard.getByRole("button", { name: "Confirm and build" })).toBeVisible();
+
+  scenario = "native";
+  builds = 0;
+  releaseReview = () => {};
+  const pending = app.store.createConversation({
+    projectId: project.id,
+    title: "Review during approval",
+    provider: "codex",
+    model: "fixture",
+    mode: "plan",
+    permissions: "override",
+  });
+  await page.goto(
+    `${app.runtime.origin}/?chat=${pending.id}#pair=${app.auth.pairing()}`,
+  );
+  await page.getByLabel("Message your coding agent").fill("Propose the native plan");
+  await page.getByLabel("Send message").click();
+  const pendingCard = page.locator(".approval");
+  await pendingCard.getByRole("button", { name: "Get independent review" }).click();
+  await expect(pendingCard.getByText(/Reviewing with Claude Code/)).toBeVisible();
+  await expect(
+    pendingCard.getByRole("button", { name: "Confirm and build" }),
+  ).toBeEnabled();
+  await pendingCard.getByRole("button", { name: "Confirm and build" }).click();
+  await expect(pendingCard).toHaveCount(0);
+  await expect.poll(() => builds).toBe(1);
+  releaseReview();
   // Independent folders, archived lists, exponential increments, reset on reload.
   const a = app.store.addProject("Pagination A", join(dataDir, "pagination-a"));
   const b = app.store.addProject("Pagination B", join(dataDir, "pagination-b"));
@@ -287,7 +410,7 @@ try {
   });
   expect(errors).toEqual([]);
   console.log(
-    "Interface checks passed: complete native and fallback plans for all providers, feedback before resuming, feedback delivery and retry, preserved drafts and Plan mode, phone layout, revisions and reloads, missing-plan guard, one implementation per approval, independent sidebar doubling and archived limits. Providers were simulated; no inference.",
+    "Interface checks passed: complete native and fallback plans for all providers, feedback before resuming, feedback delivery and retry, preserved drafts and Plan mode, phone layout, revisions and reloads, missing-plan guard, one implementation per approval, independent plan review, confirm during review, independent sidebar doubling and archived limits. Providers were simulated; no inference.",
   );
 } finally {
   await browser?.close();

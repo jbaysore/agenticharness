@@ -60,6 +60,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS conversation_context(conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, provider TEXT NOT NULL, payload TEXT NOT NULL, last_event_id INTEGER NOT NULL, PRIMARY KEY(conversation_id,provider));
       CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,created_at);
       CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL, request TEXT NOT NULL, status TEXT NOT NULL, response TEXT, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS plan_reviews(run_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, status TEXT NOT NULL, reviewer TEXT, result TEXT, error TEXT, updated_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS plan_reviews_conversation ON plan_reviews(conversation_id);
       CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), conversation_id TEXT REFERENCES conversations(id), content TEXT NOT NULL, evidence TEXT NOT NULL, stale INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS comments(id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), repository TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, body TEXT NOT NULL, revision TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -1027,6 +1029,14 @@ export class Store {
           "Host restarted. Review partial work, then explicitly continue; no action was automatically replayed.",
       });
     }
+    this.db
+      .prepare(
+        "UPDATE plan_reviews SET status='failed', error=?, updated_at=? WHERE status='running'",
+      )
+      .run(
+        "Host restarted during the review. Ask for it again.",
+        this.now(),
+      );
     return interrupted.length;
   }
   snapshot() {
@@ -1077,12 +1087,59 @@ export class Store {
         .map((event) => [event.run_id, JSON.parse(event.payload).text]),
     );
   }
+  savePlanReview({ conversationId, runId, status, reviewer, result, error }) {
+    this.db
+      .prepare(
+        `INSERT INTO plan_reviews(run_id,conversation_id,status,reviewer,result,error,updated_at)
+         VALUES(?,?,?,?,?,?,?)
+         ON CONFLICT(run_id) DO UPDATE SET
+           conversation_id=excluded.conversation_id,
+           status=excluded.status,
+           reviewer=excluded.reviewer,
+           result=excluded.result,
+           error=excluded.error,
+           updated_at=excluded.updated_at`,
+      )
+      .run(
+        runId,
+        conversationId,
+        status,
+        reviewer ? JSON.stringify(reviewer) : null,
+        result ? JSON.stringify(result) : null,
+        error ?? null,
+        this.now(),
+      );
+    return this.planReview(conversationId, runId);
+  }
+  planReview(conversationId, runId) {
+    return this.planReviews(conversationId)[runId] ?? null;
+  }
+  planReviews(conversationId) {
+    return Object.fromEntries(
+      this.db
+        .prepare(
+          "SELECT * FROM plan_reviews WHERE conversation_id=? ORDER BY updated_at",
+        )
+        .all(conversationId)
+        .map((row) => [
+          row.run_id,
+          {
+            status: row.status,
+            reviewer: row.reviewer ? JSON.parse(row.reviewer) : null,
+            result: row.result ? JSON.parse(row.result) : null,
+            error: row.error,
+            updatedAt: row.updated_at,
+          },
+        ]),
+    );
+  }
   conversationSnapshot(id) {
     return {
       ...this.conversation(id),
       contextByProvider: this.contextByProvider(id),
       messages: this.messages(id),
       proposedPlans: this.proposedPlans(id),
+      planReviews: this.planReviews(id),
       activeRun: this.activeRun(id),
       queue: this.queuedInputs(id),
       approvals: this.pendingApprovals(id),

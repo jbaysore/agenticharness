@@ -763,6 +763,21 @@ export async function createHarness({
             200,
             controller.answer(match[1], await readJson(req)),
           );
+        if (
+          (match = path.match(/^\/api\/plans\/([^/]+)\/review$/)) &&
+          method === "POST"
+        ) {
+          const body = await readJson(req);
+          return json(
+            res,
+            202,
+            controller.reviewPlan({
+              chatId: body.chatId,
+              runId: decodeURIComponent(match[1]),
+              approvalId: body.approvalId,
+            }),
+          );
+        }
         if (path === "/api/search" && method === "GET")
           return json(
             res,

@@ -203,6 +203,18 @@ export function applyWork(steps, p, after = null, sourceEventId = null) {
           ? "running"
           : ["deny", "cancelled"].includes(p.status) ? "failed" : "ok",
     };
+  } else if (p.kind === "plan-review") {
+    step = {
+      id: "plan-review:" + p.item.id,
+      verb: "other",
+      target: p.item.title,
+      status:
+        p.status === "running"
+          ? "running"
+          : p.status === "done"
+            ? "ok"
+            : "failed",
+    };
   } else if (p.provider === "codex" && (p.kind === "tool" || p.kind === "native-subagent")) {
     if (p.item?.type === "collabAgentToolCall" || p.item?.type === "agentMessage") return steps;
     step = codexStep(p);

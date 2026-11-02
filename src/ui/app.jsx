@@ -680,6 +680,7 @@ function App() {
           "chat",
           "queue",
           "proposed-plan",
+          "plan-review",
         ].includes(e.type)
       )
         reload(e.conversationId).catch(report);

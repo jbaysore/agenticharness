@@ -72,6 +72,7 @@ import {
 } from "./attachments.mjs";
 import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
+import { PlanReviewer } from "./plan-review.mjs";
 import { hostTools, hostToolsKey, toolFingerprint } from "./host-tools.mjs";
 import { blockingGoals, goalStopped, resumableGoals } from "./goals.mjs";
 import { isUsageExhausted } from "../security/billing.mjs";
@@ -143,9 +144,13 @@ export class Controller extends EventEmitter {
     }
     this.workers = { claude: runClaudeWorker, codex: runCodexWorker };
     this.openReviewer = openReviewerOption;
+    this.planReviewJobs = new Map();
+    this.planReviewTasks = new Set();
     this.workerTimeoutMs = 5 * 60 * 1000;
     this.reviewerTimeoutMs = 60 * 1000;
     this.reviewerTotalTimeoutMs = 120 * 1000;
+    this.planReviewTimeoutMs = 3 * 60 * 1000;
+    this.planReviewTotalTimeoutMs = 5 * 60 * 1000;
     this.goalQuestionTimeoutMs = GOAL_QUESTION_TIMEOUT_MS;
     this.runCommand = runCommand;
     store.recover();
@@ -1749,6 +1754,135 @@ export class Controller extends EventEmitter {
     }
     return answer;
   }
+  reviewFolder(chat) {
+    const home = this.store.project(chat.project_id);
+    if (!home) throw new Error("Project not found");
+    return chat.worktree?.path
+      ? { ...home, path: chat.worktree.path, home: home.path, worktree: chat.worktree }
+      : home;
+  }
+  planText(chat, run, approvalId) {
+    if (approvalId) {
+      const approval = this.store.approval(approvalId);
+      if (
+        !approval ||
+        approval.conversation_id !== chat.id ||
+        approval.run_id !== run.id ||
+        approval.request?.kind !== "plan"
+      )
+        throw new Error("Plan not found");
+      return approval.request.plan ?? "";
+    }
+    return this.store.proposedPlans(chat.id)[run.id] ?? "";
+  }
+  // Advice for the user. It never resolves the plan or resumes its agent.
+  reviewPlan({ chatId, runId, approvalId } = {}) {
+    const chat = this.store.conversation(chatId);
+    if (!chat) throw new Error("Conversation not found");
+    const run = this.store.run(runId);
+    if (!run || run.conversation_id !== chat.id)
+      throw new Error("Plan not found");
+    if (this.planReviewJobs.has(run.id))
+      return this.store.planReview(chat.id, run.id);
+    const plan = this.planText(chat, run, approvalId);
+    if (typeof plan !== "string" || !plan.trim())
+      throw new Error("The complete plan must be available before review");
+    const abort = new AbortController();
+    this.planReviewJobs.set(run.id, abort);
+    this.recordPlanReview(chat, run, {
+      status: "running",
+      reviewer: null,
+      result: null,
+      error: null,
+    });
+    const task = this.finishPlanReview({ chat, run, plan, abort });
+    this.planReviewTasks.add(task);
+    task.finally(() => {
+      this.planReviewTasks.delete(task);
+      if (this.planReviewJobs.get(run.id) === abort)
+        this.planReviewJobs.delete(run.id);
+    });
+    return this.store.planReview(chat.id, run.id);
+  }
+  recordPlanReview(chat, run, { status, reviewer, result, error }) {
+    if (!this.store.conversation(chat.id)) return null;
+    const saved = this.store.savePlanReview({
+      conversationId: chat.id,
+      runId: run.id,
+      status,
+      reviewer,
+      result,
+      error,
+    });
+    const assessments = {
+      sound: "Sound",
+      sound_with_suggestions: "Sound with suggestions",
+      needs_revision: "Needs revision",
+    };
+    const title =
+      status === "running"
+        ? reviewer
+          ? `Reviewing with ${reviewer.name}`
+          : "Reviewing the plan"
+        : status === "done"
+          ? `Independent review: ${assessments[result?.assessment] ?? "Complete"}`
+          : status === "cancelled"
+            ? "Independent review cancelled"
+            : "Independent review failed";
+    this.event(chat.id, run.id, "work", {
+      kind: "plan-review",
+      status,
+      item: {
+        id: run.id,
+        title,
+        description: result?.summary || error || "",
+      },
+    });
+    this.event(chat.id, run.id, "plan-review", {
+      runId: run.id,
+      status,
+    });
+    return saved;
+  }
+  async finishPlanReview({ chat, run, plan, abort }) {
+    let reviewer = null;
+    try {
+      const reviewed = await new PlanReviewer({
+        controller: this,
+        run,
+        project: this.reviewFolder(chat),
+        chat,
+        plan,
+        signal: abort.signal,
+        onAttempt: (next) => {
+          reviewer = next;
+          this.recordPlanReview(chat, run, {
+            status: "running",
+            reviewer,
+            result: null,
+            error: null,
+          });
+        },
+      }).review();
+      if (abort.signal.aborted || !this.store.conversation(chat.id)) return;
+      this.recordPlanReview(chat, run, {
+        status: "done",
+        reviewer: reviewed.reviewer,
+        result: reviewed.result,
+        error: null,
+      });
+    } catch (error) {
+      if (!this.store.conversation(chat.id)) return;
+      this.recordPlanReview(chat, run, {
+        status: abort.signal.aborted ? "cancelled" : "failed",
+        reviewer,
+        result: null,
+        error: abort.signal.aborted
+          ? "The plan review was cancelled."
+          : error.message,
+      });
+    }
+  }
   waitApproval(run, request, signal, { timeoutMs = 0 } = {}) {
     if (signal.aborted) return Promise.resolve({ allow: false });
     const stored =
@@ -1874,12 +2008,17 @@ export class Controller extends EventEmitter {
     clearTimeout(this.providerTimer);
     this.openrouter?.off("change", this.openrouterChanged);
     this.openrouter?.close();
+    for (const abort of this.planReviewJobs.values()) abort.abort();
     const active = [...this.active.values()];
     for (const work of active) {
       work.cancelled = true;
       work.abort.abort();
     }
-    await Promise.allSettled([...active.map((a) => a.task), this.refreshing]);
+    await Promise.allSettled([
+      ...active.map((a) => a.task),
+      ...this.planReviewTasks,
+      this.refreshing,
+    ]);
     this.browser?.close();
     await this.memoryWeb?.close();
   }

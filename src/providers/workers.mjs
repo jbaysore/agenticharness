@@ -4,6 +4,7 @@
 //   search: may search, list and read files in the project
 //   edit:   may read the project and change exactly one named file
 //   review: returns a decision from supplied context, with execution disabled
+//   plan-review: advises the user on one plan, with read-only file tools
 import { resolve } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AsyncQueue } from "../core/queue.mjs";
@@ -15,6 +16,8 @@ import {
   CLAUDE_USAGE_POLL_INTERVAL_MS,
 } from "../security/claude-usage.mjs";
 import { checkCodexRoute, openCodex } from "./codex.mjs";
+import { PLAN_REVIEW_PROMPT, PLAN_REVIEW_SCHEMA } from "../core/plan-review.mjs";
+import { callReadOnlyFile, readOnlyFileTools } from "../core/openrouter-files.mjs";
 import {
   REVIEW_PROMPT,
   REVIEW_SCHEMA,
@@ -22,6 +25,7 @@ import {
 } from "../core/review-policy.mjs";
 
 export const workerPrompts = {
+  "plan-review": PLAN_REVIEW_PROMPT,
   review: REVIEW_PROMPT,
   inline:
     "You answer one request from another coding agent using only the material in the message. Do not use tools. Quote file content verbatim with its line numbers; never paraphrase code or invent lines. Include whole logical blocks rather than fragments. If the material does not contain the answer, say so plainly. Do not ask questions.",
@@ -66,6 +70,9 @@ export async function runClaudeWorker(
     usageForAccount = claudeUsageForAccount,
   } = {},
 ) {
+  const reviewing = ["review", "plan-review"].includes(mode),
+    readTools = ["Read", "Grep", "Glob"],
+    schema = mode === "plan-review" ? PLAN_REVIEW_SCHEMA : REVIEW_SCHEMA;
   const input = new AsyncQueue();
   const options = baseOptions(cwd),
     q = queryFn({
@@ -78,6 +85,7 @@ export async function runClaudeWorker(
         systemPrompt: workerPrompts[mode],
         tools: {
           review: [],
+          "plan-review": readTools,
           inline: [],
           search: ["Read", "Grep", "Glob"],
           edit: ["Read", "Edit"],
@@ -85,8 +93,8 @@ export async function runClaudeWorker(
         includePartialMessages: false,
         persistSession: false,
         maxTurns: ["inline", "review"].includes(mode) ? 2 : 40,
-        ...(mode === "review" && {
-          outputFormat: { type: "json_schema", schema: REVIEW_SCHEMA },
+        ...(reviewing && {
+          outputFormat: { type: "json_schema", schema },
           permissionMode: "dontAsk",
           mcpServers: {},
           plugins: [],
@@ -95,7 +103,8 @@ export async function runClaudeWorker(
         }),
         canUseTool: async (name, args) =>
           (mode === "edit" && allowsClaudeTool(name, args, cwd, editPath)) ||
-          (mode === "review" && name === "StructuredOutput")
+          (reviewing && name === "StructuredOutput") ||
+          (["search", "plan-review"].includes(mode) && readTools.includes(name))
             ? { behavior: "allow", updatedInput: args }
             : {
                 behavior: "deny",
@@ -110,7 +119,7 @@ export async function runClaudeWorker(
     checkingQuota = false,
     boundaryError;
   const stop = () =>
-    mode === "review" ? q.close() : q.interrupt().catch(() => q.close());
+    reviewing ? q.close() : q.interrupt().catch(() => q.close());
   signal.addEventListener("abort", stop, { once: true });
   try {
     const auth = await readAuth(),
@@ -124,7 +133,7 @@ export async function runClaudeWorker(
       parent_tool_use_id: null,
       session_id: "",
     });
-    if (mode === "review")
+    if (reviewing)
       quotaTimer = setInterval(async () => {
         if (checkingQuota) return;
         checkingQuota = true;
@@ -141,11 +150,12 @@ export async function runClaudeWorker(
     for await (const event of q) {
       if (boundaryError) throw boundaryError;
       if (
-        mode === "review" &&
+        reviewing &&
         event.type === "assistant" &&
         event.message?.content?.some(
           (block) =>
-            block.type === "tool_use" && block.name !== "StructuredOutput",
+            block.type === "tool_use" && block.name !== "StructuredOutput" &&
+            !(mode === "plan-review" && readTools.includes(block.name)),
         )
       )
         throw new Error(
@@ -163,14 +173,14 @@ export async function runClaudeWorker(
       if (event.type !== "result") continue;
       if (signal.aborted) throw cancelled();
       const text =
-        mode === "review"
+        reviewing
           ? JSON.stringify(event.structured_output)
           : event.result;
       if (event.is_error || typeof text !== "string")
         throw new Error(
           event.errors?.join("\n") || "The worker ended without an answer",
         );
-      if (mode === "review") {
+      if (reviewing) {
         const { reason: blocked } = await monitor.read(() => readUsage(q));
         if (blocked) throw new WorkerUnavailable(blocked);
       }
@@ -203,10 +213,12 @@ export async function runClaudeWorker(
 }
 
 export async function runCodexWorker(
-  { cwd, model, effort, task, signal, mode = "search", editPath },
+  { cwd, model, effort, task, signal, mode = "search", editPath, project = { path: cwd } },
   { open = openCodex } = {},
 ) {
-  const rpc = await open(cwd);
+  const reviewing = ["review", "plan-review"].includes(mode),
+    planReview = mode === "plan-review",
+    rpc = await open(cwd, { signal });
   let threadId,
     turnId,
     text = "",
@@ -235,8 +247,32 @@ export async function runCodexWorker(
   });
   // The only approval a worker is ever given is an edit worker's change to
   // its one file. Commands and every other request are refused.
-  rpc.on("request", (message) => {
+  rpc.on("request", async (message) => {
     if (rpc.closed) return;
+    if (planReview && message.method === "item/tool/call") {
+      try {
+        let input = message.params?.arguments;
+        if (typeof input === "string") input = JSON.parse(input);
+        const output = await callReadOnlyFile(
+          project,
+          signal,
+          message.params?.tool,
+          input,
+        );
+        if (!rpc.closed)
+          rpc.respond(message.id, {
+            success: true,
+            contentItems: [{ type: "inputText", text: JSON.stringify(output) }],
+          });
+      } catch (error) {
+        if (!rpc.closed)
+          rpc.respond(message.id, {
+            success: false,
+            contentItems: [{ type: "inputText", text: error.message }],
+          });
+      }
+      return;
+    }
     if (message.method === "item/fileChange/requestApproval")
       rpc.respond(message.id, {
         decision:
@@ -252,14 +288,15 @@ export async function runCodexWorker(
   rpc.on("notification", ({ method, params: p }) => {
     if (p?.threadId && threadId && p.threadId !== threadId) return;
     if (
-      mode === "review" &&
+      reviewing &&
       method === "item/started" &&
       ![
         "agentMessage",
         "reasoning",
         "userMessage",
         "contextCompaction",
-      ].includes(p.item?.type)
+      ].includes(p.item?.type) &&
+      !(planReview && p.item?.type === "dynamicToolCall" && readOnlyFileTools.some((t) => t.name === p.item.tool))
     ) {
       rejectDone(
         new Error(
@@ -308,13 +345,13 @@ export async function runCodexWorker(
         model_provider: "openai",
         forced_login_method: "chatgpt",
         service_tier: "default",
-        ...(mode === "review" && reviewConfig(config)),
+        ...(reviewing && reviewConfig(config)),
       },
       ephemeral: true,
       allowProviderModelFallback: false,
-      ...(mode === "review" && {
-        baseInstructions: REVIEW_PROMPT,
-        dynamicTools: [],
+      ...(reviewing && {
+        baseInstructions: workerPrompts[mode],
+        dynamicTools: planReview ? readOnlyFileTools.map((t) => ({ type: "function", name: t.name, description: t.description, inputSchema: t.inputSchema })) : [],
       }),
     });
     threadId = thread.id;
@@ -325,11 +362,11 @@ export async function runCodexWorker(
         model,
         effort: effort || undefined,
         serviceTierForTurn: "default",
-        ...(mode === "review" && { outputSchema: REVIEW_SCHEMA }),
+        ...(reviewing && { outputSchema: planReview ? PLAN_REVIEW_SCHEMA : REVIEW_SCHEMA }),
         input: [{ type: "text", text: task }],
       })
     ).turn.id;
-    if (mode === "review")
+    if (reviewing)
       quotaTimer = setInterval(async () => {
         if (finished || checkingQuota || rpc.closed) return;
         checkingQuota = true;
@@ -352,7 +389,7 @@ export async function runCodexWorker(
       throw new Error(
         turn.error?.message ?? "The worker ended without an answer",
       );
-    if (mode === "review") {
+    if (reviewing) {
       const boundary = checkCodexBilling(
         account,
         await rpc.call("account/rateLimits/read"),

@@ -3446,8 +3446,40 @@ button:has(> .tab-dot) {
 .approval-buttons {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
+}
+.plan-review {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+.plan-review h4 {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.plan-review ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.plan-review li {
+  margin: 6px 0;
+}
+.plan-review-status {
+  margin: 12px 0 0;
+}
+.plan-assessment {
+  justify-self: start;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.plan-assessment.needs_revision {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger-ink);
 }
 .approval-buttons button {
   font-size: 13px;

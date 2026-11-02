@@ -379,7 +379,19 @@ review denial from a policy denial.
 In Goal, a review that asks you or cannot run is declined and the agent continues.
 **Manual** shows each request for **Allow once**. **Override** allows actions
 without asking. A plan still comes to you as one **Confirm and build** button,
-except in Goal, where a plan is carried out and the chat stays in Goal. Agents are told to ask only a managerial question,
+except in Goal, where a plan is carried out and the chat stays in Goal.
+
+A plan card also offers **Get independent review**. That starts a separate
+read-only reviewer, using the Auto-review model choices and preferably a
+different subscription provider from the one that wrote the plan. The review
+advises you. It can say the plan is sound, and a concern has to name a concrete
+failure and the evidence for it. Nothing is sent to the planning agent unless
+you choose **Send review to agent**, which fills the Keep planning feedback box
+for you to edit first. Confirm and Keep planning stay available while a review
+runs. The review is saved on that plan and shown again after a reload. Goal
+still carries a plan out without this card.
+
+Agents are told to ask only a managerial question,
 and to explain why they cannot decide it. In Goal that question waits 60 seconds
 and then the agent chooses. In every other mode a question stays open until you send an answer or stop the turn. Reading it or typing an answer does not start a countdown.
 

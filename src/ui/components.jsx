@@ -149,7 +149,127 @@ export function Modal({ title, children, onClose, wide = false }) {
   );
 }
 
-export function Approval({ approval, onAnswer }) {
+const PLAN_ASSESSMENTS = {
+  sound: "Sound",
+  sound_with_suggestions: "Sound with suggestions",
+  needs_revision: "Needs revision",
+};
+function reviewFeedback(result) {
+  const lines = [
+    `Independent review (${PLAN_ASSESSMENTS[result.assessment]}): ${result.summary}`,
+  ];
+  if (result.concerns.length) {
+    lines.push("", "Concerns:");
+    for (const concern of result.concerns)
+      lines.push(
+        `- ${concern.title} (${concern.severity}, ${concern.confidence} confidence): ${concern.scenario} Evidence: ${concern.evidence} Suggestion: ${concern.suggestion}`,
+      );
+  }
+  if (result.improvements.length) {
+    lines.push("", "Improvements:");
+    for (const item of result.improvements)
+      lines.push(`- ${item.title}: ${item.detail}`);
+  }
+  return lines.join("\n");
+}
+function PlanReview({ review, disabled, onSend }) {
+  const [showMinor, setShowMinor] = useState(false);
+  if (!review) return null;
+  if (review.status === "running")
+    return (
+      <p className="plan-review-status">
+        {review.reviewer?.name
+          ? `Reviewing with ${review.reviewer.name}…`
+          : "Reviewing the plan…"}
+      </p>
+    );
+  if (review.status === "failed" || review.status === "cancelled")
+    return (
+      <p className="error-text">
+        {review.error || "The plan review did not finish."}
+      </p>
+    );
+  if (review.status !== "done" || !review.result) return null;
+  const { result } = review;
+  const minor = (concern) =>
+    concern.severity === "low" && concern.confidence === "low";
+  const hidden = result.concerns.filter(minor);
+  const shown = showMinor
+    ? result.concerns
+    : result.concerns.filter((concern) => !minor(concern));
+  return (
+    <div className="plan-review">
+      <p className={"plan-assessment " + result.assessment}>
+        {PLAN_ASSESSMENTS[result.assessment]}
+      </p>
+      <p>{result.summary}</p>
+      <h4>Concerns</h4>
+      {shown.length ? (
+        <ul>
+          {shown.map((concern, index) => (
+            <li key={index}>
+              <strong>{concern.title}</strong>{" "}
+              <span className="muted small">
+                {concern.severity}, {concern.confidence} confidence
+              </span>
+              <div>{concern.scenario}</div>
+              <div className="muted small">Evidence: {concern.evidence}</div>
+              <div className="muted small">
+                Suggestion: {concern.suggestion}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">No significant concerns found</p>
+      )}
+      {hidden.length > 0 && (
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => setShowMinor((open) => !open)}
+        >
+          {showMinor
+            ? "Hide minor notes"
+            : `Show ${hidden.length} minor ${hidden.length === 1 ? "note" : "notes"}`}
+        </button>
+      )}
+      {result.improvements.length > 0 && (
+        <>
+          <h4>Improvements</h4>
+          <ul>
+            {result.improvements.map((item, index) => (
+              <li key={index}>
+                <strong>{item.title}</strong>
+                <div>{item.detail}</div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {result.questions.length > 0 && (
+        <>
+          <h4>Open questions</h4>
+          <ul>
+            {result.questions.map((question, index) => (
+              <li key={index}>{question}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      <button
+        type="button"
+        className="secondary"
+        disabled={disabled}
+        onClick={onSend}
+      >
+        Send review to agent
+      </button>
+    </div>
+  );
+}
+
+export function Approval({ approval, onAnswer, review, onReview }) {
   const [responses, setResponses] = useState({}),
     [page, setPage] = useState(0),
     [revisingPlan, setRevisingPlan] = useState(false),
@@ -255,6 +375,17 @@ export function Approval({ approval, onAnswer }) {
           <pre>{JSON.stringify(r.details, null, 2)}</pre>
         </details>
       )}
+      {r.kind === "plan" && (
+        <PlanReview
+          review={review}
+          disabled={submitting}
+          onSend={() => {
+            if (!review?.result) return;
+            setFeedback(reviewFeedback(review.result));
+            setRevisingPlan(true);
+          }}
+        />
+      )}
       {r.kind === "plan" && revisingPlan && (
         <label className="question-custom">
           What should change?
@@ -291,6 +422,27 @@ export function Approval({ approval, onAnswer }) {
               ? "Keep current mode"
               : "Decline"}
         </button>
+        {r.kind === "plan" && onReview && !revisingPlan && (
+          <button
+            className="secondary"
+            disabled={
+              submitting ||
+              !r.plan?.trim() ||
+              review?.status === "running" ||
+              review?.status === "done"
+            }
+            onClick={async () => {
+              setProblem("");
+              try {
+                await onReview();
+              } catch (error) {
+                setProblem(error.message);
+              }
+            }}
+          >
+            Get independent review
+          </button>
+        )}
         {step?.canBack && (
           <button
             className="secondary"

@@ -148,26 +148,13 @@ export async function callOpenRouterFile(ctx, name, input) {
   // This consent is a user choice in the setup UI; agents cannot grant it.
   ctx.openrouter.check(ctx.model);
   const write = name === "edit_file";
+  if (!write) return callReadOnlyFile(ctx.project, ctx.signal, name, input);
   if (write && ["ask", "plan"].includes(ctx.mode))
     throw new Error(
       "File changes are unavailable in Ask or Plan mode. Approve the plan before implementation.",
     );
   const file = await openRouterFilePath(ctx.project, input, { write });
   ctx.signal.throwIfAborted();
-  if (name === "read_file") {
-    const text = await textFile(file),
-      lines = text.split(/\r?\n/),
-      start = (input.startLine ?? 1) - 1;
-    return {
-      path: input.path,
-      totalLines: lines.length,
-      text: lines
-        .slice(start, start + (input.lineCount ?? 200))
-        .map((line, i) => `${start + i + 1}: ${line}`)
-        .join("\n")
-        .slice(0, 60000),
-    };
-  }
   if (write) {
     let before = null;
     try {
@@ -226,6 +213,33 @@ export async function callOpenRouterFile(ctx, name, input) {
     });
     return { path: input.path, changed: true };
   }
+}
+
+// The same bounded repository reads are also available to subscription plan
+// reviewers. No write, command, network, or OpenRouter capability is exposed.
+export const readOnlyFileTools = openRouterFileTools.filter((t) => t.name !== "edit_file");
+export async function callReadOnlyFile(project, signal, name, input) {
+  if (!readOnlyFileTools.some((t) => t.name === name))
+    throw new Error("Only read_file, list_files and search_files are available.");
+  if (!input || typeof input.path !== "string" || !input.path || input.path.length > 1000 ||
+      (input.repository != null && (!Number.isInteger(input.repository) || input.repository < 0)) ||
+      (input.startLine != null && (!Number.isInteger(input.startLine) || input.startLine < 1)) ||
+      (input.lineCount != null && (!Number.isInteger(input.lineCount) || input.lineCount < 1 || input.lineCount > 500)) ||
+      (name === "search_files" && (typeof input.query !== "string" || !input.query || input.query.length > 500)))
+    throw new Error("Invalid repository read arguments.");
+  signal.throwIfAborted();
+  const file = await openRouterFilePath(project, input);
+  if (name === "read_file") {
+    const text = await textFile(file),
+      lines = text.split(/\r?\n/),
+      start = (input.startLine ?? 1) - 1;
+    return {
+      path: input.path,
+      totalLines: lines.length,
+      text: lines.slice(start, start + (input.lineCount ?? 200))
+        .map((line, i) => `${start + i + 1}: ${line}`).join("\n").slice(0, 60000),
+    };
+  }
   const root = file,
     files = [];
   let visited = 0,
@@ -233,7 +247,7 @@ export async function callOpenRouterFile(ctx, name, input) {
     bytesRead = 0;
   async function walk(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
-      ctx.signal.throwIfAborted();
+      signal.throwIfAborted();
       if (++visited > 10000 || files.length >= 1000) {
         truncated = true;
         return;
@@ -260,6 +274,7 @@ export async function callOpenRouterFile(ctx, name, input) {
   const matches = [],
     needle = input.caseSensitive ? input.query : input.query.toLowerCase();
   for (const target of files) {
+    signal.throwIfAborted();
     let text;
     try {
       text = await textFile(target);
