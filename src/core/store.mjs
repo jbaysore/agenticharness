@@ -10,6 +10,7 @@ import { WatchStore } from "./watch-store.mjs";
 const historyScopes = ["none", "project", "all"];
 // A chat's newest run is its only possible active one: createRun refuses a second.
 const summary = `SELECT c.*, (SELECT scratch FROM projects WHERE id=c.project_id) AS directoryless, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
+  (SELECT r.provider FROM runs r WHERE r.conversation_id=c.id AND c.usage_stopped_at IS NOT NULL AND r.error=c.usage_stopped_reason ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1) AS usage_stopped_provider,
   (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals,
   (SELECT MAX(result_at) FROM background_watches w WHERE w.conversation_id=c.id) AS last_watch_at
   FROM conversations c LEFT JOIN runs l ON l.rowid=(SELECT r.rowid FROM runs r WHERE r.conversation_id=c.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)`;

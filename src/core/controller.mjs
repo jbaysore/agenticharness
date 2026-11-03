@@ -342,18 +342,18 @@ export class Controller extends EventEmitter {
         );
       if (!chat.usage_stopped_at)
         throw new Error("This chat is not stopped because usage ran out");
-      if (provider === chat.provider)
+      const stoppedProvider = chat.usage_stopped_provider ?? chat.provider;
+      if (provider === stoppedProvider)
         throw new Error(
           "Choose a different provider. This one is out of included usage.",
         );
       parsed = true;
       mode = mode ?? chat.mode;
       const from =
-        this.providers.find((p) => p.id === chat.provider)?.name ||
-        chat.provider;
+        this.providers.find((p) => p.id === stoppedProvider)?.name ||
+        stoppedProvider;
       const objective =
-        resumableGoals(chat).find((goal) => goal.provider === chat.provider)
-          ?.objective || null;
+        chat.sessions[stoppedProvider]?.goal?.objective || null;
       text = usageContinuationText({ from, mode, objective });
       if (mode === "goal") {
         continuedGoalObjective = objective || text;

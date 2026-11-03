@@ -754,7 +754,7 @@ export function ChatPane({
       (chat.mode === "goal" || chat.runs?.[0]?.id === goal.runId),
   );
   const continuationOptions = {
-    stoppedProvider: chat?.provider,
+    stoppedProvider: chat?.usage_stopped_provider ?? chat?.provider,
     mode: chat?.mode ?? mode,
   };
   const continuationChoices = continuationProviders(

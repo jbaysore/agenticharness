@@ -208,6 +208,9 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     resolveDone({ status: completedTurn.status, error: completedTurn.error });
   };
   const updateGoal = (status, objective) => {
+    // Keep Harness's complete objective when the native field is a reference.
+    if (objective === nativeGoalObjective && fullGoalObjective)
+      objective = fullGoalObjective;
     const next = normalizeGoalStatus(status);
     if (next !== reportedGoalStatus || objective)
       ctx.goalState?.(next, objective);
@@ -487,6 +490,12 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       finishCompleted();
     }
   });
+  const fullGoalObjective = ctx.goalObjective ?? ctx.session?.goal?.objective ?? ctx.text;
+  // Codex limits its native objective to 4,000 characters. Deliver the full
+  // requirements before goal/set can auto-start a turn, and use a reference.
+  const nativeGoalObjective = fullGoalObjective?.length > 4000
+    ? "Complete the full Harness goal supplied in the developer instructions. All requirements and completion criteria there remain binding; keep working until all are met."
+    : fullGoalObjective;
   let timer;
   try {
     const { account } = await rpc.call("account/read"),
@@ -504,7 +513,11 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       modelProvider: "openai",
       serviceTier: "default",
       ...codexExecutionPolicy(ctx.mode, ctx.permissions),
-      developerInstructions: ctx.instructions,
+      developerInstructions: goal
+        ? [ctx.instructions, ctx.addendum, ctx.handoff,
+            fullGoalObjective?.length > 4000 ? `Full Harness goal:\n${fullGoalObjective}` : ""]
+            .filter(Boolean).join("\n\n")
+        : ctx.instructions,
       config: {
         model_provider: "openai",
         forced_login_method: "chatgpt",
@@ -516,12 +529,26 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       })),
     };
     let response;
-    if (ctx.session?.id)
-      response = await rpc.call("thread/resume", {
-        ...options,
-        threadId: ctx.session.id,
-      });
-    else
+    if (ctx.session?.id) {
+      try {
+        response = await rpc.call("thread/resume", {
+          ...options,
+          threadId: ctx.session.id,
+        });
+      } catch (error) {
+        // thread/start can return an id before any rollout is persisted.
+        if (!/no rollout found for thread id/i.test(error.message)) throw error;
+        ctx.ensureHandoff?.();
+        options.developerInstructions = [options.developerInstructions, ctx.handoff]
+          .filter(Boolean).join("\n\n");
+        ctx.invalidatePromptDelivery?.();
+        ctx.session = undefined;
+        ctx.continuing = false;
+        ctx.resumeGoal = false;
+        ctx.goalObjective = fullGoalObjective;
+      }
+    }
+    if (!response)
       response = await rpc.call("thread/start", {
         ...options,
         allowProviderModelFallback: false,
@@ -562,7 +589,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
         ...(!ctx.continuing &&
           (!ctx.resumeGoal ||
             (goalStatus === "cleared" && ctx.goalObjective)) && {
-            objective: ctx.goalObjective ?? ctx.text,
+            objective: nativeGoalObjective,
           }),
         status: "active",
         origin: "user",
@@ -599,7 +626,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       const version = goalVersion;
       const { goal: set } = await rpc.call("thread/goal/set", {
         threadId,
-        objective: ctx.goalObjective,
+        objective: nativeGoalObjective,
         status: "active",
         origin: "user",
       });

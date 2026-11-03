@@ -1365,3 +1365,23 @@ test("a usage stop can continue on another provider without replacing a Goal", a
     store.close();
   }
 });
+
+test("usage continuation retries retain the stopped provider and its original Goal", async () => {
+  const store = new Store(':memory:'), controller = new Controller(store, {});
+  controller.providers = ['codex', 'claude'].map(id => ({id, models: [{id: 'm', efforts: []}]}));
+  const project = store.addProject('retry', process.cwd());
+  const chat = store.createConversation({projectId: project.id, provider: 'claude', model: 'm'});
+  try {
+    store.updateConversation(chat.id, {mode: 'goal'});
+    const run = store.createRun({conversationId: chat.id, actionId: 'original-usage-stop-run', provider: 'claude', model: 'm', text: 'Original goal'});
+    store.setRun(run.id, 'failed', null, 'Claude usage exhausted');
+    store.setGoalState(chat.id, 'claude', run.id, 'unknown', 'Original goal');
+    store.setUsageStop(chat.id, 'Claude usage exhausted');
+    store.updateConversation(chat.id, {provider: 'codex'});
+    store.setGoalState(chat.id, 'codex', 'failed-transfer', 'unknown', 'Generic continuation');
+    const prepared = controller.prepareSend(chat.id, {actionId: 'retry-usage-transfer', provider: 'codex', model: 'm', continueAfterUsage: true});
+    assert.equal(prepared.continuedGoalObjective, 'Original goal');
+    assert.match(prepared.text, /Original goal/);
+    assert.throws(() => controller.prepareSend(chat.id, {actionId: 'retry-stopped-provider', provider: 'claude', model: 'm', continueAfterUsage: true}), /different provider/);
+  } finally { await controller.close(); store.close(); }
+});

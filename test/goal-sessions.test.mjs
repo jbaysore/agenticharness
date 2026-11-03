@@ -711,3 +711,39 @@ test("Claude resumes a paused Goal by setting its saved objective again", async 
     "/goal Saved objective",
   );
 });
+
+test("Codex carries long Goals intact outside its bounded native field", async () => {
+  const objective = 'Full requirement. '.repeat(600);
+  const states = [];
+  const f = codexFixture({continuing: false, session: undefined, goalObjective: objective, handoff: 'Earlier progress', goalState: (status, text) => states.push(text)});
+  try {
+    await f.started;
+    const native = f.calls.find(c => c.method === 'thread/goal/set').params.objective;
+    assert.ok(native.length <= 4000);
+    const start = f.calls.find(c => c.method === 'thread/start');
+    assert.ok(start.params.developerInstructions.includes(objective));
+    assert.ok(start.params.developerInstructions.includes('Earlier progress'));
+    f.notify('thread/goal/updated', {goal: {status: 'active', objective: native}});
+    assert.ok(states.includes(objective));
+  } finally {
+    f.abort.abort(); f.rpc.close(); await f.run.catch(() => {});
+  }
+});
+
+test("Codex replaces only a thread with a confirmed missing rollout", async () => {
+  let handoff = false;
+  const f = codexFixture({resumeGoal: true, goalObjective: 'Original goal', ensureHandoff: () => {handoff = true;}});
+  const call = f.rpc.call;
+  f.rpc.call = async (method, params) => {
+    if (method === 'thread/resume') throw new Error('no rollout found for thread id native-goal');
+    return call(method, params);
+  };
+  try {
+    await f.started;
+    assert.ok(handoff);
+    assert.ok(f.calls.some(c => c.method === 'thread/start'));
+    assert.equal(f.calls.find(c => c.method === 'thread/goal/set').params.objective, 'Original goal');
+  } finally {
+    f.abort.abort(); f.rpc.close(); await f.run.catch(() => {});
+  }
+});
