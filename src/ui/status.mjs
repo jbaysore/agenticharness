@@ -36,14 +36,20 @@ export function chatMarker(chat) {
   if (chat?.status === "needs-approval") return "approval";
   if (chat?.status === "running") return "running";
   if (chat?.usage_stopped_at) return "usage";
+  if (chat?.unread && ["failed", "interrupted"].includes(chat.status))
+    return "failed";
+  // An in-progress host watch is the current activity. A finished watch is
+  // no longer flagged, so a plain unread result still surfaces on its own.
+  if (chat?.watching) return "watching";
   if (!chat?.unread) return null;
-  return ["failed", "interrupted"].includes(chat.status) ? "failed" : "unread";
+  return "unread";
 }
 export function chatMarkerLabel(marker) {
   return (
     {
       approval: "Waiting for your approval",
       running: "Working",
+      watching: "Watching CI",
       usage: "Stopped because usage ran out",
       failed: "Stopped before finishing",
       unread: "Finished since you last looked",
@@ -111,7 +117,7 @@ export function pinnedChats(conversations) {
   );
 }
 export function activeChats(conversations) {
-  const order = ["approval", "usage", "failed", "unread", "running"];
+  const order = ["approval", "usage", "failed", "unread", "watching", "running"];
   return conversations
     .filter((c) => !c.archived_at && chatMarker(c))
     .sort(
@@ -138,8 +144,9 @@ export function workspacePeersLabel(peers) {
     : "";
 }
 export function attentionCount(conversations) {
-  return activeChats(conversations).filter((c) => chatMarker(c) !== "running")
-    .length;
+  return activeChats(conversations).filter(
+    (c) => !["running", "watching"].includes(chatMarker(c)),
+  ).length;
 }
 // Remaining included usage, one row per reported limit window. An exhausted
 // reading still carries those windows; only a reading with no percents is blank.

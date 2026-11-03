@@ -82,6 +82,31 @@ test("a chat is marked by what it needs, and a seen result is no longer marked",
   assert.equal(chatMarker({ status: "idle", unread: true }), "unread");
   assert.equal(chatMarker({ status: "idle", unread: false }), null);
   assert.equal(
+    chatMarker({ status: "idle", unread: false, watching: true }),
+    "watching",
+  );
+  assert.equal(
+    chatMarker({ status: "idle", unread: true, watching: true }),
+    "watching",
+  );
+  assert.equal(
+    chatMarker({ status: "failed", unread: true, watching: true }),
+    "failed",
+  );
+  assert.equal(
+    chatMarker({ status: "running", unread: false, watching: true }),
+    "running",
+  );
+  assert.equal(
+    chatMarker({
+      status: "idle",
+      unread: false,
+      watching: true,
+      usage_stopped_at: "2026-01-02T00:00:00.000Z",
+    }),
+    "usage",
+  );
+  assert.equal(
     chatMarker({
       status: "failed",
       unread: false,
@@ -105,8 +130,9 @@ test("a chat is marked by what it needs, and a seen result is no longer marked",
     "running",
   );
   assert.equal(chatMarker(undefined), null);
-  for (const marker of ["approval", "running", "usage", "failed", "unread"])
+  for (const marker of ["approval", "running", "watching", "usage", "failed", "unread"])
     assert.ok(chatMarkerLabel(marker));
+  assert.equal(chatMarkerLabel("watching"), "Watching CI");
   assert.equal(chatMarkerLabel(null), "");
 });
 
@@ -122,6 +148,7 @@ test("the active list puts chats that need you first and leaves out archived one
     chat("quiet", "idle", false),
     chat("working", "running", false),
     chat("finished", "idle", true),
+    chat("ci", "idle", true, { watching: true }),
     chat("broken", "failed", true),
     chat("asking", "needs-approval", false),
     chat("limited", "failed", false, {
@@ -131,7 +158,7 @@ test("the active list puts chats that need you first and leaves out archived one
   ];
   assert.deepEqual(
     activeChats(conversations).map((c) => c.id),
-    ["asking", "limited", "broken", "finished", "working"],
+    ["asking", "limited", "broken", "finished", "ci", "working"],
   );
   assert.equal(attentionCount(conversations), 4);
   assert.equal(attentionCount([]), 0);

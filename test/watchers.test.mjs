@@ -136,6 +136,7 @@ test("host polling uses no model; missing checks stay pending and terminal resul
     f.end();
     await f.controller.watchers.tick();
     assert.equal(f.store.watchStore.get(watch.id).status, "pending");
+    assert.equal(f.store.conversation(f.chat.id).watching, true);
     f.advance();
     f.result = terminal();
     await f.controller.watchers.tick();
@@ -146,6 +147,7 @@ test("host polling uses no model; missing checks stay pending and terminal resul
     f.advance(1);
     await f.controller.watchers.tick();
     assert.equal(f.store.watchStore.get(watch.id).status, "success");
+    assert.equal(f.store.conversation(f.chat.id).watching, false);
     assert.equal(modelCalls, 0);
     assert.equal(f.store.conversation(f.chat.id).unread, true);
     f.store.markRead(f.chat.id);

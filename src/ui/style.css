@@ -612,8 +612,9 @@ small {
   color: var(--text-3);
   flex-shrink: 0;
 }
-/* Markers differ in shape as well as color: a breathing dot works, a white dot is new,
-   yellow "!" needs Josh, "0" ran out of usage, red "×" stopped. */
+/* Markers differ in shape as well as color: a filled breathing dot is a model
+   turn, a hollow ring is CI monitoring, a white dot is new, yellow "!" needs
+   Josh, "0" ran out of usage, red "×" stopped. */
 .chat-marker {
   display: inline-flex;
   align-items: center;
@@ -631,6 +632,13 @@ small {
   width: 8px;
   height: 8px;
   background: var(--agent);
+  animation: breathe 2.4s var(--ease) infinite;
+}
+.chat-marker.marker-watching {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-2);
   animation: breathe 2.4s var(--ease) infinite;
 }
 .chat-marker.marker-approval,
@@ -1927,7 +1935,20 @@ small {
 .watch-cards { display: grid; gap: 10px; margin: 18px 0; }
 .watch-trigger { margin: 18px 0; color: var(--muted); font-size: 13px; }
 .watch-card { border: 1px solid var(--line-strong); border-radius: 10px; padding: 12px 14px; font-size: 13px; overflow-wrap: anywhere; }
-.watch-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.watch-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.watch-pulse {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-2);
+  animation: breathe 2.4s var(--ease) infinite;
+}
+.watch-card.success .watch-title strong { color: var(--add); }
+.watch-card.failure .watch-title strong { color: var(--danger-ink); }
+.watch-card.cancelled .watch-title strong,
+.watch-card.expired .watch-title strong { color: var(--text-3); }
 .watch-title code, .watch-times { color: var(--muted); font-size: 12px; }
 .watch-card p { margin: 7px 0; }
 .watch-card details { margin-top: 8px; }

@@ -503,9 +503,14 @@ still apply when a continuation starts. An interrupted continuation is never
 automatically replayed after a restart.
 
 Watcher cards show the watched revision, result, check times, expiry and
-follow-up state. Their results mark the chat unread independently of model
-turns. **Cancel watch** stops monitoring; **Continue with agent** explicitly
-starts a turn on the watcher's provider and model in the chat's current mode.
+follow-up state. While a watch is still running, its card carries a hollow
+breathing ring and the sidebar marks the chat **Watching CI**. That mark is
+activity, not a request for attention: an approval, a running turn, a usage
+stop, or an unread failure takes its place. A model turn hides the card's ring
+so the working indicator stays the one live pulse. Finished results still mark
+the chat unread independently of model turns. **Cancel watch** stops
+monitoring; **Continue with agent** explicitly starts a turn on the watcher's
+provider and model in the chat's current mode.
 
 ## Browser for agents
 

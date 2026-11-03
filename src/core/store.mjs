@@ -12,6 +12,7 @@ const historyScopes = ["none", "project", "all"];
 const summary = `SELECT c.*, (SELECT scratch FROM projects WHERE id=c.project_id) AS directoryless, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
   (SELECT r.provider FROM runs r WHERE r.conversation_id=c.id AND c.usage_stopped_at IS NOT NULL AND r.error=c.usage_stopped_reason ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1) AS usage_stopped_provider,
   (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals,
+  (SELECT count(*) FROM background_watches w WHERE w.conversation_id=c.id AND w.status IN ('registering','pending','settling','retrying')) AS active_watches,
   (SELECT MAX(result_at) FROM background_watches w WHERE w.conversation_id=c.id) AS last_watch_at
   FROM conversations c LEFT JOIN runs l ON l.rowid=(SELECT r.rowid FROM runs r WHERE r.conversation_id=c.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)`;
 
@@ -28,16 +29,29 @@ export function chatStatus(row) {
     unread:
       (!!row.last_watch_at && row.last_watch_at > (row.read_at ?? "")) ||
       (!active && !!row.last_ended_at && row.last_ended_at > (row.read_at ?? "")),
+    watching: Number(row.active_watches) > 0,
   };
 }
 
-function summarize({ last_status, last_ended_at, pending_approvals, ...c }) {
+function summarize({
+  last_status,
+  last_ended_at,
+  pending_approvals,
+  active_watches,
+  ...c
+}) {
   return {
     ...c,
     directoryless: Boolean(c.directoryless),
     sessions: JSON.parse(c.sessions),
     worktree: c.worktree ? JSON.parse(c.worktree) : null,
-    ...chatStatus({ ...c, last_status, last_ended_at, pending_approvals }),
+    ...chatStatus({
+      ...c,
+      last_status,
+      last_ended_at,
+      pending_approvals,
+      active_watches,
+    }),
   };
 }
 

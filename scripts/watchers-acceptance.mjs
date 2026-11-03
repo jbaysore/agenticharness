@@ -135,6 +135,12 @@ try {
   await app.controller.watchers.tick();
   await expect(cards).toContainText("Waiting for CI");
   await expect(cards).toContainText("Notification only");
+  await expect(cards.getByRole("img", { name: "Watching CI" })).toBeVisible();
+  await expect(
+    page
+      .getByLabel("Active chats")
+      .getByRole("img", { name: "Notification-only CI: Watching CI" }),
+  ).toBeVisible();
   expect(modelCalls).toBe(1);
   await expect(
     page.getByRole("button", { name: "Stop work", exact: true }),

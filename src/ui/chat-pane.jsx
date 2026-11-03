@@ -802,7 +802,7 @@ export function ChatPane({
         >
           <span className={"provider-dot " + (chat?.provider ?? provider)} />
           <strong title={title}>{title}</strong>
-          {["approval", "running", "usage"].includes(marker) && (
+          {["approval", "running", "watching", "usage"].includes(marker) && (
             <span
               className={"chat-marker marker-" + marker}
               role="img"
