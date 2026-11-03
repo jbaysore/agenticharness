@@ -3376,7 +3376,8 @@ button:has(> .tab-dot) {
   font-size: 12px;
   color: var(--text-2);
 }
-.history-settings {
+.history-settings,
+.sound-settings {
   border-top: 1px solid var(--line-stronger);
   padding-top: 18px;
   margin-top: 22px;
@@ -3387,10 +3388,23 @@ button:has(> .tab-dot) {
   width: 100%;
   max-width: 320px;
 }
-.history-settings p {
+.history-settings p,
+.sound-settings p {
   font-size: 12px;
   color: var(--muted);
   margin: 10px 0 0;
+}
+.sound-settings label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.sound-settings input {
+  width: auto;
+  margin: 0;
+}
+.sound-settings button {
+  margin-top: 12px;
 }
 .export-link {
   display: block;

@@ -25,6 +25,11 @@ Pick a project in the sidebar, then choose an agent and model in the composer.
 Before sending the first message, click the folder path or **Change** above the
 composer to choose an existing project or enter another directory. Your draft,
 attachments, and model settings stay with the conversation.
+Completed agent turns play a short, soft chime, including chats outside the
+current view. In **Connections & usage → Sounds**, turn it off or use **Preview
+sound** to hear it. The preference stays in this browser. Audio becomes available
+after you first click or press a key in the app; browser or system mute settings
+still apply.
 The picker comes from the connected native integrations. No model or effort is
 selected until you choose one. Supported effort choices
 change with the model. Cursor's effort control stays disabled and uses each model's

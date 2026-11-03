@@ -8,6 +8,7 @@ import { api } from "./api.mjs";
 import { resolveFileLink } from "./file-links.mjs";
 import { mergeContextSnapshots } from "./context.mjs";
 import { serverClock } from "./clock.mjs";
+import { createTurnSound } from "./turn-sound.mjs";
 import { Icon, Mark, Modal } from "./components.jsx";
 import { ChatPane } from "./chat-pane.jsx";
 import { ChatRow } from "./chat-row.jsx";
@@ -100,6 +101,9 @@ const loadedBuild = new URL(
 ).searchParams.get("v");
 
 function App() {
+  const [turnSound] = useState(createTurnSound);
+  const [soundEnabled, setSoundEnabled] = useState(turnSound.isEnabled);
+  useEffect(() => turnSound.listen(setSoundEnabled), [turnSound]);
   const [state, setState] = useState({
       projects: [],
       conversations: [],
@@ -570,6 +574,7 @@ function App() {
       const e = JSON.parse(event.data);
       if (e.id <= lastEvent.current) return;
       lastEvent.current = e.id;
+      turnSound.completed(e);
       if (e.type === "providers")
         setState((s) => ({ ...s, providers: e.payload.providers }));
       if (e.type === "self-restart") {
@@ -1917,6 +1922,27 @@ function App() {
               onSaved={refresh}
             />
           )}
+          <section className="sound-settings">
+            <h3>Sounds</h3>
+            <label>
+              <input
+                type="checkbox"
+                checked={soundEnabled}
+                aria-describedby="sound-settings-help"
+                onChange={(e) => {
+                  turnSound.setEnabled(e.target.checked);
+                  setSoundEnabled(e.target.checked);
+                }}
+              />
+              Play a sound when an agent finishes
+            </label>
+            <p id="sound-settings-help">
+              A soft chime for completed turns in any chat. Saved in this browser.
+            </p>
+            <button className="secondary" onClick={() => turnSound.preview()}>
+              Preview sound
+            </button>
+          </section>
           <section className="history-settings">
             <h3>Conversation history</h3>
             <label>
