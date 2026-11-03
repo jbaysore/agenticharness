@@ -1924,6 +1924,18 @@ small {
   field-sizing: content;
   max-width: none;
 }
+.watch-cards { display: grid; gap: 10px; margin: 18px 0; }
+.watch-trigger { margin: 18px 0; color: var(--muted); font-size: 13px; }
+.watch-card { border: 1px solid var(--line-strong); border-radius: 10px; padding: 12px 14px; font-size: 13px; overflow-wrap: anywhere; }
+.watch-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.watch-title code, .watch-times { color: var(--muted); font-size: 12px; }
+.watch-card p { margin: 7px 0; }
+.watch-card details { margin-top: 8px; }
+.watch-card ul { padding-left: 20px; }
+.watch-actions { display: flex; gap: 8px; margin-top: 8px; }
+.watch-actions:empty { display: none; }
+.watch-actions button { font-size: 12px; }
+
 /* Ask, plan and goal change how the agent works, so they read like Override. */
 .mode-control.ask select,
 .mode-control.plan select,

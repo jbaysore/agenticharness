@@ -5,6 +5,7 @@ const stopped = new Set([
   "usageLimited",
   "budgetLimited",
   "cleared",
+  "waiting",
 ]);
 
 export function goalStopped(status) {
@@ -37,7 +38,7 @@ export function blockingGoals(chat) {
 
 // A Goal the user paused, or one a usage limit stopped, can pick up where it
 // left off. Codex keeps the objective natively; Claude needs the saved one.
-const resumable = new Set(["paused", "usageLimited"]);
+const resumable = new Set(["paused", "usageLimited", "waiting"]);
 
 export function resumableGoals(chat) {
   return sessionGoals(chat).filter(

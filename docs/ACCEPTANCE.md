@@ -62,6 +62,14 @@ across reload after both a lost response and an unreceived request.
 
 - `npm test`: no paid or included inference. Unit/state fixtures plus actual local
   HTTP, filesystem and child-process tests.
+- `npm run test:watchers`: real headless Edge and isolated HTTP/SQLite, simulated
+  CI and providers, no inference. Passed notification-only completion, unread
+  results while the page is closed, reload, manual continuation, cancellation,
+  Goal suspension/resumption and mobile layout. Unit fixtures cover conditional
+  requests, pagination, reruns, revision changes, restart recovery, usage limits,
+  three-continuation caps and one automatic agent at a time. A read-only smoke
+  check through the installed GitHub CLI also retrieved real CI twice with the
+  same result; it made no GitHub changes and called no models.
 - `npm run test:terminal`: real Edge and Windows ConPTY, no inference. Passed
   PowerShell/Command Prompt execution, native copy/paste shortcuts, clipboard
   buttons, Ctrl+C interruption, tab/pane lifecycle and replay after reload.

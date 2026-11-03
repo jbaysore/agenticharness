@@ -35,6 +35,7 @@ import {
 } from "./core/memory-web.mjs";
 import { ASK_DENY, askHostAllowed } from "./core/modes.mjs";
 import { hostTools } from "./core/host-tools.mjs";
+import { isWatchTool } from "./core/watch-tools.mjs";
 import { Browser, isBrowserTool } from "./core/browser.mjs";
 import { serveBrowserScreenshot } from "./core/browser-images.mjs";
 import { browserStreams } from "./core/browser-stream.mjs";
@@ -96,6 +97,7 @@ export async function createHarness({
   closeStepMs = 3000,
   seedProject = process.env.HARNESS_INITIAL_PROJECT,
   openrouterOptions = {},
+  watcherOptions = {},
 } = {}) {
   if (publicOrigin) {
     const url = new URL(publicOrigin);
@@ -296,6 +298,8 @@ export async function createHarness({
           chat = store.conversation(chatId);
         if (chat?.mode === "ask" && !askHostAllowed(body.name))
           return json(res, 403, { error: ASK_DENY });
+        if (isWatchTool(body.name))
+          return json(res, 200, controller.watchers.handle(chatId, body.name, body.arguments ?? {}));
         if (body.name === "move_chat")
           return json(
             res,
@@ -711,6 +715,7 @@ export async function createHarness({
               if (controller.active.has(id))
                 throw new Error("Stop the turn before archiving this chat");
               store.setArchived(id, body.archived === true);
+              if (body.archived === true) controller.watchers.invalidate(id, "This chat was archived.", true);
             }
             if (body.pinned !== undefined)
               store.setPinned(id, body.pinned === true);
@@ -744,6 +749,10 @@ export async function createHarness({
           method === "DELETE"
         )
           return json(res, 200, controller.removeQueued(match[1], match[2]));
+        if ((match = path.match(/^\/api\/chats\/([^/]+)\/watches\/([^/]+)(\/continue)?$/))) {
+          if (method === "DELETE" && !match[3]) return json(res, 200, controller.watchers.cancel(match[1], match[2]));
+          if (method === "POST" && match[3]) return json(res, 202, controller.watchers.continue(match[1], match[2], await readJson(req)));
+        }
         if (
           (match = path.match(/^\/api\/chats\/([^/]+)\/messages$/)) &&
           method === "POST"
@@ -1082,7 +1091,9 @@ export async function createHarness({
     openReviewer,
     openrouter,
     memoryWeb: enableMemoryWeb ? new MemoryWeb() : null,
+    watcherOptions,
   });
+  if (startProviders) controller.watchers.start();
   controller.memoryWeb?.startMaintenance();
   controller.providers = [await openrouter.inspect()];
   controller.tidyAll();

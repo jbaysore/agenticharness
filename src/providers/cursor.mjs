@@ -673,6 +673,7 @@ export async function runCursor(ctx, deps = {}) {
         : result.stopReason;
     if (isUsageExhausted(error))
       ctx.emit("work", { kind: "billing-stop", reason: error });
+    if (ctx.signal.reason?.kind === "watch-yield" && ["cancelled", "end_turn"].includes(result.stopReason)) ctx.watchParked?.();
     return {
       status:
         ctx.signal.aborted || result.stopReason === "cancelled"

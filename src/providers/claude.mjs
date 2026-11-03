@@ -15,6 +15,7 @@ import { memoryTools } from "../core/memory-web.mjs";
 import { claudeQuestionAnswers } from "../core/questions.mjs";
 import { proposalText } from "../core/plans.mjs";
 import { goalStopped } from "../core/goals.mjs";
+import { watchTools } from "../core/watch-tools.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { claudeContent } from "./attachments.mjs";
@@ -400,6 +401,17 @@ export async function runClaude(
             { alwaysLoad: true },
           ),
         ),
+      ...(ctx.tools ?? []).filter((t) => watchTools.some((w) => w.name === t.name)).map((t) =>
+        tool(t.name, t.description, {
+          watch_github_ci: {
+            repository: z.string(), commit: z.string().optional(), pr: z.number().int().positive().optional(),
+            resumeOn: z.array(z.enum(["success", "failure", "complete"])).max(3).optional(),
+            continuation: z.string().max(2000).optional(), expiryHours: z.number().min(0.25).max(24).optional(),
+          },
+          list_watches: { id: z.string().optional() },
+          cancel_watch: { id: z.string() },
+          yield_to_watch: { ids: z.array(z.string()).min(1).max(10), checkpoint: z.string().min(1).max(2000) },
+        }[t.name], async (args) => ({ content: [{ type: "text", text: JSON.stringify(await ctx.history(t.name, args)) }] }))),
       // Offered only on turns where the user's rules allow a hand-off.
       ...(ctx.tools ?? [])
         .filter((t) => delegationShapes[t.name])
@@ -837,6 +849,7 @@ export async function runClaude(
               : "completed",
           error: stopped || event.errors?.join("\n"),
         };
+        if (ctx.signal.reason?.kind === "watch-yield") ctx.watchParked?.();
         if (
           result.status === "completed" &&
           (ctx.mode === "goal" || goalStatus === "active") &&

@@ -77,6 +77,8 @@ import { ActionReviewer } from "./reviewer.mjs";
 import { PlanReviewer } from "./plan-review.mjs";
 import { hostTools, hostToolsKey, toolFingerprint } from "./host-tools.mjs";
 import { blockingGoals, goalStopped, resumableGoals } from "./goals.mjs";
+import { Watchers } from "./watchers.mjs";
+import { isWatchTool, WATCH_INSTRUCTIONS } from "./watch-tools.mjs";
 import { isUsageExhausted } from "../security/billing.mjs";
 import { usageWindows } from "../ui/status.mjs";
 import {
@@ -107,6 +109,7 @@ export class Controller extends EventEmitter {
       openReviewer: openReviewerOption = null,
       openrouter = null,
       memoryWeb = null,
+      watcherOptions = {},
     },
   ) {
     super();
@@ -157,6 +160,7 @@ export class Controller extends EventEmitter {
     this.goalQuestionTimeoutMs = GOAL_QUESTION_TIMEOUT_MS;
     this.runCommand = runCommand;
     store.recover();
+    this.watchers = new Watchers(this, watcherOptions);
     this.reliability = new Reliability(this);
   }
   event(chatId, runId, type, payload) {
@@ -271,11 +275,16 @@ export class Controller extends EventEmitter {
     }
     return next;
   }
-  send(chatId, input, releasing = false) {
+  send(chatId, input, releasing = false, watchOrigin = null) {
     const prepared = this.prepareSend(chatId, input);
     if (prepared.duplicate) return prepared.duplicate;
     this.selfRestart?.assertAdmission();
     const active = this.active.get(chatId);
+    if (!releasing && (!watchOrigin || watchOrigin.manual)) {
+      this.watchers.invalidate(chatId, "New user instructions superseded automatic follow-up.");
+      if (active) active.supersededByUser = true;
+    }
+    prepared.watchOrigin = watchOrigin;
     if (
       prepared.resumeGoal &&
       (active || this.store.queuedInputs(chatId).length)
@@ -434,7 +443,8 @@ export class Controller extends EventEmitter {
       actionId: prepared.actionId,
       provider: prepared.provider,
       model: prepared.model,
-      text: prepared.text,
+      text: prepared.watchOrigin ? this.watchers.displayText(prepared.watchOrigin.id) : prepared.text,
+      source: prepared.watchOrigin ? "watcher" : null,
       attachments: prepared.files.map(attachmentInfo),
     });
     const abort = new AbortController();
@@ -446,6 +456,7 @@ export class Controller extends EventEmitter {
       continueAfterUsage: prepared.continueAfterUsage,
       continuedGoalObjective: prepared.continuedGoalObjective,
       continuedGoalPrompt: prepared.continuedGoalPrompt,
+      watchOrigin: prepared.watchOrigin,
     });
     const entry = this.active.get(chatId);
     entry.flushSteer = () => this.flushSteers(chatId);
@@ -509,6 +520,8 @@ export class Controller extends EventEmitter {
       mode: prepared.mode,
       status: "steered",
     });
+    active.taskRootId = prepared.actionId;
+    active.supersededByUser = false;
     active.pendingSteers ??= [];
     active.pendingSteers.push({
       id: row.id,
@@ -612,6 +625,11 @@ export class Controller extends EventEmitter {
     const updated = this.store.updateConversation(chatId, { permissions }),
       active = this.active.get(chatId);
     if (active && !active.cancelled) {
+      if (active.watchYield) {
+        clearTimeout(active.watchYield.timer);
+        active.watchYield = null;
+        this.watchers.invalidate(chatId, "Permission settings changed while the turn was yielding.");
+      }
       // Native permission policies can be frozen for a turn. Interrupt before
       // resuming the same session so the entire mode, including its sandbox,
       // applies to the next action. Keep the same Harness run and user message.
@@ -639,6 +657,7 @@ export class Controller extends EventEmitter {
     const chat = this.store.conversation(chatId);
     if (!chat) throw new Error("Conversation not found");
     checkMode(mode, chat.provider);
+    if (mode !== chat.mode) this.watchers.invalidate(chatId, "The chat mode changed. Automatic follow-up was revoked.");
     return this.store.updateConversation(chatId, { mode });
   }
   // The folder a chat works in: its own worktree, created on its first turn,
@@ -724,6 +743,7 @@ export class Controller extends EventEmitter {
     if (sameDirectory(path, home.path))
       return { queued: false, moved: false, directory: path };
     active.pendingMove = { path };
+    this.watchers.invalidate(chatId, "The chat is moving to another directory.", true);
     return {
       queued: true,
       directory: path,
@@ -1415,6 +1435,7 @@ export class Controller extends EventEmitter {
       chat.mode === "ask" ? "" : commandInstructions(project),
       this.memoryWeb ? MEMORY_INSTRUCTIONS : "",
       QUESTION_INSTRUCTIONS,
+      WATCH_INSTRUCTIONS,
       chat.mode === "plan" ? PLAN_INSTRUCTIONS : "",
       standingInstructions(rules),
       chat.mode === "goal" ? GOAL_INSTRUCTIONS : MODE_SUGGESTION_INSTRUCTIONS,
@@ -1572,6 +1593,10 @@ export class Controller extends EventEmitter {
         );
         this.event(chat.id, run.id, "chat", updated);
       },
+      watchParked: () => {
+        if (abort.signal.reason?.kind === "watch-yield" && this.active.get(chat.id)?.run.id === run.id)
+          this.active.get(chat.id).watchParkAcknowledged = true;
+      },
       history: async (name, args) => {
         const input =
           typeof args === "string" ? JSON.parse(args) : (args ?? {});
@@ -1580,6 +1605,7 @@ export class Controller extends EventEmitter {
         if (name === "suggest_mode") return suggestMode(input);
         if (name === "ask_user") return askUser(input);
         if (name === "run_command") return command(input);
+        if (isWatchTool(name)) return this.watchers.handle(chat.id, name, input);
         if (name === "restart_harness")
           return this.requestSelfRestart(chat.id).catch((failure) => ({
             error: failure.message,
@@ -1712,7 +1738,14 @@ export class Controller extends EventEmitter {
         nextModeChange,
       );
     }
-    if (active?.goalStopRequested) this.store.stopGoals(chat.id);
+    const parked = Boolean(active?.watchYield && active.watchParkAcknowledged && !active.cancelled && !usageStopReason && !billingStop);
+    if (active?.watchYield) clearTimeout(active.watchYield.timer);
+    if (parked) {
+      status = "completed";
+      error = null;
+      if (chat.mode === "goal") this.store.setGoalState(chat.id, run.provider, run.id, "waiting");
+      this.watchers.parked(chat.id, active);
+    } else if (active?.goalStopRequested) this.store.stopGoals(chat.id);
     else {
       const goal = this.store.conversation(chat.id)?.sessions[run.provider]
         ?.goal;
@@ -1736,6 +1769,13 @@ export class Controller extends EventEmitter {
       status = "failed";
       error = usageStopReason;
       this.store.setUsageStop(chat.id, usageStopReason);
+    }
+    if (active?.watchYield && !parked) {
+      this.watchers.invalidate(chat.id, "The turn did not confirm suspension. CI will only notify.");
+      if (!active.cancelled && !usageStopReason && !billingStop) {
+        status = "failed";
+        error ||= "The agent did not confirm suspension. CI is notification only; continue manually.";
+      }
     }
     this.store.setRun(run.id, status, null, error ?? null);
     this.requeuePending(active);
@@ -1761,6 +1801,7 @@ export class Controller extends EventEmitter {
     this.event(chat.id, null, "chat", this.store.conversation(chat.id));
     if (!active?.pendingMove && project?.worktree) this.tidy(chat.id);
     this.releaseQueue(chat.id);
+    this.watchers.kick();
   }
   // A Goal question waits out its deadline, then the agent chooses. Any other
   // call still waits until the user answers or the turn stops.
@@ -2056,6 +2097,7 @@ export class Controller extends EventEmitter {
     return this.store.approval(id);
   }
   cancel(chatId) {
+    this.watchers.invalidate(chatId, "Stop revoked automatic follow-up.");
     const active = this.active.get(chatId);
     if (active) {
       active.cancelled = true;
@@ -2077,6 +2119,7 @@ export class Controller extends EventEmitter {
   }
   async close() {
     clearTimeout(this.providerTimer);
+    await this.watchers.close();
     this.openrouter?.off("change", this.openrouterChanged);
     this.openrouter?.close();
     for (const { abort } of this.planReviewJobs.values()) abort.abort();

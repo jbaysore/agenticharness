@@ -204,6 +204,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     )
       return;
     finished = true;
+    if (ctx.signal.reason?.kind === "watch-yield" && ((!goal && goalStatus === null) || goalStopped(goalStatus))) ctx.watchParked?.();
     resolveDone({ status: completedTurn.status, error: completedTurn.error });
   };
   const updateGoal = (status, objective) => {

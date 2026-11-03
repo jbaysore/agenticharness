@@ -444,6 +444,47 @@ inside compound scripts, the agent sets `isolateDependencies: true` to detach a
 shared `node_modules` link before execution. A declined request leaves the link
 intact. Real test failures, missing files and search exit codes remain visible.
 
+## Background CI watchers
+
+Agents can register `watch_github_ci` for a full commit SHA or a pull-request
+snapshot on github.com, inspect it with `list_watches`, and stop it with
+`cancel_watch`. The Windows host uses the existing GitHub CLI sign-in. No model
+is called to poll, compare results or post notifications. Monitoring requires
+the Harness host to be running; closing a browser pane or ending an agent turn
+does not stop it. Saved watchers resume after a host restart or sleep without
+replaying missed polls. Initial lookup or access failures are visible in chat.
+
+Notification only is the default. When the existing task authorizes follow-up,
+the agent sets `resumeOn` (`success`, `failure`, or `complete`) and a short
+continuation, then calls `yield_to_watch` with a checkpoint after other useful
+work ends. Only yielding arms the follow-up. A native Goal is interrupted and
+confirmed stopped before its saved state becomes **waiting for CI**; its
+objective is retained, and Codex resumes its native budget instead of setting
+a new one. Confirmed waits do not block Harness updates. An unconfirmed stop
+keeps the existing Goal hold and downgrades CI to notification only.
+
+The host reads check runs, commit statuses and workflow runs, including
+pagination and current rerun attempts. Empty checks stay pending; completed
+results need two matching observations at least a minute apart. A changed PR
+revision supersedes its watcher. Polls share identical targets, use conditional
+requests and serialize GitHub access. The interval starts at one minute, grows
+to two after ten minutes and five after an hour, and respects GitHub rate-limit
+headers. Expiry defaults to six hours, with a maximum of 24 hours.
+
+A watcher can start one follow-up, with three automatic continuations allowed
+per original user request and only one watcher-triggered agent running at a
+time. Further results offer **Continue with agent**. No provider switch or paid
+fallback occurs. Stop revokes wakeups; new user instructions or changed modes
+downgrade them to notifications. Archiving or moving the chat cancels watchers.
+Ask and Plan watchers only notify. Current permissions and provider usage gates
+still apply when a continuation starts. An interrupted continuation is never
+automatically replayed after a restart.
+
+Watcher cards show the watched revision, result, check times, expiry and
+follow-up state. Their results mark the chat unread independently of model
+turns. **Cancel watch** stops monitoring; **Continue with agent** explicitly
+starts a turn on the watcher's provider and model in the chat's current mode.
+
 ## Browser for agents
 
 Every Codex, Claude Code and Cursor chat can drive a browser through one

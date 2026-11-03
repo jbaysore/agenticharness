@@ -4,6 +4,7 @@ import { commandTool } from "./command-tool.mjs";
 import { modeSuggestionTool } from "./modes.mjs";
 import { landTool } from "./worktrees.mjs";
 import { restartTool } from "./self-restart.mjs";
+import { watchTools } from "./watch-tools.mjs";
 
 // Harness's own tools, offered to every agent in every mode. A mode or a
 // chat's situation decides what a call may do when it is made, not which
@@ -16,6 +17,7 @@ export const hostTools = [
   modeSuggestionTool,
   landTool,
   restartTool,
+  ...watchTools,
 ];
 
 // A Codex thread keeps the tools it started with. A thread started under a

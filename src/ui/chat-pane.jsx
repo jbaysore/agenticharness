@@ -41,6 +41,7 @@ import { StepSummary } from "./steps.jsx";
 import { IssueButton } from "./reliability.jsx";
 import { interleave } from "../core/steps.mjs";
 import { blockingGoals, resumableGoals } from "../core/goals.mjs";
+import { WatchCards } from "./watch-cards.jsx";
 
 // A turn's byline names the agent once, and the model only when it changed.
 // Below it the turn reads in order: short progress updates, each followed by
@@ -122,6 +123,7 @@ function UserTurn({ message }) {
   const [open, setOpen] = useState(false),
     text = message.content ?? "",
     long = text.length > 520 || text.split("\n").length > 6;
+  if (message.source === "watcher") return <div className="watch-trigger" role="note" id={message.id}>{text}</div>;
   return (
     <article
       className={"message user" + (long && !open ? " clamped" : "")}
@@ -887,6 +889,7 @@ export function ChatPane({
         ) : (
           <Conversation chat={chat} onOpenWork={onOpenWork} />
         )}
+        <WatchCards chat={chat} reload={reload} refresh={refresh} report={report} />
         {chat?.activeRun &&
           chat.steps?.[chat.activeRun.id]?.length > 0 &&
           !chat.messages.some(
@@ -989,7 +992,7 @@ export function ChatPane({
               <strong>
                 {goal.status === "usageLimited"
                   ? "Goal stopped at a usage limit."
-                  : "Goal paused."}
+                  : goal.status === "waiting" ? "Goal waiting for CI." : "Goal paused."}
               </strong>{" "}
               {goal.objective && (
                 <span className="goal-objective" title={goal.objective}>
@@ -1230,7 +1233,7 @@ export function ChatPane({
               onOpenConnections={onOpenConnections}
             />
             <span className="composer-spacer" />
-            {(chat?.activeRun || blockingGoals(chat).length > 0) && (
+            {(chat?.activeRun || blockingGoals(chat).length > 0 || chat?.watches?.some((w) => w.armed)) && (
               <button
                 type="button"
                 className="send-button stopping"

@@ -5,11 +5,13 @@ import { dirname } from "node:path";
 import { buildSteps, settle } from "./steps.mjs";
 import { provisionalTitle } from "./history.mjs";
 import { blockingGoals, goalStatus, sessionGoals } from "./goals.mjs";
+import { WatchStore } from "./watch-store.mjs";
 
 const historyScopes = ["none", "project", "all"];
 // A chat's newest run is its only possible active one: createRun refuses a second.
 const summary = `SELECT c.*, (SELECT scratch FROM projects WHERE id=c.project_id) AS directoryless, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
-  (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals
+  (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals,
+  (SELECT MAX(result_at) FROM background_watches w WHERE w.conversation_id=c.id) AS last_watch_at
   FROM conversations c LEFT JOIN runs l ON l.rowid=(SELECT r.rowid FROM runs r WHERE r.conversation_id=c.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)`;
 
 export function chatStatus(row) {
@@ -23,7 +25,8 @@ export function chatStatus(row) {
         ? row.last_status
         : "idle",
     unread:
-      !active && !!row.last_ended_at && row.last_ended_at > (row.read_at ?? ""),
+      (!!row.last_watch_at && row.last_watch_at > (row.read_at ?? "")) ||
+      (!active && !!row.last_ended_at && row.last_ended_at > (row.read_at ?? "")),
   };
 }
 
@@ -86,11 +89,14 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS queued_inputs_conversation ON queued_inputs(conversation_id, position);
     `);
+    this.watchStore = new WatchStore(this.db);
     const columns = (table) =>
       this.db
         .prepare(`PRAGMA table_info(${table})`)
         .all()
         .map((c) => c.name);
+    if (!columns("messages").includes("source"))
+      this.db.exec("ALTER TABLE messages ADD COLUMN source TEXT");
     if (!columns("messages").includes("attachments"))
       this.db.exec(
         "ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
@@ -362,7 +368,7 @@ export class Store {
   }
   stopGoals(id) {
     const chat = this.conversation(id);
-    const goals = blockingGoals(chat);
+    const goals = [...blockingGoals(chat), ...sessionGoals(chat).filter((g) => g.status === "waiting")];
     for (const goal of goals)
       this.setGoalState(id, goal.provider, goal.runId, "paused");
     return goals.length;
@@ -561,10 +567,11 @@ export class Store {
     content = "",
     attachments = [],
     createdAt,
+    source = null,
   }) {
     this.db
       .prepare(
-        "INSERT INTO messages(id,conversation_id,run_id,role,provider,model,content,created_at,attachments) VALUES(?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO messages(id,conversation_id,run_id,role,provider,model,content,created_at,attachments,source) VALUES(?,?,?,?,?,?,?,?,?,?)",
       )
       .run(
         id,
@@ -576,6 +583,7 @@ export class Store {
         content,
         createdAt || this.now(),
         JSON.stringify(attachments),
+        source,
       );
     this.updateConversation(conversationId, {});
     return id;
@@ -789,6 +797,7 @@ export class Store {
     model,
     text,
     attachments = [],
+    source = null,
   }) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -821,6 +830,7 @@ export class Store {
         role: "user",
         content: text,
         attachments,
+        source,
       });
       const c = this.conversation(conversationId);
       this.updateConversation(conversationId, {
@@ -1142,6 +1152,7 @@ export class Store {
       planReviews: this.planReviews(id),
       activeRun: this.activeRun(id),
       queue: this.queuedInputs(id),
+      watches: this.watchStore.list(id).map(({ checkpoint, rootId, originRunId, ...watch }) => watch),
       approvals: this.pendingApprovals(id),
       comments: this.comments(id),
       artifacts: this.db

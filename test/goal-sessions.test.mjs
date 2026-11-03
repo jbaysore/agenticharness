@@ -113,6 +113,28 @@ function codexFixture(extra = {}, savedGoal = "active") {
   };
 }
 
+test("Codex confirms watcher suspension only after the native Goal pauses and the turn ends", async () => {
+  for (const pauseWorks of [true, false]) {
+    let confirmed = false;
+    const f = codexFixture({ watchParked: () => { confirmed = true; } });
+    await f.started;
+    if (!pauseWorks) {
+      const call = f.rpc.call;
+      f.rpc.call = async (method, params) => {
+        if (method === "thread/goal/set" && params.status === "paused") throw new Error("Pause failed");
+        return call(method, params);
+      };
+    }
+    f.abort.abort({ kind: "watch-yield" });
+    await flush();
+    assert.equal(confirmed, false);
+    f.notify("turn/completed", { turn: { id: "turn-1", status: "cancelled" } });
+    await f.run;
+    assert.equal(confirmed, pauseWorks);
+    assert.equal(f.closes, 1);
+  }
+});
+
 test("Codex keeps its Goal session open across long continuation gaps", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
   const f = codexFixture();
@@ -302,7 +324,7 @@ test("resuming a saved session verifies Goal state before allowing its hold to c
     });
 });
 
-function claudeFixture() {
+function claudeFixture(extra = {}) {
   const events = new AsyncQueue(),
     states = [],
     started = deferred();
@@ -318,6 +340,7 @@ function claudeFixture() {
       emit() {},
       saveSession() {},
       goalState: (status) => states.push(status),
+      ...extra,
     },
     {
       baseOptions: () => ({}),
@@ -372,6 +395,17 @@ function claudeFixture() {
     },
   };
 }
+
+test("Claude acknowledges watcher suspension on an interrupted result and closes the native query", async () => {
+  let confirmed = false;
+  const f = claudeFixture({ watchParked: () => { confirmed = true; } });
+  await f.started;
+  f.events.push({ type: "active_goal", value: { condition: "Ship passing CI", iterations: 1 } });
+  f.abort.abort({ kind: "watch-yield" });
+  assert.equal((await f.run).status, "cancelled");
+  assert.equal(confirmed, true);
+  assert.equal(f.closes, 1);
+});
 
 test("Claude intermediate results keep an active Goal alive until confirmed met", async (t) => {
   for (const before of [false, true])

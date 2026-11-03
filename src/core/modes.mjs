@@ -105,6 +105,9 @@ const ASK_HOST_TOOLS = new Set([
   "ask_user",
   "delegate_read",
   "delegate_locate",
+  "watch_github_ci",
+  "list_watches",
+  "cancel_watch",
 ]);
 
 export function askHostAllowed(name) {
