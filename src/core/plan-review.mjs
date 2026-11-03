@@ -2,7 +2,7 @@
 import { readRepositoryFile } from "./repository.mjs";
 import { agentInstructions } from "./history.mjs";
 import { readRules } from "./rules.mjs";
-import { cursorReviewer } from "./review-policy.mjs";
+import { cursorReviewer, reviewProviders } from "./review-policy.mjs";
 
 const text = { type: "string", minLength: 1, maxLength: 4000 };
 const object = (properties) => ({
@@ -110,12 +110,13 @@ export class PlanReviewer {
   constructor(options) { Object.assign(this, options); }
   async review() {
     const { controller, run, signal, onAttempt } = this,
-      settings = readRules(controller.store).review,
-      candidates = run.provider === "claude" ? ["codex", "claude"] : ["claude", "codex"],
+      review = readRules(controller.store).review,
+      settings = review.plan,
+      candidates = reviewProviders(review, "plan", run.provider),
       deadline = Date.now() + controller.planReviewTotalTimeoutMs,
       packet = await bounded(() => planReviewPacket({ ...this, store: controller.store }), signal, deadline - Date.now()),
       errors = [];
-    let retry;
+    let retry, retried = false;
     for (let index = 0; index < candidates.length; index++) {
       signal.throwIfAborted();
       if (Date.now() >= deadline) break;
@@ -136,7 +137,10 @@ export class PlanReviewer {
         // One transient retry total, after the other provider has had a chance.
         if (!retry && !error.unavailable && /timed out|connection|socket|ECONN|EPIPE|session ended|exited|fetch failed|invalid plan review/i.test(error.message)) retry = provider;
       }
-      if (index === 1 && retry) candidates.push(retry);
+      if (index === candidates.length - 1 && retry && !retried) {
+        candidates.push(retry);
+        retried = true;
+      }
     }
     throw new Error(errors.join(" ") || "The plan review time budget was exhausted.");
   }

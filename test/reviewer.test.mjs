@@ -542,6 +542,34 @@ function addClaude(f) {
   return calls;
 }
 
+test("Auto-review uses the selected primary provider and switches choices during a turn", async (t) => {
+  const f = await fixture(t), claude = addClaude(f);
+  saveRules(f.store, { review: {
+    primaryProvider: "claude", fallbackEnabled: false,
+    claude: { model: "claude-review", effort: "high" },
+  } }, f.controller.providers);
+  assert.equal((await f.ctx.approve(action())).allow, true);
+  assert.equal(claude.length, 1);
+  assert.equal(claude[0].effort, "high");
+  assert.equal(f.jobs.length, 0);
+  saveRules(f.store, { review: { primaryProvider: "codex" } }, f.controller.providers);
+  assert.equal((await f.ctx.approve(action("Second action"))).allow, true);
+  assert.equal(f.jobs.length, 1);
+});
+
+for (const fallbackEnabled of [false, true])
+  test(`Claude primary failure respects Auto-review fallback ${fallbackEnabled}`, async (t) => {
+    const f = await fixture(t);
+    addClaude(f);
+    saveRules(f.store, { review: { primaryProvider: "claude", fallbackEnabled } }, f.controller.providers);
+    f.controller.workers.claude = async () => {
+      throw new WorkerUnavailable("Claude included usage exhausted");
+    };
+    assert.equal((await f.ctx.approve(action())).allow, fallbackEnabled);
+    assert.equal(f.jobs.length, fallbackEnabled ? 1 : 0);
+    assert.equal(f.store.pendingApprovals(f.chat.id).length, 0);
+  });
+
 test("transient failures try the fallback before one fresh-session retry with complete policies", async (t) => {
   const f = await fixture(t);
   addClaude(f);

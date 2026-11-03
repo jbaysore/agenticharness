@@ -227,10 +227,19 @@ usage each time.
 ## Agent rules
 
 **Agent rules** in the sidebar holds standing rules that every agent receives at
-the start of each turn, in every project. Changes apply to the next turn.
+the start of each turn, in every project. Changes apply to the next turn;
+reviewer choices apply to the next review, even during an active turn.
 
 - **Instructions for every agent** is free text given to Codex, Claude Code and
   Cursor chats as written.
+- **Reviewing agents**, also in **Connections & usage**, configures Auto-review
+  and independent plan reviews separately. Choose Codex or Claude Code as the
+  primary provider, pin each provider's model and effort or use its current
+  default, and choose whether to try the other provider when a review cannot
+  complete. Plan reviews also offer **Different provider from the planner**.
+  Existing model choices carry over to both review types; their settings can
+  then be changed independently. Saving in Connections & usage preserves your
+  standing instructions and delegation rules.
 - **Hand off work to a cheaper model** lets a chat give certain kinds of work to
   a worker model you choose instead of doing them on its own model. Pick the
   worker, optionally a fallback worker, tick the kinds of work you allow, and
@@ -366,8 +375,9 @@ money, publishing or sending something, signing in, or changing the goal, and
 the note explains that choice in plain language. If automatic review cannot run,
 the action is declined automatically with that reason. The agent can continue
 other authorized work without asking you to approve the failed technical action.
-Codex reviews first; when enabled, Claude fallback uses included subscription
-usage if Codex cannot complete a review. Temporary connection failures, timeouts,
+The selected provider reviews first; when enabled, fallback uses the other
+provider's included subscription usage if the first cannot complete a review.
+Temporary connection failures, timeouts,
 and invalid replies permit one fresh-session retry total, after trying the
 configured fallback. Each attempt has at most 60 seconds, including startup and
 usage verification, within a 120-second total budget. Valid decisions are final;
@@ -382,9 +392,10 @@ without asking. A plan still comes to you as one **Confirm and build** button,
 except in Goal, where a plan is carried out and the chat stays in Goal.
 
 A plan card also offers **Get independent review**. That starts a separate
-read-only reviewer, using the Auto-review model choices and preferably a
-different subscription provider from the one that wrote the plan. The review
-advises you. It can say the plan is sound, and a concern has to name a concrete
+read-only reviewer, using the independent plan review settings. By default it
+prefers a different subscription provider from the one that wrote the plan;
+you can choose a fixed provider and disable fallback in Reviewing agents. The
+review advises you. It can say the plan is sound, and a concern has to name a concrete
 failure and the evidence for it. Nothing is sent to the planning agent unless
 you choose **Send review to agent**, which fills the Keep planning feedback box
 for you to edit first. Confirm and Keep planning stay available while a review

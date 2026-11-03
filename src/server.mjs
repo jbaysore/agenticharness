@@ -53,6 +53,7 @@ import {
   delegationStats,
   describeRules,
   readRules,
+  saveReviewSettings,
   saveRules,
 } from "./core/rules.mjs";
 import {
@@ -477,12 +478,20 @@ export async function createHarness({
             selfRestart: selfRestart?.status() ?? null,
             selfRestartUnavailable,
           });
-        if (path === "/api/rules" && method === "PUT") {
-          const rules = saveRules(
-            store,
-            await readJson(req),
-            controller.providers,
-          );
+        if (path === "/api/rules" && ["PUT", "PATCH"].includes(method)) {
+          const input = await readJson(req);
+          if (!input || typeof input !== "object" || Array.isArray(input))
+            throw new Error("Rules must be an object");
+          if (
+            method === "PATCH" &&
+            (!Object.hasOwn(input, "review") ||
+              Object.keys(input).some((key) => key !== "review"))
+          )
+            throw new Error("Only reviewer settings can be patched");
+          const rules =
+            method === "PATCH"
+              ? saveReviewSettings(store, input.review, controller.providers)
+              : saveRules(store, input, controller.providers);
           controller.event(null, null, "rules", {});
           return json(res, 200, describeRules(rules, controller.providers));
         }

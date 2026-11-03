@@ -13,6 +13,7 @@ import { PRICES_AS_OF, priceOf } from "../core/prices.mjs";
 import {
   cursorReviewer,
   reviewerModel,
+  reviewProviders,
   reviewSettings,
 } from "../core/review-policy.mjs";
 
@@ -149,46 +150,60 @@ function WorkerPicker({
   );
 }
 
-function ReviewerSettings({ value, providers, onChange }) {
-  const ids = ["codex", ...(value.claudeFallback ? ["claude"] : [])],
-    reasons = [];
-  let route = "";
-  for (const id of ids) {
-    try {
-      const reviewer = cursorReviewer(providers, value[id], id);
-      route = `Cursor reviews use ${reviewer.name}${reviewer.effort ? ` · ${reviewer.effort} effort` : ""}.`;
-      if (reasons.length) route += " " + reasons.join(" ");
-      break;
-    } catch (error) {
-      reasons.push(error.message);
-    }
-  }
-  if (!route)
-    route =
-      "No reviewer is available; actions will be declined automatically. " +
-      reasons.join(" ");
+function ReviewScopeSettings({ value, providers, onChange, plan = false }) {
+  const label = plan ? "Plan review" : "Auto-review",
+    route = (planner) => {
+      const reasons = [];
+      for (const id of reviewProviders(
+        plan ? { plan: value } : value,
+        plan ? "plan" : "action",
+        planner,
+      )) {
+        try {
+          const reviewer = cursorReviewer(providers, value[id], id);
+          return `${reviewer.name}${reviewer.effort ? ` · ${reviewer.effort} effort` : ""}. ${reasons.join(" ")}`;
+        } catch (error) {
+          reasons.push(error.message);
+        }
+      }
+      return `No reviewer is available; ${plan ? "the review will report an error" : "actions will be declined automatically"}. ${reasons.join(" ")}`;
+    };
   return (
     <section className="connection">
       <header>
-        <h3>Automatic reviewer</h3>
+        <h3>{plan ? "Independent plan review" : "Auto-review"}</h3>
       </header>
       <p>
-        Choose the Codex model that reviews Auto-review actions: Cursor
-        requests, browser actions from every agent, and commands Claude Code or
-        Codex passes on. It decides coding and command questions, and asks you
-        only for a managerial choice it explains. If Codex cannot review, the
-        Claude model below takes over using its included subscription usage.
-        Both receive the task, recent user instructions and refusals, project
-        rules, the agent's recent actions, and exact action details.
+        {plan
+          ? "A second opinion when you choose Get independent review on a plan. Its advice stays with you until you send it to the agent."
+          : "Reviews agent commands, edits and browser actions. It asks you only for a managerial choice the task did not already settle."}
       </p>
+      <div className="rule-worker">
+        <label>
+          {label} provider
+          <select
+            aria-label={`${label} provider`}
+            value={value.primaryProvider}
+            onChange={(e) =>
+              onChange({ ...value, primaryProvider: e.target.value })
+            }
+          >
+            {plan && (
+              <option value="independent">
+                Different provider from the planner
+              </option>
+            )}
+            <option value="codex">Codex</option>
+            <option value="claude">Claude Code</option>
+          </select>
+        </label>
+      </div>
       {["codex", "claude"].map((id) => {
-        const automatic = reviewerModel(providers, id, null),
-          label =
-            id === "codex" ? "Codex reviewer model" : "Claude fallback model";
+        const automatic = reviewerModel(providers, id, null);
         return (
           <WorkerPicker
             key={id}
-            label={label}
+            label={`${label} ${id === "codex" ? "Codex" : "Claude Code"} model`}
             empty={
               automatic
                 ? `Provider default: ${automatic.name ?? automatic.id} (${automatic.resolvedModel ?? automatic.id})`
@@ -211,25 +226,99 @@ function ReviewerSettings({ value, providers, onChange }) {
       <label className="rule-toggle">
         <input
           type="checkbox"
-          aria-label="Use Claude fallback"
-          checked={value.claudeFallback}
+          aria-label={`Use ${plan ? "plan review" : "Auto-review"} fallback`}
+          checked={value.fallbackEnabled}
           onChange={(e) =>
-            onChange({ ...value, claudeFallback: e.target.checked })
+            onChange({ ...value, fallbackEnabled: e.target.checked })
           }
         />
-        Use Claude fallback
+        Try the other provider if the first cannot complete
       </label>
       <p className="rule-route" role="status">
-        {route}
-      </p>
-      <p className="muted small">
-        Pinned choices stay fixed until you change them. Saving applies to the
-        next review, including during an active turn. A reviewer&rsquo;s deny is
-        final, as is a request for a managerial choice. If neither reviewer can
-        complete, the action is declined automatically. API billing and paid
-        extra usage remain disabled.
+        {plan && value.primaryProvider === "independent" ? (
+          <>
+            Codex or Cursor plan: {route("codex")}
+            <br />
+            Claude Code plan: {route("claude")}
+          </>
+        ) : (
+          route()
+        )}
       </p>
     </section>
+  );
+}
+
+export function ReviewerSettings({ value, providers, onChange }) {
+  return (
+    <div className="reviewer-settings">
+      <h3>Reviewing agents</h3>
+      <p>
+        Choose a provider, model and effort for each type of review. Reviews use
+        your included subscription usage.
+      </p>
+      <ReviewScopeSettings
+        value={value}
+        providers={providers}
+        onChange={onChange}
+      />
+      <ReviewScopeSettings
+        plan
+        value={value.plan}
+        providers={providers}
+        onChange={(plan) => onChange({ ...value, plan })}
+      />
+      <p className="muted small">
+        Pinned choices stay fixed until you change them. Saving applies to the
+        next review, including during an active turn. Fallback runs only when a
+        reviewer cannot complete; a completed decision or plan review is final.
+        API billing and paid extra usage remain disabled.
+      </p>
+    </div>
+  );
+}
+
+export function ReviewerSettingsForm({ rules, providers, onSaved }) {
+  const [review, setReview] = useState(() => reviewSettings(rules.review)),
+    [saving, setSaving] = useState(false),
+    [notice, setNotice] = useState(null);
+  return (
+    <form
+      className="rules-form"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        setSaving(true);
+        setNotice(null);
+        try {
+          await api("/api/rules", { review }, "PATCH");
+          await onSaved();
+          setNotice({
+            text: "Saved. Reviewer choices apply to the next review.",
+          });
+        } catch (error) {
+          setNotice({ text: error.message, failed: true });
+        } finally {
+          setSaving(false);
+        }
+      }}
+    >
+      <ReviewerSettings
+        value={review}
+        providers={providers}
+        onChange={setReview}
+      />
+      <button className="primary" disabled={saving} type="submit">
+        {saving ? "Saving…" : "Save reviewing agents"}
+      </button>
+      {notice && (
+        <p
+          className={notice.failed ? "error-text" : "muted small"}
+          role={notice.failed ? "alert" : "status"}
+        >
+          {notice.text}
+        </p>
+      )}
+    </form>
   );
 }
 

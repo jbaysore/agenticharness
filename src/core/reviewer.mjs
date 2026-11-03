@@ -12,6 +12,7 @@ import {
   cursorReviewer,
   parseReview,
   readOnlyGitCommand,
+  reviewProviders,
 } from "./review-policy.mjs";
 import { applyWork } from "./steps.mjs";
 
@@ -345,7 +346,7 @@ export class ActionReviewer {
         return { decision: "allow", reason };
       }
       const settings = readRules(controller.store).review,
-        candidates = ["codex", ...(settings.claudeFallback ? ["claude"] : [])],
+        candidates = reviewProviders(settings),
         packet = await bounded(
           () => this.packet(request),
           signal,

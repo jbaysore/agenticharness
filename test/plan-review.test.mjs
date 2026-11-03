@@ -9,6 +9,7 @@ import {
   parsePlanReview,
 } from "../src/core/plan-review.mjs";
 import { runClaudeWorker, runCodexWorker } from "../src/providers/workers.mjs";
+import { saveReviewSettings } from "../src/core/rules.mjs";
 
 const sound = () => ({
   assessment: "sound",
@@ -185,6 +186,42 @@ test("a Codex or Cursor plan is reviewed by Claude, then Codex if Claude is unav
     assert.equal(store.approval(approval.id).status, "pending");
   }
 });
+
+test("plan review uses its own provider, model and effort even when they match the planner", async (t) => {
+  const { store, controller, chat, run, approval } = harness(t, "claude");
+  controller.providers[1].models.push({ id: "plan-model", efforts: ["high"] });
+  saveReviewSettings(store, { primaryProvider: "codex", plan: {
+    primaryProvider: "claude", fallbackEnabled: false,
+    claude: { model: "plan-model", effort: "high" },
+  } }, controller.providers);
+  const jobs = [];
+  controller.workers.claude = async (job) => {
+    jobs.push(job);
+    return { text: JSON.stringify(sound()) };
+  };
+  controller.workers.codex = async () => { throw new Error("Wrong provider"); };
+  controller.reviewPlan({ chatId: chat.id, runId: run.id, approvalId: approval.id });
+  await waitFor(() => store.planReview(chat.id, run.id)?.status === "done");
+  assert.equal(jobs[0].model, "plan-model");
+  assert.equal(jobs[0].effort, "high");
+});
+
+for (const transient of [false, true])
+  test(`plan fallback off skips the other provider and bounds retries (${transient})`, async (t) => {
+    const { store, controller, chat, run, approval } = harness(t);
+    saveReviewSettings(store, { plan: { primaryProvider: "claude", fallbackEnabled: false } }, controller.providers);
+    let calls = 0;
+    controller.workers.claude = async () => {
+      calls++;
+      throw Object.assign(new Error(transient ? "Connection closed" : "Usage exhausted"), { unavailable: !transient });
+    };
+    controller.workers.codex = async () => { throw new Error("Must not try fallback"); };
+    controller.reviewPlan({ chatId: chat.id, runId: run.id, approvalId: approval.id });
+    await waitFor(() => store.planReview(chat.id, run.id)?.status === "failed");
+    assert.equal(calls, transient ? 2 : 1);
+    assert.doesNotMatch(store.planReview(chat.id, run.id).error, /Must not try fallback/);
+    assert.equal(store.approval(approval.id).status, "pending");
+  });
 
 test("one transient failure is retried after the other provider has been tried", async (t) => {
   const { store, controller, chat, run, approval } = harness(t);

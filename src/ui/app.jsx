@@ -19,7 +19,7 @@ import {
 } from "./terminal-session.jsx";
 import { terminalGroups } from "./terminal-groups.mjs";
 import { BrowserPane } from "./browser-pane.jsx";
-import { RulesModal } from "./rules-modal.jsx";
+import { RulesModal, ReviewerSettingsForm } from "./rules-modal.jsx";
 import { SkillsModal } from "./skills-modal.jsx";
 import { UsageGlance } from "./usage-glance.jsx";
 import { ClaudeResets } from "./claude-resets.jsx";
@@ -1910,6 +1910,13 @@ function App() {
             const next = await api("/api/state");
             setState((prior) => ({ ...prior, providers: next.providers }));
           }} />
+          {state.rules && (
+            <ReviewerSettingsForm
+              rules={state.rules}
+              providers={state.providers}
+              onSaved={refresh}
+            />
+          )}
           <section className="history-settings">
             <h3>Conversation history</h3>
             <label>

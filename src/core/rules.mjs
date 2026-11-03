@@ -68,6 +68,16 @@ export function readRules(store) {
 }
 
 // What the user submits is checked against the live model lists before saving.
+export function saveReviewSettings(store, input, providers) {
+  const current = readRules(store),
+    rules = {
+      ...current,
+      review: validateReviewSettings(input, providers, current.review),
+    };
+  store.setting(RULES_KEY, rules);
+  return rules;
+}
+
 export function saveRules(store, input, providers) {
   if (!input || typeof input !== "object")
     throw new Error("Rules must be an object");

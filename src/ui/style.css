@@ -3236,6 +3236,15 @@ button:has(> .tab-dot) {
   font-size: 12px;
   line-height: 1.6;
 }
+.reviewer-settings {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+}
+.reviewer-settings > h3,
+.reviewer-settings > p {
+  margin: 0;
+}
 .rules-form .connection > p {
   color: var(--text-2);
   line-height: 1.6;

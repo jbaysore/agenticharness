@@ -34,8 +34,48 @@ export function reviewSettings(saved) {
   return {
     codex: choice(saved?.codex),
     claude: choice(saved?.claude),
-    claudeFallback: saved?.claudeFallback !== false,
+    primaryProvider: saved?.primaryProvider === "claude" ? "claude" : "codex",
+    fallbackEnabled:
+      typeof saved?.fallbackEnabled === "boolean"
+        ? saved.fallbackEnabled
+        : saved?.claudeFallback !== false,
+    plan: {
+      primaryProvider: ["codex", "claude"].includes(
+        saved?.plan?.primaryProvider,
+      )
+        ? saved.plan.primaryProvider
+        : "independent",
+      fallbackEnabled: saved?.plan?.fallbackEnabled !== false,
+      // Migrate the shared model choices once; subsequent saves keep the two
+      // review types independent, including an explicit provider-default choice.
+      ...Object.fromEntries(
+        ["codex", "claude"].map((id) => [
+          id,
+          choice(
+            saved?.plan && Object.hasOwn(saved.plan, id)
+              ? saved.plan[id]
+              : saved?.[id],
+          ),
+        ]),
+      ),
+    },
   };
+}
+
+export function reviewProviders(settings, kind = "action", plannerProvider) {
+  const scope = kind === "plan" ? settings.plan : settings,
+    primary =
+      scope.primaryProvider === "independent"
+        ? plannerProvider === "claude"
+          ? "codex"
+          : "claude"
+        : scope.primaryProvider;
+  return [
+    primary,
+    ...(scope.fallbackEnabled
+      ? [primary === "codex" ? "claude" : "codex"]
+      : []),
+  ];
 }
 
 export function validateReviewSettings(input, providers, previous) {
@@ -46,7 +86,36 @@ export function validateReviewSettings(input, providers, previous) {
   if (Object.hasOwn(input, "claudeFallback")) {
     if (typeof input.claudeFallback !== "boolean")
       throw new Error("Choose whether Claude fallback is enabled");
-    result.claudeFallback = input.claudeFallback;
+    result.fallbackEnabled = input.claudeFallback;
+  }
+  validateReviewScope(input, providers, saved, result, ["codex", "claude"]);
+  if (Object.hasOwn(input, "plan")) {
+    if (
+      !input.plan ||
+      typeof input.plan !== "object" ||
+      Array.isArray(input.plan)
+    )
+      throw new Error("Plan reviewer settings must be an object");
+    result.plan = { ...saved.plan };
+    validateReviewScope(input.plan, providers, saved.plan, result.plan, [
+      "independent",
+      "codex",
+      "claude",
+    ]);
+  }
+  return result;
+}
+
+function validateReviewScope(input, providers, saved, result, providerIds) {
+  if (Object.hasOwn(input, "primaryProvider")) {
+    if (!providerIds.includes(input.primaryProvider))
+      throw new Error("Choose a subscription reviewer provider");
+    result.primaryProvider = input.primaryProvider;
+  }
+  if (Object.hasOwn(input, "fallbackEnabled")) {
+    if (typeof input.fallbackEnabled !== "boolean")
+      throw new Error("Choose whether reviewer fallback is enabled");
+    result.fallbackEnabled = input.fallbackEnabled;
   }
   for (const id of ["codex", "claude"]) {
     if (!Object.hasOwn(input, id)) continue;
@@ -79,7 +148,6 @@ export function validateReviewSettings(input, providers, previous) {
       throw new Error("That reviewer model does not offer the selected effort");
     result[id] = chosen;
   }
-  return result;
 }
 
 export function reviewerModel(providers, id, selection) {

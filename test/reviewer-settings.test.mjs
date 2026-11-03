@@ -4,8 +4,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
-import { readRules, saveRules } from "../src/core/rules.mjs";
-import { cursorReviewer } from "../src/core/review-policy.mjs";
+import {
+  readRules,
+  saveRules,
+  saveReviewSettings,
+} from "../src/core/rules.mjs";
+import {
+  cursorReviewer,
+  reviewSettings,
+  reviewProviders,
+} from "../src/core/review-policy.mjs";
 import { createHarness } from "../src/server.mjs";
 
 const providers = () => [
@@ -49,7 +57,14 @@ const providers = () => [
 const selection = {
   codex: { model: "pinned", effort: "low" },
   claude: { model: "fallback", effort: "high" },
-  claudeFallback: true,
+  primaryProvider: "claude",
+  fallbackEnabled: true,
+  plan: {
+    primaryProvider: "codex",
+    fallbackEnabled: false,
+    codex: { model: "pinned", effort: "high" },
+    claude: null,
+  },
 };
 
 test("reviewer choices and effort override changing catalog defaults without changing delegation", () => {
@@ -104,6 +119,16 @@ test("invalid reviewer models, providers, efforts and fallback settings never ch
       [],
       "wrong",
       { claudeFallback: "yes" },
+      { fallbackEnabled: "yes" },
+      { primaryProvider: "cursor" },
+      { primaryProvider: "openrouter" },
+      { primaryProvider: "independent" },
+      { plan: null },
+      { plan: [] },
+      { plan: { primaryProvider: "openrouter" } },
+      { plan: { fallbackEnabled: 1 } },
+      { plan: { codex: { model: "missing" } } },
+      { plan: { claude: { model: "fallback", effort: "ultra" } } },
       { codex: { model: "missing" } },
       { codex: { model: "retired" } },
       { codex: { provider: "claude", model: "pinned" } },
@@ -125,9 +150,71 @@ test("invalid reviewer models, providers, efforts and fallback settings never ch
       {
         codex: null,
         claude: selection.claude,
-        claudeFallback: false,
+        primaryProvider: "claude",
+        fallbackEnabled: false,
+        plan: selection.plan,
       },
     );
+  } finally {
+    store.close();
+  }
+});
+
+test("legacy reviewer models migrate to separate plan choices and preserve their fallback policy", () => {
+  const legacy = {
+      codex: selection.codex,
+      claude: selection.claude,
+      claudeFallback: false,
+    },
+    settings = reviewSettings(legacy);
+  assert.equal(settings.primaryProvider, "codex");
+  assert.equal(settings.fallbackEnabled, false);
+  assert.deepEqual(settings.plan, {
+    primaryProvider: "independent",
+    fallbackEnabled: true,
+    codex: selection.codex,
+    claude: selection.claude,
+  });
+  assert.deepEqual(reviewProviders(settings), ["codex"]);
+  assert.deepEqual(reviewProviders(settings, "plan", "codex"), [
+    "claude",
+    "codex",
+  ]);
+  assert.deepEqual(reviewProviders(settings, "plan", "claude"), [
+    "codex",
+    "claude",
+  ]);
+  assert.deepEqual(reviewProviders(selection), ["claude", "codex"]);
+  assert.deepEqual(reviewProviders(selection, "plan", "codex"), ["codex"]);
+});
+
+test("saving only reviewers preserves instructions and an unavailable delegated worker", () => {
+  const store = new Store(":memory:");
+  try {
+    const rules = saveRules(
+      store,
+      {
+        instructions: "Keep my standing rules",
+        delegate: {
+          enabled: true,
+          workers: [{ provider: "codex", model: "pinned" }],
+        },
+      },
+      providers(),
+    );
+    const catalog = providers();
+    catalog[0].models = [];
+    const saved = saveReviewSettings(
+      store,
+      { primaryProvider: "claude", plan: { claude: selection.claude } },
+      catalog,
+    );
+    assert.equal(saved.instructions, rules.instructions);
+    assert.deepEqual(saved.delegate, rules.delegate);
+    assert.equal(saved.review.primaryProvider, "claude");
+    assert.deepEqual(saved.review.plan.claude, selection.claude);
+    saveReviewSettings(store, { claude: null }, catalog);
+    assert.deepEqual(readRules(store).review.plan.claude, selection.claude);
   } finally {
     store.close();
   }
@@ -142,8 +229,19 @@ test("reviewer choices save through the API and survive a host restart", async (
   });
   try {
     app.controller.providers = providers();
+    saveRules(
+      app.store,
+      {
+        instructions: "Preserve these",
+        delegate: {
+          enabled: true,
+          workers: [{ provider: "codex", model: "pinned" }],
+        },
+      },
+      providers(),
+    );
     const response = await fetch(app.runtime.origin + "/api/rules", {
-      method: "PUT",
+      method: "PATCH",
       headers: { "Content-Type": "application/json", "X-Harness-Client": "1" },
       body: JSON.stringify({ review: selection }),
     });
@@ -155,6 +253,9 @@ test("reviewer choices save through the API and survive a host restart", async (
       r.json(),
     );
     assert.deepEqual(state.rules.review, selection);
+    assert.equal(state.rules.instructions, "Preserve these");
+    assert.equal(state.rules.delegate.enabled, true);
+    assert.equal(state.rules.delegate.workers[0].model, "pinned");
   } finally {
     await app.close();
     await rm(dir, { recursive: true, force: true });
