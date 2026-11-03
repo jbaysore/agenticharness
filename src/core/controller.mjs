@@ -443,8 +443,12 @@ export class Controller extends EventEmitter {
       actionId: prepared.actionId,
       provider: prepared.provider,
       model: prepared.model,
-      text: prepared.watchOrigin ? this.watchers.displayText(prepared.watchOrigin.id) : prepared.text,
-      source: prepared.watchOrigin ? "watcher" : null,
+      text: prepared.watchOrigin
+        ? this.watchers.displayText(prepared.watchOrigin.id)
+        : (prepared.moveOrigin?.displayText ?? prepared.text),
+      source: prepared.watchOrigin
+        ? "watcher"
+        : prepared.moveOrigin ? "chat-move" : null,
       attachments: prepared.files.map(attachmentInfo),
     });
     const abort = new AbortController();
@@ -457,6 +461,7 @@ export class Controller extends EventEmitter {
       continuedGoalObjective: prepared.continuedGoalObjective,
       continuedGoalPrompt: prepared.continuedGoalPrompt,
       watchOrigin: prepared.watchOrigin,
+      moveOrigin: prepared.moveOrigin,
     });
     const entry = this.active.get(chatId);
     entry.flushSteer = () => this.flushSteers(chatId);
@@ -748,7 +753,7 @@ export class Controller extends EventEmitter {
       queued: true,
       directory: path,
       instruction:
-        "Harness will move the chat after this turn ends. Stop task work now and tell the user the move is queued, not complete. Harness will report whether it completed; future turns will start in the destination directory.",
+        "Harness will move the chat after this turn ends. Stop task work now and tell the user the move is queued, not complete. After a successful move, Harness will automatically prompt you in the destination directory to continue the task. Do not ask the user to send another message.",
     };
   }
   async requestSelfRestart(chatId) {
@@ -794,6 +799,56 @@ export class Controller extends EventEmitter {
       },
     });
     return true;
+  }
+  continueChatMove(chatId, active, goalObjective) {
+    const chat = this.store.conversation(chatId);
+    // User input and Stop take precedence, including while the move awaited IO.
+    // A move gets one continuation; a replay must not create another turn.
+    const actionId = `move-${active.run.id}`;
+    if (
+      !chat ||
+      chat.archived_at ||
+      chat.usage_stopped_at ||
+      active.cancelled ||
+      active.supersededByUser ||
+      this.active.has(chatId) ||
+      this.store.queuedInputs(chatId).length ||
+      this.store.runForAction(actionId)
+    )
+      return;
+    const directory = this.store.project(chat.project_id).path;
+    const text = [
+      `Harness has moved this chat to ${directory}. The move is complete and the previous provider session was reset.`,
+      "Read the destination's project instructions and inspect its current state. Continue the latest unfinished task from the conversation's saved progress without repeating completed work or requesting the same move again. Stay within the existing task and current chat mode; the move does not approve a plan or expand authorization. If moving the chat was the entire request, acknowledge completion without inventing additional work.",
+      chat.mode === "goal" && goalObjective
+        ? `The Goal objective is still:\n${goalObjective}`
+        : "",
+    ].filter(Boolean).join("\n\n");
+    try {
+      const prepared = this.prepareSend(chatId, {
+        actionId,
+        text,
+        provider: chat.provider,
+        model: chat.model,
+        effort: chat.effort,
+        permissions: chat.permissions,
+        mode: chat.mode,
+        parsed: true,
+      });
+      prepared.moveOrigin = {
+        displayText: `Chat moved to ${directory}. Continuing the task.`,
+        goalObjective,
+      };
+      this.startTurn(prepared);
+    } catch (failure) {
+      this.event(chatId, null, "work", {
+        kind: "chat-move-continuation-failed",
+        item: {
+          title: "Chat moved, but the agent could not continue",
+          description: failure.message,
+        },
+      });
+    }
   }
   // Between turns, a worktree whose work has all landed is removed, so a
   // project left idle is back to its one folder.
@@ -863,9 +918,8 @@ export class Controller extends EventEmitter {
         modeChange?.mode === "goal" && chat.mode === "goal"
           ? modeChange.objective
           : chat.mode === "goal" && !resumeGoal && !continuing
-            ? continueAfterUsage
-              ? activeEntry.continuedGoalObjective
-              : text
+            ? activeEntry?.moveOrigin?.goalObjective ??
+              (continueAfterUsage ? activeEntry.continuedGoalObjective : text)
             : undefined,
       );
     let actualModel =
@@ -1066,7 +1120,11 @@ export class Controller extends EventEmitter {
           .filter(Boolean)
           .join("\n\n")
       : requestText;
-    const startGoal = modeChange?.mode === "goal" && chat.mode === "goal";
+    // A moved Goal first receives its handoff before the fresh native Goal is set.
+    const startGoal = chat.mode === "goal" && (
+      modeChange?.mode === "goal" ||
+      (!continuing && Boolean(activeEntry?.moveOrigin))
+    );
     const lastAgent = messages
       .filter((m) => m.role === "assistant")
       .at(-1)?.provider;
@@ -1499,7 +1557,7 @@ export class Controller extends EventEmitter {
       startGoal,
       resumeGoal,
       goalObjective: startGoal
-        ? modeChange.objective
+        ? modeChange?.objective ?? activeEntry?.moveOrigin?.goalObjective ?? text
         : resumeGoal
           ? savedGoal?.objective
           : continueAfterUsage && chat.mode === "goal" && !continuing
@@ -1553,7 +1611,15 @@ export class Controller extends EventEmitter {
         });
       },
       instructions: delivery.instructions,
-      addendum: [delivery.addendum, renameLine].filter(Boolean).join("\n\n"),
+      // Claude's /goal input uses the objective instead of ctx.text. Keep the
+      // one-time move instructions alongside the handoff for that fresh Goal.
+      addendum: [
+        delivery.addendum,
+        renameLine,
+        chat.mode === "goal" && !continuing && activeEntry?.moveOrigin
+          ? continuationText
+          : "",
+      ].filter(Boolean).join("\n\n"),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
       tools: [...hostTools, ...plan.tools, ...browserTools],
       browser,
@@ -1785,8 +1851,13 @@ export class Controller extends EventEmitter {
       provider: run.provider,
       model: run.model,
     });
+    // moveConversation clears sessions, so retain the Goal before applying it.
+    const moveGoalObjective = active?.pendingMove
+      ? this.store.conversation(chat.id)?.sessions[run.provider]?.goal?.objective
+      : undefined;
+    let moved = false;
     if (active?.pendingMove)
-      await this.finishChatMove(chat.id, active.pendingMove).catch(
+      moved = await this.finishChatMove(chat.id, active.pendingMove).catch(
         (failure) => {
           this.event(chat.id, null, "work", {
             kind: "chat-move-failed",
@@ -1801,6 +1872,11 @@ export class Controller extends EventEmitter {
     this.event(chat.id, null, "chat", this.store.conversation(chat.id));
     if (!active?.pendingMove && project?.worktree) this.tidy(chat.id);
     this.releaseQueue(chat.id);
+    if (
+      moved && status === "completed" && !abort.signal.aborted &&
+      !usageStopReason && !billingStop
+    )
+      this.continueChatMove(chat.id, active, moveGoalObjective);
     this.watchers.kick();
   }
   // A Goal question waits out its deadline, then the agent chooses. Any other

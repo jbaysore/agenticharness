@@ -133,7 +133,7 @@ export const historyTools = [
   {
     name: "move_chat",
     description:
-      "Move this chat to an existing directory on this computer. Call this only when the user explicitly asks to move this chat. Give the destination as an absolute path. Harness applies the move after this turn ends, resets the provider session, and starts future turns in the new directory. After calling this tool, stop task work, end your turn, and tell the user the move is queued rather than complete. Harness reports whether it completed. Existing chat history stays with the chat. If the chat has unfinished work in its current worktree, Harness keeps the old directory and reports that the move could not be completed.",
+      "Move this chat to an existing directory on this computer. Call this only when the user explicitly asks to move this chat. Give the destination as an absolute path. Harness applies the move after this turn ends and resets the provider session. After calling this tool, stop task work, end your turn, and tell the user the move is queued rather than complete. After a successful move, Harness automatically prompts the agent in the destination directory to continue the task; do not ask the user to send another message. Existing chat history stays with the chat. If the chat has unfinished work in its current worktree, Harness keeps the old directory and reports that the move could not be completed.",
     inputSchema: {
       type: "object",
       properties: { directory: { type: "string", minLength: 1 } },

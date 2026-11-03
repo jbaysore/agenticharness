@@ -123,7 +123,7 @@ function UserTurn({ message }) {
   const [open, setOpen] = useState(false),
     text = message.content ?? "",
     long = text.length > 520 || text.split("\n").length > 6;
-  if (message.source === "watcher") return <div className="watch-trigger" role="note" id={message.id}>{text}</div>;
+  if (["watcher", "chat-move"].includes(message.source)) return <div className="watch-trigger" role="note" id={message.id}>{text}</div>;
   return (
     <article
       className={"message user" + (long && !open ? " clamped" : "")}

@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -60,6 +61,51 @@ function fixture() {
   };
 }
 const passing = async () => ({ exitCode: 0, output: "ok" });
+
+test("an unfinished worktree prevents moving the chat and automatic continuation", async () => {
+  const f = fixture(),
+    store = new Store(":memory:"),
+    controller = new Controller(store, { worktreeRoot: f.root });
+  const destination = join(f.dir, "destination");
+  mkdirSync(destination);
+  const project = store.addProject("Source", f.project);
+  const chat = store.createConversation({
+    projectId: project.id, provider: "codex", model: "m",
+  });
+  const worktree = await createWorktree({
+    projectPath: f.project, root: f.root, chatId: chat.id,
+  });
+  store.updateConversation(chat.id, { worktree });
+  writeFileSync(join(worktree.path, "unfinished.txt"), "Work in progress");
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  const events = [];
+  controller.on("event", (event) => events.push(event));
+  let attempts = 0;
+  controller.runners.codex = async (ctx) => {
+    attempts++;
+    await ctx.history("move_chat", { directory: destination });
+    return { status: "completed" };
+  };
+  try {
+    controller.send(chat.id, {
+      actionId: crypto.randomUUID(), text: "Move this chat", provider: "codex", model: "m",
+    });
+    await controller.active.get(chat.id).task;
+    assert.equal(attempts, 1);
+    assert.equal(store.conversation(chat.id).project_id, project.id);
+    assert.ok(events.some((e) => e.payload.kind === "chat-move-failed"));
+    assert.equal(
+      readFileSync(join(worktree.path, "unfinished.txt"), "utf8"), "Work in progress",
+    );
+    assert.equal(
+      store.messages(chat.id).filter((m) => m.source === "chat-move").length, 0,
+    );
+  } finally {
+    await controller.close();
+    store.close();
+    f.done();
+  }
+});
 
 test("a worktree starts from the project's branch and shares its dependencies", async () => {
   const f = fixture();

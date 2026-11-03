@@ -25,6 +25,12 @@ Pick a project in the sidebar, then choose an agent and model in the composer.
 Before sending the first message, click the folder path or **Change** above the
 composer to choose an existing project or enter another directory. Your draft,
 attachments, and model settings stay with the conversation.
+After a conversation has started, ask its agent to move the chat to another
+directory. Harness applies the move after the turn ends, resets the native
+session, and automatically starts a new turn in the destination to continue the
+task. Chat history and settings stay available; queued messages take priority.
+Stop prevents automatic continuation. If unfinished work prevents the move,
+Harness keeps the old directory and reports the problem.
 Completed agent turns play a short, soft chime, including chats outside the
 current view. In **Connections & usage → Sounds**, turn it off or use **Preview
 sound** to hear it. The preference stays in this browser. Audio becomes available

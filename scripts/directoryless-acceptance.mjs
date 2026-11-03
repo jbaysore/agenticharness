@@ -177,9 +177,57 @@ try {
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  // A tool-requested move completes and answers in the destination without
+  // another submit. Its host-generated trigger remains a note after reload.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await chooseModel(page, app.controller.providers, "codex", "fixture");
+  await page.getByLabel("Mode", { exact: true }).selectOption("default");
+  const beforeMove = attempts.length;
+  app.controller.runners.codex = async (ctx) => {
+    attempts.push(ctx);
+    if (ctx.project.path !== projectPath) {
+      ctx.saveSession({ id: "before-move" });
+      await ctx.history("move_chat", { directory: projectPath });
+      ctx.emit("text", {
+        nativeId: "queued-move",
+        text: "The move is queued.",
+      });
+    } else {
+      ctx.emit("text", {
+        nativeId: "after-move",
+        text: "Continuing in the destination repository.",
+      });
+    }
+    return { status: "completed" };
+  };
+  await input.fill("Move this chat to the project and continue the task");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(
+    page.getByText("Continuing in the destination repository.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(attempts).toHaveLength(beforeMove + 2);
+  const continued = attempts.at(-1);
+  expect(continued.project.path).toBe(projectPath);
+  expect(continued.session?.id).toBeUndefined();
+  expect(continued.text).toContain("The move is complete");
+  const moveNote = page
+    .getByRole("note")
+    .filter({ hasText: `Chat moved to ${projectPath}. Continuing the task.` });
+  await expect(moveNote).toBeVisible();
+  await expect(input).toHaveValue("");
+  await page.reload();
+  await expect(moveNote).toBeVisible();
+  await expect(
+    page.getByText("Continuing in the destination repository.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(attempts).toHaveLength(beforeMove + 2);
   expect(errors).toEqual([]);
   console.log(
-    "Directoryless acceptance passed: fresh workspace, upload recovery, attachments, replies, reloads, search, private workspaces, sidebar grouping, review panel, new chats, directory switching with draft/settings/files preserved, and mobile composer. No inference.",
+    "Directoryless acceptance passed: fresh workspace, upload recovery, attachments, replies, reloads, search, private workspaces, sidebar grouping, review panel, new chats, directory switching with draft/settings/files preserved, mobile composer, and automatic continuation after a chat move. No inference.",
   );
 } finally {
   await browser.close();
