@@ -314,6 +314,12 @@ export async function createHarness({
             200,
             await controller.bridgeCommands.get(token)(body.arguments ?? {}),
           );
+        if (body.name === "pause_for_owner")
+          return json(
+            res,
+            200,
+            controller.pauseForOwner(chatId, body.arguments ?? {}),
+          );
         if (body.name === "ask_user" && controller.bridgeQuestions.has(token))
           return json(
             res,
@@ -762,6 +768,15 @@ export async function createHarness({
           if (method === "DELETE" && !match[3]) return json(res, 200, controller.watchers.cancel(match[1], match[2]));
           if (method === "POST" && match[3]) return json(res, 202, controller.watchers.continue(match[1], match[2], await readJson(req)));
         }
+        if (
+          (match = path.match(/^\/api\/chats\/([^/]+)\/owner-pause$/)) &&
+          method === "POST"
+        )
+          return json(
+            res,
+            202,
+            controller.answerOwnerPause(match[1], await readJson(req)),
+          );
         if (
           (match = path.match(/^\/api\/chats\/([^/]+)\/messages$/)) &&
           method === "POST"

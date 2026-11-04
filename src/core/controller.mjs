@@ -76,8 +76,27 @@ import { runClaudeWorker, runCodexWorker } from "../providers/workers.mjs";
 import { ActionReviewer } from "./reviewer.mjs";
 import { PlanReviewer } from "./plan-review.mjs";
 import { hostTools, hostToolsKey, toolFingerprint } from "./host-tools.mjs";
-import { blockingGoals, goalStopped, resumableGoals } from "./goals.mjs";
+import {
+  blockingGoals,
+  goalStopped,
+  ownerPauseFor,
+  resumableGoals,
+  sessionGoals,
+} from "./goals.mjs";
+import {
+  OWNER_PAUSE_STOP,
+  checkOwnerAnswer,
+  checkOwnerPause,
+  ownerAnswerDisplay,
+  ownerAnswerPrompt,
+} from "./owner-pause.mjs";
 import { Watchers } from "./watchers.mjs";
+
+function clearOwnerPauseAttempt(active) {
+  if (!active?.ownerPause) return;
+  clearTimeout(active.ownerPause.timer);
+  active.ownerPause = null;
+}
 import { isWatchTool, WATCH_INSTRUCTIONS } from "./watch-tools.mjs";
 import { isUsageExhausted } from "../security/billing.mjs";
 import { usageWindows } from "../ui/status.mjs";
@@ -282,7 +301,10 @@ export class Controller extends EventEmitter {
     const active = this.active.get(chatId);
     if (!releasing && (!watchOrigin || watchOrigin.manual)) {
       this.watchers.invalidate(chatId, "New user instructions superseded automatic follow-up.");
-      if (active) active.supersededByUser = true;
+      if (active) {
+        active.supersededByUser = true;
+        clearOwnerPauseAttempt(active);
+      }
     }
     prepared.watchOrigin = watchOrigin;
     if (
@@ -318,6 +340,7 @@ export class Controller extends EventEmitter {
       parsed = false,
       resumeGoal = false,
       continueAfterUsage = false,
+      ownerDisplay = null,
     },
   ) {
     const chat = this.store.conversation(chatId);
@@ -415,11 +438,36 @@ export class Controller extends EventEmitter {
     if (provider === "openrouter") this.openrouter?.check(model);
     if (effort && !selectedModel.efforts.includes(effort))
       throw new Error("The selected model does not expose that effort setting");
+    let agentText = body;
+    const owner = ownerPauseFor(chat, provider);
+    if (
+      owner &&
+      mode === "goal" &&
+      !continueAfterUsage &&
+      ownerDisplay == null &&
+      (body || files.length || resumeGoal)
+    ) {
+      const visible =
+        body && body !== GOAL_RESUME_TEXT
+          ? body
+          : files.length && !body
+            ? "The owner attached files."
+            : "";
+      ownerDisplay = visible || ownerAnswerDisplay({ choice: "done" });
+      agentText = ownerAnswerPrompt(
+        owner.ownerPause.statement,
+        visible
+          ? { choice: "message", reason: visible }
+          : { choice: "done" },
+      );
+      resumeGoal = true;
+    }
     return {
       chat,
       chatId,
       actionId,
-      text: body,
+      text: agentText,
+      ownerDisplay,
       delivery: opened.delivery,
       files,
       provider,
@@ -445,7 +493,9 @@ export class Controller extends EventEmitter {
       model: prepared.model,
       text: prepared.watchOrigin
         ? this.watchers.displayText(prepared.watchOrigin.id)
-        : (prepared.moveOrigin?.displayText ?? prepared.text),
+        : (prepared.ownerDisplay ??
+          prepared.moveOrigin?.displayText ??
+          prepared.text),
       source: prepared.watchOrigin
         ? "watcher"
         : prepared.moveOrigin ? "chat-move" : null,
@@ -635,6 +685,7 @@ export class Controller extends EventEmitter {
         active.watchYield = null;
         this.watchers.invalidate(chatId, "Permission settings changed while the turn was yielding.");
       }
+      clearOwnerPauseAttempt(active);
       // Native permission policies can be frozen for a turn. Interrupt before
       // resuming the same session so the entire mode, including its sandbox,
       // applies to the next action. Keep the same Harness run and user message.
@@ -1663,6 +1714,10 @@ export class Controller extends EventEmitter {
         if (abort.signal.reason?.kind === "watch-yield" && this.active.get(chat.id)?.run.id === run.id)
           this.active.get(chat.id).watchParkAcknowledged = true;
       },
+      ownerParked: () => {
+        if (abort.signal.reason?.kind === "owner-pause" && this.active.get(chat.id)?.run.id === run.id)
+          this.active.get(chat.id).ownerParkAcknowledged = true;
+      },
       history: async (name, args) => {
         const input =
           typeof args === "string" ? JSON.parse(args) : (args ?? {});
@@ -1670,6 +1725,7 @@ export class Controller extends EventEmitter {
           return { error: ASK_DENY };
         if (name === "suggest_mode") return suggestMode(input);
         if (name === "ask_user") return askUser(input);
+        if (name === "pause_for_owner") return this.pauseForOwner(chat.id, input);
         if (name === "run_command") return command(input);
         if (isWatchTool(name)) return this.watchers.handle(chat.id, name, input);
         if (name === "restart_harness")
@@ -1789,6 +1845,7 @@ export class Controller extends EventEmitter {
     }
     const active = this.active.get(chat.id);
     if (active?.restart && !active.cancelled) {
+      clearOwnerPauseAttempt(active);
       active.deliverSteer = null;
       active.restart = false;
       const nextModeChange = active.modeChange;
@@ -1805,8 +1862,31 @@ export class Controller extends EventEmitter {
       );
     }
     const parked = Boolean(active?.watchYield && active.watchParkAcknowledged && !active.cancelled && !usageStopReason && !billingStop);
+    const ownerParked = Boolean(
+      active?.ownerPause &&
+      active.ownerParkAcknowledged &&
+      !active.cancelled &&
+      !usageStopReason &&
+      !billingStop &&
+      abort.signal.reason?.kind === "owner-pause",
+    );
     if (active?.watchYield) clearTimeout(active.watchYield.timer);
-    if (parked) {
+    if (active?.ownerPause) clearTimeout(active.ownerPause.timer);
+    if (ownerParked) {
+      status = "completed";
+      error = null;
+      this.store.setGoalState(chat.id, run.provider, run.id, "owner", undefined, {
+        statement: active.ownerPause.statement,
+        askedAt: new Date().toISOString(),
+      });
+      this.event(chat.id, run.id, "work", {
+        kind: "owner-pause",
+        item: {
+          title: "Paused until you can continue",
+          description: active.ownerPause.statement,
+        },
+      });
+    } else if (parked) {
       status = "completed";
       error = null;
       if (chat.mode === "goal") this.store.setGoalState(chat.id, run.provider, run.id, "waiting");
@@ -1843,6 +1923,16 @@ export class Controller extends EventEmitter {
         error ||= "The agent did not confirm suspension. CI is notification only; continue manually.";
       }
     }
+    if (
+      active?.ownerPause &&
+      !ownerParked &&
+      !active.cancelled &&
+      !usageStopReason &&
+      !billingStop
+    ) {
+      status = "failed";
+      error ||= "The agent did not confirm the Goal pause. Continue manually.";
+    }
     this.store.setRun(run.id, status, null, error ?? null);
     this.requeuePending(active);
     this.event(chat.id, run.id, "run", {
@@ -1878,6 +1968,67 @@ export class Controller extends EventEmitter {
     )
       this.continueChatMove(chat.id, active, moveGoalObjective);
     this.watchers.kick();
+  }
+  pauseForOwner(chatId, input) {
+    const chat = this.store.conversation(chatId);
+    const active = this.active.get(chatId);
+    if (!chat || chat.mode !== "goal")
+      return { error: "Only Goal mode can pause for an owner action." };
+    if (!active || active.cancelled || active.abort.signal.aborted)
+      return { error: "Pause for the owner during an active Goal turn." };
+    if (active.supersededByUser || this.store.queuedInputs(chatId).length)
+      return { error: "Handle the newer user instructions before pausing." };
+    if (active.watchYield)
+      return { error: "This turn is already pausing for CI." };
+    let statement;
+    try {
+      statement = checkOwnerPause(input).statement;
+    } catch (error) {
+      return { error: error.message };
+    }
+    if (active.ownerPause)
+      return { parked: true, instruction: OWNER_PAUSE_STOP };
+    active.ownerPause = { statement };
+    active.ownerPause.timer = setTimeout(() => {
+      const current = this.active.get(chatId);
+      if (
+        current === active &&
+        !current.cancelled &&
+        !current.supersededByUser &&
+        current.ownerPause
+      )
+        current.abort.abort({ kind: "owner-pause" });
+    }, 25);
+    return { parked: true, instruction: OWNER_PAUSE_STOP };
+  }
+  answerOwnerPause(chatId, input) {
+    const chat = this.store.conversation(chatId);
+    if (!chat) throw new Error("Conversation not found");
+    if (this.active.has(chatId) || this.store.queuedInputs(chatId).length)
+      throw new Error("Wait for the current turn to finish.");
+    const goal = sessionGoals(chat).find(
+      (item) => item.status === "owner" && item.ownerPause?.statement,
+    );
+    if (!goal) throw new Error("This Goal is not waiting on you.");
+    const answer = checkOwnerAnswer(input?.choice, input?.reason);
+    const model =
+      goal.provider === chat.provider
+        ? chat.model
+        : this.store.latestModel(chatId, goal.provider);
+    if (!model)
+      throw new Error(`Connect ${goal.provider} to continue this Goal.`);
+    return this.send(chatId, {
+      actionId: input?.actionId,
+      text: ownerAnswerPrompt(goal.ownerPause.statement, answer),
+      provider: goal.provider,
+      model,
+      effort: goal.provider === chat.provider ? chat.effort : null,
+      permissions: chat.permissions,
+      mode: "goal",
+      parsed: true,
+      resumeGoal: true,
+      ownerDisplay: ownerAnswerDisplay(answer),
+    });
   }
   // A Goal question waits out its deadline, then the agent chooses. Any other
   // call still waits until the user answers or the turn stops.

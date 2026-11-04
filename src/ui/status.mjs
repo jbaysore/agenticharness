@@ -36,6 +36,7 @@ export function chatMarker(chat) {
   if (chat?.status === "needs-approval") return "approval";
   if (chat?.status === "running") return "running";
   if (chat?.usage_stopped_at) return "usage";
+  if (chat?.owner_pause) return "owner";
   if (chat?.unread && ["failed", "interrupted"].includes(chat.status))
     return "failed";
   // An in-progress host watch is the current activity. A finished watch is
@@ -48,6 +49,7 @@ export function chatMarkerLabel(marker) {
   return (
     {
       approval: "Waiting for your approval",
+      owner: "Waiting on you",
       running: "Working",
       watching: "Watching CI",
       usage: "Stopped because usage ran out",
@@ -117,7 +119,7 @@ export function pinnedChats(conversations) {
   );
 }
 export function activeChats(conversations) {
-  const order = ["approval", "usage", "failed", "unread", "watching", "running"];
+  const order = ["approval", "owner", "usage", "failed", "unread", "watching", "running"];
   return conversations
     .filter((c) => !c.archived_at && chatMarker(c))
     .sort(

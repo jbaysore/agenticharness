@@ -40,7 +40,8 @@ import {
 import { StepSummary } from "./steps.jsx";
 import { IssueButton } from "./reliability.jsx";
 import { interleave } from "../core/steps.mjs";
-import { blockingGoals, resumeOffers } from "../core/goals.mjs";
+import { blockingGoals, ownerPauses, resumeOffers } from "../core/goals.mjs";
+import { OwnerPauseCard } from "./owner-pause.jsx";
 import { WatchCards, useWatchPolling } from "./watch-cards.jsx";
 import { placeWatches } from "./watch-order.mjs";
 
@@ -657,6 +658,26 @@ export function ChatPane({
       setBusy(false);
     }
   }
+  // Confirming, denying, or Other resumes the Goal with that answer.
+  async function answerOwner(answer) {
+    if (!chat || busy || sending.current || chat.activeRun) return;
+    setBusy(true);
+    sending.current = true;
+    try {
+      await api(`/api/chats/${chat.id}/owner-pause`, {
+        actionId: crypto.randomUUID(),
+        ...answer,
+      });
+      await reload(chat.id);
+      await refresh();
+    } catch (error) {
+      report(error);
+      throw error;
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
+  }
   // Resuming reactivates the paused Goal with its saved objective, on the
   // agent that owns it. The composer's draft is left alone.
   async function resumeGoal(goal) {
@@ -813,7 +834,7 @@ export function ChatPane({
         >
           <span className={"provider-dot " + (chat?.provider ?? provider)} />
           <strong title={title}>{title}</strong>
-          {["approval", "running", "watching", "usage"].includes(marker) && (
+          {["approval", "owner", "running", "watching", "usage"].includes(marker) && (
             <span
               className={"chat-marker marker-" + marker}
               role="img"
@@ -1008,6 +1029,15 @@ export function ChatPane({
             waiting. Send a message to continue, or use Stop work to stop it.
           </div>
         )}
+        {!chat?.activeRun &&
+          ownerPauses(chat).map((goal) => (
+            <OwnerPauseCard
+              key={goal.provider}
+              goal={goal}
+              disabled={busy || modeBusy || permissionsBusy}
+              onAnswer={(answer) => answerOwner(answer)}
+            />
+          ))}
         {!chat?.activeRun &&
           pausedGoals.map((goal) => (
             <div className="notice goal-paused" key={goal.provider}>
@@ -1255,7 +1285,7 @@ export function ChatPane({
               onOpenConnections={onOpenConnections}
             />
             <span className="composer-spacer" />
-            {(chat?.activeRun || blockingGoals(chat).length > 0 || chat?.watches?.some((w) => w.armed)) && (
+            {(chat?.activeRun || blockingGoals(chat).length > 0 || ownerPauses(chat).length > 0 || chat?.watches?.some((w) => w.armed)) && (
               <button
                 type="button"
                 className="send-button stopping"

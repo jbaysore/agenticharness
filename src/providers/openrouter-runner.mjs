@@ -320,11 +320,15 @@ export async function runOpenRouter(ctx) {
           title: name,
           status: output?.error || output?.declined ? "failed" : "completed",
         });
-        if (name === "yield_to_watch" && output?.parked) {
+        if (
+          (name === "yield_to_watch" || name === "pause_for_owner") &&
+          output?.parked
+        ) {
           // No next completion request is allowed after the yield tool. Wait
           // for the host's interrupt instead of starting another model call.
           if (!ctx.signal.aborted) await new Promise((resolve) => ctx.signal.addEventListener("abort", resolve, { once: true }));
-          ctx.watchParked?.();
+          if (name === "yield_to_watch") ctx.watchParked?.();
+          else ctx.ownerParked?.();
           return { status: "cancelled" };
         }
       }

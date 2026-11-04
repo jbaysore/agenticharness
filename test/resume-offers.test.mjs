@@ -62,6 +62,25 @@ test("the latest paused Goal is still offered when the chat is idle", () => {
   assert.equal(resumeOffers(chat)[0].status, "paused");
 });
 
+test("an owner pause uses its own card instead of a resume box", () => {
+  const chat = {
+    mode: "goal",
+    provider: "codex",
+    runs: [{ id: "paused-run" }],
+    sessions: {
+      codex: {
+        goal: {
+          status: "owner",
+          runId: "paused-run",
+          objective: "Ship the release",
+          ownerPause: { statement: "Merge the pull request." },
+        },
+      },
+    },
+  };
+  assert.deepEqual(resumeOffers(chat), []);
+});
+
 test("a running turn hides resume boxes", () => {
   const chat = {
     mode: "goal",

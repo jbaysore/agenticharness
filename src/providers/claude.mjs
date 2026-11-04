@@ -16,6 +16,7 @@ import { claudeQuestionAnswers } from "../core/questions.mjs";
 import { proposalText } from "../core/plans.mjs";
 import { goalStopped } from "../core/goals.mjs";
 import { watchTools } from "../core/watch-tools.mjs";
+import { ownerPauseTool } from "../core/owner-pause.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { claudeContent } from "./attachments.mjs";
@@ -426,6 +427,23 @@ export async function runClaude(
           cancel_watch: { id: z.string() },
           yield_to_watch: { ids: z.array(z.string()).min(1).max(10), checkpoint: z.string().min(1).max(2000) },
         }[t.name], async (args) => ({ content: [{ type: "text", text: JSON.stringify(await ctx.history(t.name, args)) }] }))),
+      ...(ctx.tools ?? [])
+        .filter((t) => t.name === ownerPauseTool.name)
+        .map((t) =>
+          tool(
+            t.name,
+            t.description,
+            { statement: z.string().min(1).max(2000) },
+            async (args) => ({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(await ctx.history(t.name, args)),
+                },
+              ],
+            }),
+          ),
+        ),
       // Offered only on turns where the user's rules allow a hand-off.
       ...(ctx.tools ?? [])
         .filter((t) => delegationShapes[t.name])
@@ -867,6 +885,7 @@ export async function runClaude(
           error: stopped || event.errors?.join("\n"),
         };
         if (ctx.signal.reason?.kind === "watch-yield") ctx.watchParked?.();
+        if (ctx.signal.reason?.kind === "owner-pause") ctx.ownerParked?.();
         if (
           result.status === "completed" &&
           (ctx.mode === "goal" || goalStatus === "active") &&

@@ -75,6 +75,11 @@ test("a chat is marked by what it needs, and a seen result is no longer marked",
     chatMarker({ status: "needs-approval", unread: false }),
     "approval",
   );
+  assert.equal(
+    chatMarker({ status: "idle", unread: true, owner_pause: true }),
+    "owner",
+  );
+  assert.equal(chatMarkerLabel("owner"), "Waiting on you");
   assert.equal(chatMarker({ status: "running", unread: false }), "running");
   assert.equal(chatMarker({ status: "failed", unread: true }), "failed");
   assert.equal(chatMarker({ status: "interrupted", unread: true }), "failed");

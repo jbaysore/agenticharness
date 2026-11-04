@@ -642,16 +642,19 @@ small {
   animation: breathe 2.4s var(--ease) infinite;
 }
 .chat-marker.marker-approval,
+.chat-marker.marker-owner,
 .chat-marker.marker-usage,
 .chat-marker.marker-failed {
   width: 15px;
   height: 15px;
 }
-.chat-marker.marker-approval {
+.chat-marker.marker-approval,
+.chat-marker.marker-owner {
   background: var(--signal);
   color: #2b2400;
 }
-.chat-marker.marker-approval::after {
+.chat-marker.marker-approval::after,
+.chat-marker.marker-owner::after {
   content: "!";
 }
 .chat-marker.marker-usage {
@@ -2081,7 +2084,27 @@ small {
   background: var(--surface);
   font-size: 13px;
 }
-.notice.goal-paused .goal-objective {
+.owner-pause .owner-pause-statement {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+}
+.owner-pause-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.owner-pause .notice-action.primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+.owner-pause .notice-action[aria-pressed="true"] {
+  border-color: var(--text);
+}
+.notice.goal-paused .goal-objective,
+.owner-pause .goal-objective {
   display: -webkit-box;
   margin: 4px 0;
   color: var(--text);

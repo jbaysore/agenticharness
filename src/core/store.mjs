@@ -4,7 +4,12 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { buildSteps, settle } from "./steps.mjs";
 import { provisionalTitle } from "./history.mjs";
-import { blockingGoals, goalStatus, sessionGoals } from "./goals.mjs";
+import {
+  blockingGoals,
+  goalStatus,
+  hasOwnerPause,
+  sessionGoals,
+} from "./goals.mjs";
 import { WatchStore } from "./watch-store.mjs";
 
 const historyScopes = ["none", "project", "all"];
@@ -33,18 +38,21 @@ export function chatStatus(row) {
   };
 }
 
-function summarize({
-  last_status,
-  last_ended_at,
-  pending_approvals,
-  active_watches,
-  ...c
-}) {
+function summarize(row) {
+  const owner_pause = hasOwnerPause(row.sessions);
+  const {
+    last_status,
+    last_ended_at,
+    pending_approvals,
+    active_watches,
+    ...c
+  } = row;
   return {
     ...c,
     directoryless: Boolean(c.directoryless),
     sessions: JSON.parse(c.sessions),
     worktree: c.worktree ? JSON.parse(c.worktree) : null,
+    owner_pause,
     ...chatStatus({
       ...c,
       last_status,
@@ -360,13 +368,16 @@ export class Store {
   }
   // The objective is kept so a paused Goal can resume without retyping it.
   // Leave it undefined to keep the saved one; null forgets it.
-  setGoalState(id, provider, runId, status, objective) {
+  setGoalState(id, provider, runId, status, objective, ownerPause) {
     const chat = this.conversation(id);
     if (!chat) return;
     const previous = chat.sessions[provider];
     const session = typeof previous === "string" ? { id: previous } : previous;
     const kept =
       objective === undefined ? session?.goal?.objective : objective || null;
+    const next = goalStatus(status);
+    const pause =
+      next === "owner" ? ownerPause ?? session?.goal?.ownerPause : null;
     return this.updateConversation(id, {
       sessions: {
         ...chat.sessions,
@@ -374,16 +385,29 @@ export class Store {
           ...session,
           goal: {
             runId,
-            status: goalStatus(status),
+            status: next,
             ...(kept && { objective: kept }),
+            ...(pause?.statement && {
+              ownerPause: {
+                statement: pause.statement,
+                askedAt: pause.askedAt ?? this.now(),
+              },
+            }),
           },
         },
       },
     });
   }
+  latestModel(conversationId, provider) {
+    return this.db
+      .prepare(
+        "SELECT model FROM runs WHERE conversation_id=? AND provider=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      )
+      .get(conversationId, provider)?.model;
+  }
   stopGoals(id) {
     const chat = this.conversation(id);
-    const goals = [...blockingGoals(chat), ...sessionGoals(chat).filter((g) => g.status === "waiting")];
+    const goals = [...blockingGoals(chat), ...sessionGoals(chat).filter((g) => g.status === "waiting" || g.status === "owner")];
     for (const goal of goals)
       this.setGoalState(id, goal.provider, goal.runId, "paused");
     return goals.length;

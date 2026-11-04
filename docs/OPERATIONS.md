@@ -68,6 +68,17 @@ agent chooses the path that best completes the objective and continues. The
 same question does not wait again after it times out, and after three timeouts
 further questions are answered by the agent at once.
 
+When a Goal is blocked on something only you can do, such as merging a pull
+request or running a command on a machine the agent cannot reach, it calls
+`pause_for_owner` and the turn ends. The native Goal is confirmed paused, then
+saved as **waiting on you**, with its objective kept and no further model
+calls. The card states what you need to do. **I've done this** resumes the Goal.
+**Deny** and **Other** each need a reason, and that reason resumes it too. A
+message you send while the card is up also resumes the Goal and is passed
+along as your answer. **Stop work** leaves it paused for a later manual resume.
+An unconfirmed pause does not stick: the turn fails and you can continue
+manually. Confirmed owner pauses do not block Harness updates.
+
 Three projects are configured on the delivery PC: Agentic Harness, linescience,
 and linescience-personal. Only linescience-personal lists linescience as an
 upstream reference. The reverse relationship is absent. Add more folders with

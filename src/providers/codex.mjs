@@ -208,7 +208,14 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     )
       return;
     finished = true;
-    if (ctx.signal.reason?.kind === "watch-yield" && ((!goal && goalStatus === null) || goalStopped(goalStatus))) ctx.watchParked?.();
+    const parking = ctx.signal.reason?.kind;
+    if (
+      (parking === "watch-yield" || parking === "owner-pause") &&
+      ((!goal && goalStatus === null) || goalStopped(goalStatus))
+    ) {
+      if (parking === "watch-yield") ctx.watchParked?.();
+      else ctx.ownerParked?.();
+    }
     resolveDone({ status: completedTurn.status, error: completedTurn.error });
   };
   const updateGoal = (status, objective) => {

@@ -6,6 +6,8 @@ const stopped = new Set([
   "budgetLimited",
   "cleared",
   "waiting",
+  // Confirmed pause until the owner finishes something the agent cannot do.
+  "owner",
 ]);
 
 export function goalStopped(status) {
@@ -38,7 +40,7 @@ export function blockingGoals(chat) {
 
 // A Goal the user paused, or one a usage limit stopped, can pick up where it
 // left off. Codex keeps the objective natively; Claude needs the saved one.
-const resumable = new Set(["paused", "usageLimited", "waiting"]);
+const resumable = new Set(["paused", "usageLimited", "waiting", "owner"]);
 
 export function resumableGoals(chat) {
   return sessionGoals(chat).filter(
@@ -56,14 +58,49 @@ const watchContinuing = (watch) =>
 // The bottom of a Goal chat offers resume only for the Goal the latest turn
 // left unfinished. An older provider's pause stays saved, and a Goal parked
 // on an armed CI watch continues on its own, so neither becomes another box.
+// An owner pause has its own card; confirming, denying, or Other resumes it.
 export function resumeOffers(chat) {
   if (chat?.activeRun) return [];
   const continuing = (chat?.watches ?? []).some(watchContinuing);
   const latest = chat?.runs?.[0];
   return resumableGoals(chat).filter((goal) => {
     if (goal.provider === "cursor") return false;
+    if (goal.status === "owner") return false;
     if (continuing && goal.status === "waiting") return false;
     if (!latest) return chat?.mode === "goal" && goal.provider === chat.provider;
     return Boolean(goal.runId) && goal.runId === latest.id;
   });
+}
+
+export function hasOwnerPause(sessions) {
+  let parsed = sessions;
+  if (typeof sessions === "string") {
+    try {
+      parsed = JSON.parse(sessions);
+    } catch {
+      return false;
+    }
+  }
+  return ["codex", "claude"].some((provider) => {
+    const goal = parsed?.[provider]?.goal;
+    return goal?.status === "owner" && Boolean(goal.ownerPause?.statement);
+  });
+}
+
+export function ownerPauseFor(chat, provider) {
+  return (
+    sessionGoals(chat).find(
+      (goal) =>
+        goal.provider === provider &&
+        goal.status === "owner" &&
+        goal.ownerPause?.statement,
+    ) ?? null
+  );
+}
+
+export function ownerPauses(chat) {
+  if (chat?.activeRun) return [];
+  return sessionGoals(chat).filter(
+    (goal) => goal.status === "owner" && goal.ownerPause?.statement,
+  );
 }
