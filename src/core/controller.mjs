@@ -932,6 +932,7 @@ export class Controller extends EventEmitter {
       home = this.store.project(chat.project_id),
       messageMap = new Map(),
       proposalBuffers = new Map();
+    this.store.setRunMode(run.id, chat.mode);
     let project;
     try {
       project = await this.chatFolder(chat, home, run);
@@ -1034,7 +1035,8 @@ export class Controller extends EventEmitter {
         if (payload.text !== undefined)
           this.store.replaceMessage(id, payload.text);
         else this.store.appendMessage(id, payload.delta ?? "");
-        if (chat.mode === "plan") {
+        // Agents can end any turn with a tagged plan. Goal carries its own out.
+        if (chat.mode !== "goal") {
           const content =
             payload.text ??
             (proposalBuffers.get(id) ?? "") + (payload.delta ?? "");
@@ -1933,6 +1935,20 @@ export class Controller extends EventEmitter {
       status = "failed";
       error ||= "The agent did not confirm the Goal pause. Continue manually.";
     }
+    // A Plan turn that ended without a tagged or native proposal still gets a
+    // card for its final answer, unless that answer is a clarifying question.
+    if (
+      status === "completed" &&
+      chat.mode === "plan" &&
+      !this.store.proposedPlans(chat.id)[run.id]
+    ) {
+      const reply = this.store
+        .messages(chat.id)
+        .findLast((m) => m.run_id === run.id && m.role === "assistant")
+        ?.content?.trim();
+      if (reply && !reply.split("\n").at(-1).trim().endsWith("?"))
+        saveProposal(proposalText(reply));
+    }
     this.store.setRun(run.id, status, null, error ?? null);
     this.requeuePending(active);
     this.event(chat.id, run.id, "run", {
@@ -2117,14 +2133,20 @@ export class Controller extends EventEmitter {
     const run = this.store.run(runId);
     if (!run || run.conversation_id !== chat.id)
       throw new Error("Plan not found");
-    if (this.planReviewJobs.has(run.id))
-      return this.store.planReview(chat.id, run.id);
     const plan = this.planText(chat, run, approvalId);
     if (typeof plan !== "string" || !plan.trim())
       throw new Error("The complete plan must be available before review");
+    // A review belongs to the plan text it read. A revised plan in the same
+    // run replaces the earlier review instead of inheriting it.
+    const job = this.planReviewJobs.get(run.id),
+      saved = this.store.planReview(chat.id, run.id);
+    if (job?.plan === plan || (!job && saved?.plan === plan && saved.status === "done"))
+      return saved;
+    job?.abort.abort();
     const abort = new AbortController();
-    this.planReviewJobs.set(run.id, { chatId: chat.id, abort });
+    this.planReviewJobs.set(run.id, { chatId: chat.id, abort, plan });
     this.recordPlanReview(chat, run, {
+      plan,
       status: "running",
       reviewer: null,
       result: null,
@@ -2143,11 +2165,12 @@ export class Controller extends EventEmitter {
     });
     return this.store.planReview(chat.id, run.id);
   }
-  recordPlanReview(chat, run, { status, reviewer, result, error }) {
+  recordPlanReview(chat, run, { plan, status, reviewer, result, error }) {
     if (!this.store.conversation(chat.id)) return null;
     const saved = this.store.savePlanReview({
       conversationId: chat.id,
       runId: run.id,
+      plan,
       status,
       reviewer,
       result,
@@ -2185,6 +2208,10 @@ export class Controller extends EventEmitter {
   }
   async finishPlanReview({ chat, run, plan, abort }) {
     let reviewer = null;
+    // A review replaced by one for a revised plan leaves no trace on its row.
+    const current = () =>
+      Boolean(this.store.conversation(chat.id)) &&
+      (this.planReviewJobs.get(run.id)?.abort ?? abort) === abort;
     try {
       const reviewed = await new PlanReviewer({
         controller: this,
@@ -2195,7 +2222,9 @@ export class Controller extends EventEmitter {
         signal: abort.signal,
         onAttempt: (next) => {
           reviewer = next;
+          if (!current()) return;
           this.recordPlanReview(chat, run, {
+            plan,
             status: "running",
             reviewer,
             result: null,
@@ -2203,16 +2232,18 @@ export class Controller extends EventEmitter {
           });
         },
       }).review();
-      if (abort.signal.aborted || !this.store.conversation(chat.id)) return;
+      if (abort.signal.aborted || !current()) return;
       this.recordPlanReview(chat, run, {
+        plan,
         status: "done",
         reviewer: reviewed.reviewer,
         result: reviewed.result,
         error: null,
       });
     } catch (error) {
-      if (!this.store.conversation(chat.id)) return;
+      if (!current()) return;
       this.recordPlanReview(chat, run, {
+        plan,
         status: abort.signal.aborted ? "cancelled" : "failed",
         reviewer,
         result: null,
@@ -2224,6 +2255,23 @@ export class Controller extends EventEmitter {
   }
   waitApproval(run, request, signal, { timeoutMs = 0 } = {}) {
     if (signal.aborted) return Promise.resolve({ allow: false });
+    // A newer plan replaces any the agent left waiting, such as one asked
+    // again after a dropped connection. Only the latest stays open.
+    if (request.kind === "plan")
+      for (const old of this.store.pendingApprovals(run.conversation_id))
+        if (old.run_id === run.id && old.request?.kind === "plan") {
+          const result = {
+            allow: false,
+            answers: {},
+            reason: "Superseded by a newer plan.",
+          };
+          if (!this.store.resolveApproval(old.id, result)) continue;
+          this.event(run.conversation_id, run.id, "approval-resolved", {
+            id: old.id,
+            response: result,
+          });
+          this.approvalWaiters.get(old.id)?.resolve(result);
+        }
     const stored =
       timeoutMs > 0
         ? { ...request, deadline: Date.now() + timeoutMs }

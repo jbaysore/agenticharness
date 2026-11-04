@@ -13,7 +13,7 @@ import { AsyncQueue } from "../core/queue.mjs";
 import { historyTools } from "../core/history.mjs";
 import { memoryTools } from "../core/memory-web.mjs";
 import { claudeQuestionAnswers } from "../core/questions.mjs";
-import { proposalText } from "../core/plans.mjs";
+import { planRevisionRequest, proposalText } from "../core/plans.mjs";
 import { goalStopped } from "../core/goals.mjs";
 import { watchTools } from "../core/watch-tools.mjs";
 import { ownerPauseTool } from "../core/owner-pause.mjs";
@@ -589,7 +589,7 @@ export async function runClaude(
             return {
               behavior: "deny",
               message: answer.reason
-                ? `The user wants to keep planning. Stay in plan mode and revise the plan based on this feedback:\n\n${answer.reason}`
+                ? `The user wants to keep planning. Stay in plan mode. ${planRevisionRequest(answer.reason)}`
                 : "The user wants to keep planning. Stay in plan mode and ask what to change.",
             };
           // Carrying out a plan inside Goal must not switch the chat to Default.

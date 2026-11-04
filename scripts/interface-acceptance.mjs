@@ -3,6 +3,7 @@ import { chromium, expect } from "@playwright/test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createHarness } from "../src/server.mjs";
+import { planRevisionRequest } from "../src/core/plans.mjs";
 
 await mkdir(".local/screenshots", { recursive: true });
 const dataDir = await mkdtemp(resolve(".local/interface-"));
@@ -140,6 +141,27 @@ try {
         kind === "fallback" ? "revised behavior" : "complete feature",
       );
       expect(builds).toBe(0);
+      // A review belongs to the plan it read, so a revised native plan in
+      // the same run can be reviewed again.
+      const reviewButton = card.getByRole("button", { name: "Get independent review" });
+      if (kind === "native") {
+        const pending = app.store.pendingApprovals(chat.id)[0];
+        app.controller.recordPlanReview(app.store.conversation(chat.id), { id: pending.run_id }, {
+          plan: pending.request.plan,
+          status: "done",
+          reviewer: null,
+          result: {
+            assessment: "sound",
+            summary: "Fixture review of the first plan.",
+            concerns: [],
+            improvements: [],
+            questions: [],
+          },
+          error: null,
+        });
+        await expect(card.getByText("Fixture review of the first plan.")).toBeVisible();
+        await expect(reviewButton).toBeDisabled();
+      }
 
       const turnCount = turns.length,
         answerCount = planAnswers.length,
@@ -193,7 +215,7 @@ try {
       if (kind === "fallback") {
         expect(turns.length).toBe(turnCount + 1);
         expect(turns.at(-1)).toEqual({
-          text: `Revise the plan based on this feedback:\n\n${feedbackText}`,
+          text: planRevisionRequest(feedbackText),
           mode: "plan",
         });
       } else {
@@ -203,6 +225,9 @@ try {
           answers: {},
           reason: feedbackText,
         });
+        await expect(card.locator(".plan-body")).toContainText("requested revisions");
+        await expect(card.getByText("Fixture review of the first plan.")).toHaveCount(0);
+        await expect(reviewButton).toBeEnabled();
       }
       await expect(page.getByLabel("Message your coding agent"))
         .toHaveValue("Unsent draft");

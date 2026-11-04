@@ -408,3 +408,75 @@ test("Cursor's authenticated HTTP bridge offers questions, waits, returns arrays
     401,
   );
 });
+
+test("a newer plan closes the older one still waiting in the same run", async (t) => {
+  const { store, chat, start } = fixture(t, "cursor");
+  const answers = [];
+  const { task } = start(async (ctx) => {
+    const first = ctx.approve({ kind: "plan", title: "Plan", plan: "First" });
+    await waitFor(() => store.pendingApprovals(chat.id).length === 1);
+    const second = ctx.approve({ kind: "plan", title: "Plan", plan: "Second" });
+    answers.push(await first);
+    assert.equal(store.pendingApprovals(chat.id)[0].request.plan, "Second");
+    answers.push(await Promise.race([second, Promise.resolve("waiting")]));
+    return { status: "completed" };
+  });
+  await task;
+  assert.deepEqual(answers[0], {
+    allow: false,
+    answers: {},
+    reason: "Superseded by a newer plan.",
+  });
+  assert.equal(answers[1], "waiting");
+});
+
+test("only a finished, unapproved plan stays open", async (t) => {
+  const { store, controller, chat, start } = fixture(t, "codex", "default");
+  // A tagged plan at the end of a Default turn still gets a card.
+  let turn = start(async (ctx) => {
+    ctx.emit("text", {
+      nativeId: "final",
+      text: "Here is the plan.\n<proposed_plan>Default plan</proposed_plan>",
+    });
+    return { status: "completed" };
+  });
+  await turn.task;
+  assert.deepEqual(store.openPlan(chat.id), {
+    runId: turn.run.id,
+    plan: "Default plan",
+    mode: "default",
+  });
+  // An ordinary reply leaves no plan open.
+  turn = start(async (ctx) => {
+    ctx.emit("text", { nativeId: "final", text: "Done." });
+    return { status: "completed" };
+  });
+  await turn.task;
+  assert.equal(store.openPlan(chat.id), null);
+  // A plan approved during its run is not offered again.
+  store.updateConversation(chat.id, { mode: "plan" });
+  turn = start(async (ctx) => {
+    await ctx.approve({ kind: "plan", title: "Build?", plan: "Approved plan" });
+    return { status: "completed" };
+  });
+  await waitFor(() => store.pendingApprovals(chat.id).length);
+  controller.answer(store.pendingApprovals(chat.id)[0].id, { allow: true });
+  await turn.task;
+  assert.equal(store.openPlan(chat.id), null);
+});
+
+test("a Plan turn's untagged answer becomes its proposal unless it asks a question", async (t) => {
+  const { store, chat, start } = fixture(t, "claude");
+  let turn = start(async (ctx) => {
+    ctx.emit("text", { nativeId: "final", text: "## Plan\n\nAdd caching." });
+    return { status: "completed" };
+  });
+  await turn.task;
+  assert.equal(store.openPlan(chat.id).plan, "## Plan\n\nAdd caching.");
+  turn = start(async (ctx) => {
+    ctx.emit("text", { nativeId: "final", text: "Which cache should I use?" });
+    return { status: "completed" };
+  });
+  await turn.task;
+  assert.equal(store.openPlan(chat.id), null);
+});

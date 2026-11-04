@@ -41,6 +41,7 @@ import { StepSummary } from "./steps.jsx";
 import { IssueButton } from "./reliability.jsx";
 import { interleave } from "../core/steps.mjs";
 import { blockingGoals, ownerPauses, resumeOffers } from "../core/goals.mjs";
+import { planRevisionRequest } from "../core/plans.mjs";
 import { OwnerPauseCard } from "./owner-pause.jsx";
 import { WatchCards, useWatchPolling } from "./watch-cards.jsx";
 import { placeWatches } from "./watch-order.mjs";
@@ -797,21 +798,28 @@ export function ChatPane({
     providers,
     continuationOptions,
   );
-  const finishedPlan = chat?.runs?.[0];
-  const hasPlanOutput = Boolean(
-    chat?.proposedPlans?.[finishedPlan?.id]?.trim() ||
-    chat?.messages?.some((m) => m.run_id === finishedPlan?.id && m.role === "assistant" && m.content?.trim()),
-  );
+  // The plan the latest finished run left open. Runs saved before run modes
+  // were recorded still need the composer in Plan mode, as they did before.
+  const openPlan = chat?.openPlan;
   const planReady =
     chat &&
     !chat.activeRun &&
-    mode === "plan" &&
-    finishedPlan?.status === "completed" &&
-    hasPlanOutput &&
-    !keptPlans.has(finishedPlan.id) &&
+    openPlan &&
+    (openPlan.mode != null || mode === "plan") &&
+    !keptPlans.has(openPlan.runId) &&
     !chat.approvals?.some((a) => a.request?.kind === "plan")
-      ? finishedPlan
+      ? {
+          ...openPlan,
+          provider: chat.runs?.find((r) => r.id === openPlan.runId)?.provider,
+        }
       : null;
+  // A review shows only on the plan it read. Older reviews did not record it.
+  const reviewFor = (runId, plan) => {
+    const review = chat?.planReviews?.[runId];
+    return review && (review.plan == null || review.plan === plan)
+      ? review
+      : null;
+  };
   return (
     <section
       className={"chat-pane " + provider + (focused ? " focused" : "")}
@@ -1066,23 +1074,23 @@ export function ChatPane({
             awaiting approval during a turn. */}
         {planReady && (
           <Approval
-            key={planReady.id}
+            key={planReady.runId}
             approval={{
-              provider: planReady.provider ?? provider,
+              provider: planReady.provider ?? chat.provider ?? provider,
               request: {
                 kind: "plan",
                 title: "Happy with the plan?",
-                plan: chat.proposedPlans?.[planReady.id],
+                plan: planReady.plan,
               },
             }}
-            review={chat.planReviews?.[planReady.id]}
+            review={reviewFor(planReady.runId, planReady.plan)}
             onReview={() =>
-              api(`/api/plans/${planReady.id}/review`, { chatId: chat.id })
+              api(`/api/plans/${planReady.runId}/review`, { chatId: chat.id })
             }
             onAnswer={async (answer) => {
               if (!answer.allow) {
                 const sent = await send(
-                  `Revise the plan based on this feedback:\n\n${answer.reason}`,
+                  planRevisionRequest(answer.reason),
                   "plan",
                   { planFeedback: true },
                 );
@@ -1090,7 +1098,7 @@ export function ChatPane({
                   throw new Error(
                     "Wait for the current action to finish and select an available model before sending feedback.",
                   );
-                setKeptPlans((ids) => new Set(ids).add(planReady.id));
+                setKeptPlans((ids) => new Set(ids).add(planReady.runId));
                 return;
               }
               await changeMode("default");
@@ -1103,7 +1111,7 @@ export function ChatPane({
             key={a.id}
             approval={a}
             review={
-              a.request?.kind === "plan" ? chat.planReviews?.[a.run_id] : null
+              a.request?.kind === "plan" ? reviewFor(a.run_id, a.request.plan) : null
             }
             onReview={
               a.request?.kind === "plan"

@@ -481,3 +481,44 @@ test("Codex plan review rejects a command instead of running it", async () => {
   );
   assert.equal(rpc.closed, true);
 });
+
+test("a revised plan in the same run gets its own review", async (t) => {
+  const { store, controller, chat, run, approval } = harness(t, "claude");
+  const reviewed = [];
+  let release;
+  controller.workers = {
+    codex: async (job) => {
+      reviewed.push(job.task);
+      if (reviewed.length === 1) await new Promise((done) => (release = done));
+      return { text: JSON.stringify(sound()), usage: {} };
+    },
+  };
+  controller.reviewPlan({ chatId: chat.id, runId: run.id, approvalId: approval.id });
+  await waitFor(() => reviewed.length === 1);
+  // Asking again for the same plan keeps the review that is running.
+  controller.reviewPlan({ chatId: chat.id, runId: run.id, approvalId: approval.id });
+  assert.equal(reviewed.length, 1);
+  const revised = store.addApproval(chat.id, run.id, "claude", {
+    kind: "plan",
+    title: "Review the plan",
+    plan: "Revised: add the button behind a setting.",
+  });
+  const started = controller.reviewPlan({
+    chatId: chat.id,
+    runId: run.id,
+    approvalId: revised.id,
+  });
+  assert.equal(started.status, "running");
+  assert.equal(started.plan, "Revised: add the button behind a setting.");
+  await waitFor(() => store.planReview(chat.id, run.id)?.status === "done");
+  release();
+  await Promise.all(controller.planReviewTasks);
+  const saved = store.planReview(chat.id, run.id);
+  assert.equal(saved.status, "done");
+  assert.equal(saved.plan, "Revised: add the button behind a setting.");
+  assert.match(reviewed.at(-1), /behind a setting/);
+  // A finished review of the same plan is returned, not repeated.
+  const count = reviewed.length;
+  controller.reviewPlan({ chatId: chat.id, runId: run.id, approvalId: revised.id });
+  assert.equal(reviewed.length, count);
+});

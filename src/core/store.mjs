@@ -126,6 +126,12 @@ export class Store {
       );
     if (!columns("runs").includes("error"))
       this.db.exec("ALTER TABLE runs ADD COLUMN error TEXT");
+    // The chat mode a run worked in. Older runs have none.
+    if (!columns("runs").includes("mode"))
+      this.db.exec("ALTER TABLE runs ADD COLUMN mode TEXT");
+    // The plan text a review read, so a revised plan gets its own review.
+    if (!columns("plan_reviews").includes("plan"))
+      this.db.exec("ALTER TABLE plan_reviews ADD COLUMN plan TEXT");
     const conversation = columns("conversations");
     if (!conversation.includes("permissions"))
       this.db.exec(
@@ -902,6 +908,9 @@ export class Store {
         id,
       );
   }
+  setRunMode(id, mode) {
+    this.db.prepare("UPDATE runs SET mode=? WHERE id=?").run(mode, id);
+  }
   appendEvent(conversationId, runId, type, payload) {
     if (type === "run" && payload.status === "interrupted")
       this.insertEvent(conversationId, runId, "reliability-transition", { kind: "interruption", key: "interruption:" + runId, provider: payload.provider });
@@ -1136,13 +1145,14 @@ export class Store {
         .map((event) => [event.run_id, JSON.parse(event.payload).text]),
     );
   }
-  savePlanReview({ conversationId, runId, status, reviewer, result, error }) {
+  savePlanReview({ conversationId, runId, plan, status, reviewer, result, error }) {
     this.db
       .prepare(
-        `INSERT INTO plan_reviews(run_id,conversation_id,status,reviewer,result,error,updated_at)
-         VALUES(?,?,?,?,?,?,?)
+        `INSERT INTO plan_reviews(run_id,conversation_id,plan,status,reviewer,result,error,updated_at)
+         VALUES(?,?,?,?,?,?,?,?)
          ON CONFLICT(run_id) DO UPDATE SET
            conversation_id=excluded.conversation_id,
+           plan=excluded.plan,
            status=excluded.status,
            reviewer=excluded.reviewer,
            result=excluded.result,
@@ -1152,6 +1162,7 @@ export class Store {
       .run(
         runId,
         conversationId,
+        plan ?? null,
         status,
         reviewer ? JSON.stringify(reviewer) : null,
         result ? JSON.stringify(result) : null,
@@ -1173,6 +1184,7 @@ export class Store {
         .map((row) => [
           row.run_id,
           {
+            plan: row.plan,
             status: row.status,
             reviewer: row.reviewer ? JSON.parse(row.reviewer) : null,
             result: row.result ? JSON.parse(row.result) : null,
@@ -1182,6 +1194,24 @@ export class Store {
         ]),
     );
   }
+  // The plan the latest finished run left for the user to confirm or revise.
+  // A plan approved during the run, or one carried out by a Goal, is not open.
+  openPlan(conversationId) {
+    const run = this.db
+      .prepare(
+        "SELECT id, status, mode FROM runs WHERE conversation_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      )
+      .get(conversationId);
+    if (!run || run.status !== "completed" || run.mode === "goal") return null;
+    const plan = this.proposedPlans(conversationId)[run.id];
+    if (!plan?.trim()) return null;
+    const approved = this.db
+      .prepare(
+        "SELECT 1 FROM approvals WHERE run_id=? AND json_extract(request,'$.kind')='plan' AND json_extract(response,'$.allow')=1 LIMIT 1",
+      )
+      .get(run.id);
+    return approved ? null : { runId: run.id, plan, mode: run.mode };
+  }
   conversationSnapshot(id) {
     return {
       ...this.conversation(id),
@@ -1189,6 +1219,7 @@ export class Store {
       messages: this.messages(id),
       proposedPlans: this.proposedPlans(id),
       planReviews: this.planReviews(id),
+      openPlan: this.openPlan(id),
       activeRun: this.activeRun(id),
       queue: this.queuedInputs(id),
       watches: this.watchStore.list(id).map(({ checkpoint, rootId, originRunId, ...watch }) => watch),

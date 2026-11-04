@@ -13,6 +13,7 @@ import { cursorPrompt } from "./attachments.mjs";
 import { historyTools } from "../core/history.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
 import { modeSuggestionTool } from "../core/modes.mjs";
+import { planRevisionRequest } from "../core/plans.mjs";
 const exec = promisify(execFile);
 
 // Harness's history and browser tools need no prompt of Cursor's, as with
@@ -513,7 +514,9 @@ export async function runCursor(ctx, deps = {}) {
               ? { outcome: "accepted" }
               : {
                   outcome: "rejected",
-                  reason: answer.reason ?? "The user declined this plan.",
+                  reason: answer.reason
+                    ? planRevisionRequest(answer.reason)
+                    : "The user declined this plan.",
                 },
           });
       } else rpc.reject(m.id);

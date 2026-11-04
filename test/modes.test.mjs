@@ -12,6 +12,7 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { askUserTool } from "../src/core/questions.mjs";
+import { planRevisionRequest } from "../src/core/plans.mjs";
 import { commandTool } from "../src/core/command-tool.mjs";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
@@ -212,7 +213,8 @@ test("Claude receives plan feedback while remaining in plan mode", async () => {
   );
   assert.equal((await run).status, "completed");
   assert.equal(decision.behavior, "deny");
-  assert.match(decision.message, /Stay in plan mode and revise/);
+  assert.match(decision.message, /Stay in plan mode\. Revise the plan/);
+  assert.match(decision.message, /say briefly what you changed/);
   assert.match(decision.message, /Include cache invalidation\.\nTest expiry\./);
   assert.equal(decision.updatedPermissions, undefined);
 });
@@ -747,7 +749,7 @@ test("declining a Cursor plan stays in plan mode and does not build", async () =
   assert.equal(responses[0].result.outcome.outcome, "rejected");
   assert.equal(
     responses[0].result.outcome.reason,
-    "Include cache invalidation.\nTest expiry.",
+    planRevisionRequest("Include cache invalidation.\nTest expiry."),
   );
 });
 
