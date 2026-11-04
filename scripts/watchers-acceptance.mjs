@@ -135,6 +135,10 @@ try {
   await app.controller.watchers.tick();
   await expect(cards).toContainText("Waiting for CI");
   await expect(cards).toContainText("Notification only");
+  await expect(cards.getByRole("link", { name: "Unit tests" })).toBeVisible();
+  const card = cards.getByRole("article");
+  await expect(card).toHaveCSS("border-top-width", "3px");
+  await expect(card).toHaveCSS("border-top-color", "rgb(61, 123, 255)");
   await expect(cards.getByRole("img", { name: "Watching CI" })).toBeVisible();
   await expect(
     page
@@ -153,8 +157,13 @@ try {
   expect(modelCalls).toBe(1);
   await page.goto(`${app.runtime.origin}/?chat=${chat.id}`);
   await expect(cards).toContainText("CI passed");
+  await expect(cards.getByRole("link", { name: "Unit tests" })).toBeVisible();
+  await expect(card).toHaveCSS("border-top-width", "3px");
+  await expect(card).toHaveCSS("border-top-color", "rgb(79, 209, 139)");
   await page.reload();
   await expect(cards).toContainText("CI passed");
+  await expect(cards.getByRole("link", { name: "Unit tests" })).toBeVisible();
+  await expect(card).toHaveCSS("border-top-color", "rgb(79, 209, 139)");
   await cards
     .getByRole("button", { name: "Continue with agent", exact: true })
     .click();
@@ -176,9 +185,10 @@ try {
   mode = "goal";
   const goalChat = await create("Goal waits for CI", "goal");
   await page.goto(`${app.runtime.origin}/?chat=${goalChat.id}`);
+  // An armed watch continues the Goal, so the resume box stays hidden.
   await expect(
     page.getByText("Goal waiting for CI.", { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(cards).toContainText("Authorized follow-up is armed");
   await expect(
     page.getByRole("button", { name: "Stop work", exact: true }),
@@ -187,6 +197,9 @@ try {
   state = "failure";
   await settle();
   await expect(cards).toContainText("CI failed");
+  await expect(cards.getByRole("link", { name: "Unit tests" })).toBeVisible();
+  await expect(card).toHaveCSS("border-top-width", "3px");
+  await expect(card).toHaveCSS("border-top-color", "rgb(255, 92, 92)");
   await expect(
     page.getByText("Watcher follow-up reviewed.", { exact: true }),
   ).toBeVisible();

@@ -61,7 +61,14 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
         const live = pending(watch) && !chat.activeRun;
         return (
           <article
-            className={`watch-card ${watch.status}${live ? " live" : ""}`}
+            className={[
+              "watch-card",
+              watch.status,
+              watch.provider,
+              live ? "live" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             key={watch.id}
           >
             <div className="watch-title">
@@ -105,23 +112,20 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
               <p>Follow-up sent to the agent.</p>
             )}
             {watch.items?.length > 0 && (
-              <details>
-                <summary>{watch.items.length} CI results</summary>
-                <ul>
-                  {watch.items.map((item) => (
-                    <li key={item.id}>
-                      {item.url ? (
-                        <a href={item.url} target="_blank" rel="noreferrer">
-                          {item.name}
-                        </a>
-                      ) : (
-                        item.name
-                      )}
-                      : {item.state}
-                    </li>
-                  ))}
-                </ul>
-              </details>
+              <ul aria-label="CI results">
+                {watch.items.map((item) => (
+                  <li key={item.id}>
+                    {item.url ? (
+                      <a href={item.url} target="_blank" rel="noreferrer">
+                        {item.name}
+                      </a>
+                    ) : (
+                      item.name
+                    )}
+                    : {item.state}
+                  </li>
+                ))}
+              </ul>
             )}
             <div className="watch-actions">
               {(pending(watch) || watch.delivery === "pending") && (

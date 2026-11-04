@@ -1934,7 +1934,19 @@ small {
 }
 .watch-cards { display: grid; gap: 10px; margin: 18px 0; }
 .watch-trigger { margin: 18px 0; color: var(--muted); font-size: 13px; }
-.watch-card { border: 1px solid var(--line-strong); border-radius: 10px; padding: 12px 14px; font-size: 13px; overflow-wrap: anywhere; }
+.watch-card { border: 3px solid var(--text-2); border-radius: 10px; padding: 12px 14px; font-size: 13px; overflow-wrap: anywhere; }
+.watch-card.registering,
+.watch-card.pending,
+.watch-card.settling,
+.watch-card.retrying { border-color: var(--agent); }
+.watch-card.success { border-color: var(--add); }
+.watch-card.failure { border-color: var(--danger); }
+.watch-card.error { border-color: var(--signal); }
+.watch-card.cancelled,
+.watch-card.skipped,
+.watch-card.expired,
+.watch-card.stopped,
+.watch-card.superseded { border-color: var(--text-3); }
 .watch-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .watch-pulse {
   width: 8px;
@@ -1951,8 +1963,7 @@ small {
 .watch-card.expired .watch-title strong { color: var(--text-3); }
 .watch-title code, .watch-times { color: var(--muted); font-size: 12px; }
 .watch-card p { margin: 7px 0; }
-.watch-card details { margin-top: 8px; }
-.watch-card ul { padding-left: 20px; }
+.watch-card ul { margin: 8px 0 0; padding-left: 20px; }
 .watch-actions { display: flex; gap: 8px; margin-top: 8px; }
 .watch-actions:empty { display: none; }
 .watch-actions button { font-size: 12px; }
