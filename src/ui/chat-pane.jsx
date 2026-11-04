@@ -40,7 +40,7 @@ import {
 import { StepSummary } from "./steps.jsx";
 import { IssueButton } from "./reliability.jsx";
 import { interleave } from "../core/steps.mjs";
-import { blockingGoals, resumableGoals } from "../core/goals.mjs";
+import { blockingGoals, resumeOffers } from "../core/goals.mjs";
 import { WatchCards, useWatchPolling } from "./watch-cards.jsx";
 import { placeWatches } from "./watch-order.mjs";
 
@@ -761,13 +761,9 @@ export function ChatPane({
   };
   const title = chat?.title ?? "New conversation",
     marker = chatMarker(chat);
-  // A paused Goal is offered for resuming while the chat is still in Goal
-  // mode, or while its turn is the latest one.
-  const pausedGoals = resumableGoals(chat).filter(
-    (goal) =>
-      goal.provider !== "cursor" &&
-      (chat.mode === "goal" || chat.runs?.[0]?.id === goal.runId),
-  );
+  // Only the Goal the latest turn left unfinished. A live CI watch continues
+  // a waiting Goal, and an older provider's pause is not a second prompt.
+  const pausedGoals = resumeOffers(chat);
   const continuationOptions = {
     stoppedProvider: chat?.usage_stopped_provider ?? chat?.provider,
     mode: chat?.mode ?? mode,

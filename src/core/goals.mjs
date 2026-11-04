@@ -47,3 +47,23 @@ export function resumableGoals(chat) {
       (goal.provider === "codex" || Boolean(goal.objective)),
   );
 }
+
+const watchContinuing = (watch) =>
+  Boolean(watch?.armed) &&
+  (["registering", "pending", "settling", "retrying"].includes(watch.status) ||
+    watch.delivery === "pending");
+
+// The bottom of a Goal chat offers resume only for the Goal the latest turn
+// left unfinished. An older provider's pause stays saved, and a Goal parked
+// on an armed CI watch continues on its own, so neither becomes another box.
+export function resumeOffers(chat) {
+  if (chat?.activeRun) return [];
+  const continuing = (chat?.watches ?? []).some(watchContinuing);
+  const latest = chat?.runs?.[0];
+  return resumableGoals(chat).filter((goal) => {
+    if (goal.provider === "cursor") return false;
+    if (continuing && goal.status === "waiting") return false;
+    if (!latest) return chat?.mode === "goal" && goal.provider === chat.provider;
+    return Boolean(goal.runId) && goal.runId === latest.id;
+  });
+}
