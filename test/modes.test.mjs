@@ -392,7 +392,10 @@ test("an approved Claude switch to Goal starts the concrete objective while resu
     approve: async () => ({ allow: true }),
   });
   await run;
-  assert.equal(seen.message, "/goal The parser tests pass");
+  assert.equal(
+    seen.message,
+    "Latest message for this Goal:\nContinue the current task without repeating completed actions\n\n/goal The parser tests pass",
+  );
   assert.equal(seen.options.resume, "saved-session");
 });
 

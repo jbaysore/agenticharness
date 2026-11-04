@@ -8,17 +8,19 @@ import {
   ownerAnswerPrompt,
 } from "../src/core/owner-pause.mjs";
 import { ownerPauses } from "../src/core/goals.mjs";
+import { runClaude } from "../src/providers/claude.mjs";
 
 const STATEMENT = "Merge the pull request.";
 
-function harness() {
+function harness(provider = "codex") {
   const store = new Store(":memory:"),
     controller = new Controller(store, {}),
-    seen = [];
+    seen = [],
+    prompts = [];
   controller.providers = [
-    { id: "codex", name: "Codex", models: [{ id: "m", efforts: [] }] },
+    { id: provider, models: [{ id: "m", efforts: [] }] },
   ];
-  controller.runners.codex = async (ctx) => {
+  controller.runners[provider] = async (ctx) => {
     seen.push(ctx);
     if (ctx.text.startsWith("Block on the owner")) {
       ctx.goalState("active", "Ship the release");
@@ -37,24 +39,50 @@ function harness() {
       await ctx.history("pause_for_owner", { statement: STATEMENT });
       return { status: "completed" };
     }
+    if (provider === "claude")
+      return runClaude(ctx, {
+        baseOptions: () => ({}),
+        readAuth: async () => ({
+          loggedIn: true,
+          authMethod: "claude.ai",
+          apiProvider: "firstParty",
+          subscriptionType: "pro",
+        }),
+        readUsage: async () => ({
+          rate_limits_available: true,
+          rate_limits: {
+            extra_usage: { is_enabled: false, user_disabled: true },
+            limits: [{ kind: "five_hour", percent: 1 }],
+          },
+        }),
+        queryFn: ({ prompt }) => ({
+          interrupt: async () => {},
+          close() {},
+          async *[Symbol.asyncIterator]() {
+            prompts.push((await prompt.next()).value.message.content);
+            yield { type: "active_goal", value: null };
+            yield { type: "result", is_error: false };
+          },
+        }),
+      });
     ctx.goalState("complete");
     return { status: "completed" };
   };
   const project = store.addProject("fixture", "C:\\owner-pause-fixture");
   const chat = store.createConversation({
     projectId: project.id,
-    provider: "codex",
+    provider,
     model: "m",
     mode: "goal",
   });
-  return { store, controller, seen, chat };
+  return { store, controller, seen, prompts, chat };
 }
 
 const send = async (controller, chat, actionId, text, extra = {}) => {
   const run = controller.send(chat.id, {
     actionId,
     text,
-    provider: "codex",
+    provider: chat.provider,
     model: "m",
     mode: "goal",
     ...extra,
@@ -145,6 +173,59 @@ test("deny and other resume with the reason, and a typed message does too", asyn
     store.close();
   }
 });
+
+for (const answer of [
+  { choice: "done", expected: "Done. The owner confirmed this is complete." },
+  {
+    choice: "deny",
+    reason: "Do not promote yet.",
+    expected: "Denied.\nDo not promote yet.",
+  },
+  {
+    choice: "other",
+    reason: "Use the release branch instead.",
+    expected: "Other.\nUse the release branch instead.",
+  },
+  {
+    choice: "typed",
+    expected:
+      "1) The command failed with a syntax error.\n2) Done.\n3) Update the branch to main",
+  },
+]) {
+  test(`Claude receives ${answer.choice} owner feedback in its SDK prompt`, async () => {
+    const { store, controller, seen, prompts, chat } = harness("claude");
+    try {
+      await send(controller, chat, "claude-owner-pause-01", "Block on the owner");
+      if (answer.choice === "typed")
+        await send(controller, chat, "claude-owner-answer-01", answer.expected);
+      else {
+        controller.answerOwnerPause(chat.id, {
+          actionId: "claude-owner-answer-01",
+          choice: answer.choice,
+          reason: answer.reason,
+        });
+        await controller.active.get(chat.id).task;
+      }
+      assert.equal(prompts.length, 1);
+      const prompt = prompts[0];
+      assert.ok(
+        prompt.includes(seen.at(-1).text),
+        "The complete owner response must reach Claude",
+      );
+      assert.equal(prompt.split(answer.expected).length - 1, 1);
+      assert.match(prompt, /You asked the owner to:\n\nMerge the pull request/);
+      assert.ok(prompt.endsWith("/goal Ship the release"));
+      const saved = store.conversation(chat.id);
+      assert.equal(saved.sessions.claude.goal.objective, "Ship the release");
+      assert.equal(saved.sessions.claude.goal.status, "complete");
+      assert.equal(saved.owner_pause, false);
+      assert.equal(store.conversationSnapshot(chat.id).runs[0].status, "completed");
+    } finally {
+      await controller.close();
+      store.close();
+    }
+  });
+}
 
 test("a pause the agent does not confirm does not stay waiting", async () => {
   const { store, controller, chat } = harness();

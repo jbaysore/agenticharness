@@ -158,6 +158,7 @@ for (const provider of ["codex", "claude"]) {
         assert.match(ctx.text, /The Goal objective is still:\nShip the parser/);
         const prompt = await claudeContent(ctx);
         assert.match(prompt, /The move is complete/);
+        assert.equal(prompt.split(ctx.text).length - 1, 1);
         assert.match(prompt, /\/goal Ship the parser with passing tests/);
         ctx.goalState("complete", objective);
       }

@@ -7,9 +7,10 @@ import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { blockingGoals } from "../src/core/goals.mjs";
+import { claudeContent } from "../src/providers/attachments.mjs";
 
 const sha = "a".repeat(40);
-function fixture({ path = ":memory:", mode = "default" } = {}) {
+function fixture({ path = ":memory:", mode = "default", provider = "codex" } = {}) {
   let now = Date.now() + 1000,
     reads = 0;
   let result = {
@@ -38,7 +39,7 @@ function fixture({ path = ":memory:", mode = "default" } = {}) {
   const chat = store.createConversation({
     projectId: project.id,
     mode,
-    provider: "codex",
+    provider,
     model: "fixture",
   });
   controller.providers = ["codex", "claude", "cursor"].map((id) => ({
@@ -265,87 +266,95 @@ test("cancel and new instructions during an outstanding poll cannot be overwritt
   }
 });
 
-test("yield closes a Goal before parking, preserves its objective and resumes once", async () => {
-  const f = fixture({ mode: "goal" });
-  try {
-    let calls = 0,
-      watch,
-      followup;
-    f.controller.runners.codex = async (ctx) => {
-      calls++;
-      if (calls > 1) {
-        followup = ctx;
-        ctx.goalState("complete");
-        return { status: "completed" };
-      }
-      ctx.goalState("active", "Ship passing CI");
-      watch = await ctx.history("watch_github_ci", {
-        repository: "owner/repo",
-        commit: sha,
-        resumeOn: ["complete"],
-        continuation: "Fix CI if needed and assess the saved goal.",
+for (const provider of ["codex", "claude"])
+  test(`${provider}: yield closes a Goal before parking, preserves its objective and resumes once`, async () => {
+    const f = fixture({ mode: "goal", provider });
+    try {
+      let calls = 0,
+        watch,
+        followup;
+      f.controller.runners[provider] = async (ctx) => {
+        calls++;
+        if (calls > 1) {
+          followup = ctx;
+          ctx.goalState("complete");
+          return { status: "completed" };
+        }
+        ctx.goalState("active", "Ship passing CI");
+        watch = await ctx.history("watch_github_ci", {
+          repository: "owner/repo",
+          commit: sha,
+          resumeOn: ["complete"],
+          continuation: "Fix CI if needed and assess the saved goal.",
+        });
+        assert.equal(
+          (
+            await ctx.history("yield_to_watch", {
+              ids: [watch.id],
+              checkpoint: "Pushed the tested change.",
+            })
+          ).parked,
+          true,
+        );
+        assert.equal(
+          f.store.conversation(f.chat.id).sessions[provider].goal.status,
+          "active",
+        );
+        await new Promise((resolve) =>
+          ctx.signal.addEventListener("abort", resolve, { once: true }),
+        );
+        ctx.watchParked();
+        return { status: "cancelled" };
+      };
+      f.controller.send(f.chat.id, {
+        actionId: randomUUID(),
+        text: "Ship passing CI",
+        provider,
+        model: "fixture",
+        mode: "goal",
       });
+      await finishRuns(f.controller);
       assert.equal(
-        (
-          await ctx.history("yield_to_watch", {
-            ids: [watch.id],
-            checkpoint: "Pushed the tested change.",
-          })
-        ).parked,
-        true,
+        f.store.conversation(f.chat.id).sessions[provider].goal.status,
+        "waiting",
       );
       assert.equal(
-        f.store.conversation(f.chat.id).sessions.codex.goal.status,
-        "active",
+        f.store.conversation(f.chat.id).sessions[provider].goal.objective,
+        "Ship passing CI",
       );
-      await new Promise((resolve) =>
-        ctx.signal.addEventListener("abort", resolve, { once: true }),
+      assert.equal(blockingGoals(f.store.conversation(f.chat.id)).length, 0);
+      assert.equal(f.controller.active.size, 0);
+      f.result = terminal("failure");
+      await f.controller.watchers.tick();
+      f.advance();
+      await f.controller.watchers.tick();
+      await finishRuns(f.controller);
+      assert.equal(calls, 2);
+      assert.equal(followup.resumeGoal, true);
+      assert.equal(followup.goalObjective, "Ship passing CI");
+      assert.match(followup.text, /Pushed the tested change/);
+      if (provider === "claude") {
+        const prompt = await claudeContent(followup);
+        assert.equal(prompt.split(followup.text).length - 1, 1);
+        assert.match(prompt, /Outcome: failure/);
+        assert.match(prompt, /Fix CI if needed and assess the saved goal/);
+        assert.ok(prompt.endsWith("/goal Ship passing CI"));
+      }
+      const trigger = f.store
+        .messages(f.chat.id)
+        .findLast((m) => m.role === "user");
+      assert.equal(trigger.source, "watcher");
+      assert.doesNotMatch(trigger.content, /Checkpoint|untrusted evidence/);
+      assert.equal(
+        f.store.conversation(f.chat.id).sessions[provider].goal.status,
+        "complete",
       );
-      ctx.watchParked();
-      return { status: "cancelled" };
-    };
-    f.controller.send(f.chat.id, {
-      actionId: randomUUID(),
-      text: "Ship passing CI",
-      provider: "codex",
-      model: "fixture",
-      mode: "goal",
-    });
-    await finishRuns(f.controller);
-    assert.equal(
-      f.store.conversation(f.chat.id).sessions.codex.goal.status,
-      "waiting",
-    );
-    assert.equal(
-      f.store.conversation(f.chat.id).sessions.codex.goal.objective,
-      "Ship passing CI",
-    );
-    assert.equal(blockingGoals(f.store.conversation(f.chat.id)).length, 0);
-    assert.equal(f.controller.active.size, 0);
-    f.result = terminal("failure");
-    await f.controller.watchers.tick();
-    f.advance();
-    await f.controller.watchers.tick();
-    await finishRuns(f.controller);
-    assert.equal(calls, 2);
-    assert.equal(followup.resumeGoal, true);
-    assert.equal(followup.goalObjective, "Ship passing CI");
-    assert.match(followup.text, /Pushed the tested change/);
-    const trigger = f.store
-      .messages(f.chat.id)
-      .findLast((m) => m.role === "user");
-    assert.equal(trigger.source, "watcher");
-    assert.doesNotMatch(trigger.content, /Checkpoint|untrusted evidence/);
-    assert.equal(
-      f.store.conversation(f.chat.id).sessions.codex.goal.status,
-      "complete",
-    );
-    await f.controller.watchers.tick();
-    assert.equal(calls, 2);
-  } finally {
-    await f.close();
-  }
-});
+      await f.controller.watchers.tick();
+      assert.equal(calls, 2);
+    } finally {
+      await f.close();
+    }
+  });
 
 test("an unconfirmed suspension never releases a Goal or arms a wake", async () => {
   const f = fixture({ mode: "goal" });

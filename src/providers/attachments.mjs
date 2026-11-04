@@ -17,11 +17,18 @@ export function codexInput(ctx) {
 }
 
 export async function claudeContent(ctx) {
+  const goal = ctx.mode === "goal" && (!ctx.continuing || ctx.startGoal);
+  const objective = ctx.goalObjective ?? ctx.text;
+  // Reactivating /goal must preserve both its saved condition and this turn's
+  // feedback. Keep the feedback before the command so it is not part of the
+  // native Goal's condition, just like the existing context preface.
+  const feedback =
+    goal && ctx.text && ctx.text !== objective
+      ? `Latest message for this Goal:\n${ctx.text}\n\n`
+      : "";
   const text = prefaceText(
     ctx,
-    ctx.mode === "goal" && (!ctx.continuing || ctx.startGoal)
-      ? "/goal " + (ctx.goalObjective ?? ctx.text)
-      : ctx.text,
+    goal ? `${feedback}/goal ${objective}` : ctx.text,
   );
   const files = images(ctx);
   if (!files.length) return text;

@@ -730,7 +730,7 @@ test("Claude resumes a paused Goal by setting its saved objective again", async 
       goalObjective: "Saved objective",
       text: "Resume the paused goal.",
     }),
-    "/goal Saved objective",
+    "Latest message for this Goal:\nResume the paused goal.\n\n/goal Saved objective",
   );
 });
 

@@ -1664,15 +1664,7 @@ export class Controller extends EventEmitter {
         });
       },
       instructions: delivery.instructions,
-      // Claude's /goal input uses the objective instead of ctx.text. Keep the
-      // one-time move instructions alongside the handoff for that fresh Goal.
-      addendum: [
-        delivery.addendum,
-        renameLine,
-        chat.mode === "goal" && !continuing && activeEntry?.moveOrigin
-          ? continuationText
-          : "",
-      ].filter(Boolean).join("\n\n"),
+      addendum: [delivery.addendum, renameLine].filter(Boolean).join("\n\n"),
       firstTurn: messages.filter((m) => m.role === "user").length === 1,
       tools: [...hostTools, ...plan.tools, ...browserTools],
       browser,
