@@ -123,16 +123,30 @@ const permissionModes = {
     allowDangerouslySkipPermissions: true,
   },
 };
-export async function claudeAuth() {
-  const path = executable("claude");
+export async function claudeAuth({ run = exec, path = executable("claude") } = {}) {
   if (!path) throw new Error("Claude Code is not installed");
-  const result = await exec(path, ["auth", "status"], {
-    env: subscriptionEnvironment(),
-    windowsHide: true,
-    timeout: 20000,
-    maxBuffer: 128 * 1024,
-  });
-  return JSON.parse(result.stdout);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await run(path, ["auth", "status"], {
+      env: subscriptionEnvironment(),
+      windowsHide: true,
+      timeout: 20000,
+      maxBuffer: 128 * 1024,
+    });
+    try {
+      const auth = JSON.parse(result.stdout);
+      if (!auth || typeof auth.loggedIn !== "boolean")
+        throw new Error("Missing sign-in status");
+      return auth;
+    } catch (cause) {
+      // This command is read-only: retry its response, never the model turn
+      // or tools that may already have performed work. Do not expose stdout.
+      if (attempt === 1)
+        throw new Error(
+          "Claude's sign-in check returned an empty or invalid response twice. Try continuing the chat; if it repeats, check Claude Code in Connections & usage.",
+          { cause },
+        );
+    }
+  }
 }
 // Harness keeps Claude Code's setting sources off, so it would read neither
 // CLAUDE.md nor AGENTS.md. Pass the project's AGENTS.md on, plus anything
@@ -611,15 +625,17 @@ export async function runClaude(
       ctx.mode === "goal" ? "unknown" : (ctx.session?.goal?.status ?? null),
     pendingResult = null,
     sawModel = false,
-    retriedUnread = false;
+    retriedUnread = false,
+    phase = "sign-in check";
   const cancel = () => {
     q.interrupt().catch(() => q.close());
     killTimer ??= setTimeout(() => q.close(), 8000);
   };
   ctx.signal.addEventListener("abort", cancel, { once: true });
   try {
-    const auth = await readAuth(),
-      monitor = usageForAccount(auth),
+    const auth = await readAuth();
+    phase = "subscription usage check";
+    const monitor = usageForAccount(auth),
       initial = await monitor.read(() => readUsage(q));
     ctx.emit("usage", initial.usage);
     if (initial.reason) throw new Error(initial.reason);
@@ -663,6 +679,7 @@ export async function runClaude(
         polling = false;
       }
     }, pollIntervalMs);
+    phase = "session stream";
     for await (const event of q) {
       if (event.session_id && !event.parent_tool_use_id && !event.agent_id) {
         ctx.saveSession({ id: event.session_id });
@@ -872,6 +889,11 @@ export async function runClaude(
     throw new Error(stopped || "Claude ended without a final result");
   } catch (error) {
     if (stopped) return { status: "failed", error: stopped };
+    if (error instanceof SyntaxError && /JSON/i.test(error.message))
+      throw new Error(
+        `Claude returned incomplete or invalid JSON during its ${phase}. The saved chat and goal are retained. Send a message to continue.`,
+        { cause: error },
+      );
     throw error;
   } finally {
     contextRead.dispose();
