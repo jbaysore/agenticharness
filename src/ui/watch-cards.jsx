@@ -25,16 +25,19 @@ const time = (at) =>
       })
     : "Not yet";
 
-export function WatchCards({ chat, reload, refresh, report }) {
-  const [busy, setBusy] = useState(null);
-  const watches = chat?.watches ?? [],
-    ongoing = watches.some(pending);
+// Cards render inline with their turn, so the chat polls once for all of them.
+export function useWatchPolling(chat, reload, report) {
+  const ongoing = (chat?.watches ?? []).some(pending);
   useEffect(() => {
     if (!ongoing) return;
     // Read host bookkeeping, never force another GitHub check or model turn.
     const timer = setInterval(() => reload(chat.id).catch(report), 60_000);
     return () => clearInterval(timer);
   }, [chat?.id, ongoing, reload, report]);
+}
+
+export function WatchCards({ chat, watches = [], reload, refresh, report }) {
+  const [busy, setBusy] = useState(null);
   if (!watches.length) return null;
   const act = async (watch, continuation) => {
     setBusy(watch.id);

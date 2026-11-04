@@ -41,13 +41,15 @@ import { StepSummary } from "./steps.jsx";
 import { IssueButton } from "./reliability.jsx";
 import { interleave } from "../core/steps.mjs";
 import { blockingGoals, resumableGoals } from "../core/goals.mjs";
-import { WatchCards } from "./watch-cards.jsx";
+import { WatchCards, useWatchPolling } from "./watch-cards.jsx";
+import { placeWatches } from "./watch-order.mjs";
 
 // A turn's byline names the agent once, and the model only when it changed.
 // Below it the turn reads in order: short progress updates, each followed by
 // the work it led to, then the closing reply.
-function Conversation({ chat, onOpenWork }) {
-  const turns = [];
+function Conversation({ chat, onOpenWork, watchCards }) {
+  const turns = [],
+    placed = placeWatches(chat.messages, chat.watches);
   for (const m of chat.messages) {
     const last = turns.at(-1);
     if (m.role !== "assistant") turns.push({ user: m });
@@ -60,8 +62,14 @@ function Conversation({ chat, onOpenWork }) {
   }
   let lastModel = null;
   const runs = new Map((chat.runs ?? []).map((run) => [run.id, run]));
-  return turns.map(({ user, replies }) => {
-    if (user) return <UserTurn key={user.id} message={user} />;
+  const rendered = turns.map(({ user, replies }) => {
+    if (user)
+      return (
+        <React.Fragment key={user.id}>
+          {watchCards(placed.get(user.id))}
+          <UserTurn message={user} />
+        </React.Fragment>
+      );
     const first = replies[0],
       model = first.model !== lastModel ? first.model : null;
     lastModel = first.model;
@@ -118,6 +126,12 @@ function Conversation({ chat, onOpenWork }) {
       </article>
     );
   });
+  return (
+    <>
+      {rendered}
+      {watchCards(placed.get(null))}
+    </>
+  );
 }
 function UserTurn({ message }) {
   const [open, setOpen] = useState(false),
@@ -246,6 +260,7 @@ export function ChatPane({
     sending = useRef(false);
   const connected = providers.find((p) => p.id === provider),
     selectedModel = connected?.models?.find((m) => m.id === model);
+  useWatchPolling(chat, reload, report);
   useEffect(() => {
     saveDraft(draftKey, draft);
   }, [draftKey, draft]);
@@ -887,9 +902,20 @@ export function ChatPane({
             </div>
           </div>
         ) : (
-          <Conversation chat={chat} onOpenWork={onOpenWork} />
+          <Conversation
+            chat={chat}
+            onOpenWork={onOpenWork}
+            watchCards={(watches) => (
+              <WatchCards
+                chat={chat}
+                watches={watches}
+                reload={reload}
+                refresh={refresh}
+                report={report}
+              />
+            )}
+          />
         )}
-        <WatchCards chat={chat} reload={reload} refresh={refresh} report={report} />
         {chat?.activeRun &&
           chat.steps?.[chat.activeRun.id]?.length > 0 &&
           !chat.messages.some(
