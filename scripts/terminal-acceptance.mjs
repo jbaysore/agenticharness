@@ -175,6 +175,42 @@ try {
   await expect(page.locator(".terminal-pane .xterm-rows")).toContainText(
     "PANE_OK",
   );
+
+  // A plain click on the line being typed moves the cursor there: typing
+  // "C" after clicking between "AB" and "END" runs "echo ABCEND".
+  await textarea.pressSequentially("echo ABEND");
+  await expect(rows).toContainText("echo ABEND");
+  const spot = await page.evaluate(() => {
+    const row = [
+      ...document.querySelectorAll(".terminal-pane .xterm-rows > div"),
+    ].findLast((r) => r.textContent.includes("echo ABEND"));
+    let index = row.textContent.indexOf("ABEND") + 2;
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (index < node.length) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + 1);
+        const box = range.getBoundingClientRect();
+        return { x: box.left + box.width / 4, y: box.top + box.height / 2 };
+      }
+      index -= node.length;
+    }
+  });
+  await page.mouse.click(spot.x, spot.y);
+  await expect
+    .poll(() => inputs.some((i) => i.data.includes("\x1b[D")))
+    .toBe(true);
+  await textarea.press("C");
+  await textarea.press("Enter");
+  await expect
+    .poll(
+      () =>
+        app.terminals.list().find((t) => t.shell === "powershell")?.output ??
+        "",
+      { timeout: 15000 },
+    )
+    .toMatch(/ABCEND[^]*ABCEND/);
   await page.getByLabel("Close Command Prompt 1").click();
   await expect(page.getByRole("tab")).toHaveCount(1);
   expect(app.terminals.list()).toHaveLength(1);
@@ -276,7 +312,7 @@ try {
   ).toHaveAttribute("aria-expanded", "false");
   expect(errors).toEqual([]);
   console.log(
-    `Terminal pane checks passed: real PowerShell/Command Prompt, native clipboard shortcuts and buttons, Ctrl+C interrupt, ordered typing (${typingLatency} ms for a 25-character command, no per-key HTTP), splits, tabs, reload and cleanup.`,
+    `Terminal pane checks passed: real PowerShell/Command Prompt, native clipboard shortcuts and buttons, Ctrl+C interrupt, click to place the cursor, ordered typing (${typingLatency} ms for a 25-character command, no per-key HTTP), splits, tabs, reload and cleanup.`,
   );
 } finally {
   await browser.close();

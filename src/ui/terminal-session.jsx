@@ -9,6 +9,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { connectTerminal } from "./terminal-stream.mjs";
+import { cursorMoveFor } from "./terminal-click.mjs";
 import { Icon } from "./components.jsx";
 import { SHELL_CHOICES, activeTab } from "./terminal-groups.mjs";
 
@@ -106,6 +107,7 @@ export function TerminalView({ id, report, focus = false }) {
         return false;
       return true;
     });
+    let ended = false;
     const connection = connectTerminal(id, {
       report,
       onOpen: () => resize(),
@@ -114,12 +116,13 @@ export function TerminalView({ id, report, focus = false }) {
         if (message.type === "snapshot") {
           t.reset();
           t.write(message.output);
-          setStatus(message.status === "exited" ? "Ended" : "");
-          if (message.status === "exited")
-            t.write("\r\n[Terminal has ended]\r\n");
+          ended = message.status === "exited";
+          setStatus(ended ? "Ended" : "");
+          if (ended) t.write("\r\n[Terminal has ended]\r\n");
         }
         if (message.type === "output") t.write(message.data);
         if (message.type === "exit") {
+          ended = true;
           setStatus("Ended");
           t.write(`\r\n[Terminal exited: ${message.exitCode}]\r\n`);
         }
@@ -139,7 +142,51 @@ export function TerminalView({ id, report, focus = false }) {
     observer.observe(container.current);
     resize();
     const input = t.onData((data) => connection.input(data));
+    // A plain click on the line being typed moves the cursor there, as in an
+    // editor. Drags, double clicks, scrolled-back views and full-screen or
+    // mouse-driven programs keep xterm's own handling.
+    let press = null;
+    const area = container.current,
+      pressed = (event) => {
+        press = { x: event.clientX, y: event.clientY };
+      },
+      clicked = (event) => {
+        const buffer = t.buffer.active,
+          screen = t.element?.querySelector(".xterm-screen");
+        if (
+          ended ||
+          !press ||
+          !screen ||
+          event.button !== 0 ||
+          event.detail !== 1 ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey ||
+          Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4 ||
+          t.hasSelection() ||
+          t.modes.mouseTrackingMode !== "none" ||
+          buffer.type !== "normal" ||
+          buffer.viewportY !== buffer.baseY
+        )
+          return;
+        const box = screen.getBoundingClientRect(),
+          col = Math.floor(((event.clientX - box.left) / box.width) * t.cols),
+          row = Math.floor(((event.clientY - box.top) / box.height) * t.rows);
+        if (row < 0 || row >= t.rows) return;
+        const move = cursorMoveFor(buffer, {
+          cols: t.cols,
+          col,
+          row: buffer.viewportY + row,
+          applicationCursor: t.modes.applicationCursorKeysMode,
+        });
+        if (move) connection.input(move);
+      };
+    area.addEventListener("pointerdown", pressed, true);
+    area.addEventListener("click", clicked);
     return () => {
+      area.removeEventListener("pointerdown", pressed, true);
+      area.removeEventListener("click", clicked);
       observer.disconnect();
       input.dispose();
       selection.dispose();
