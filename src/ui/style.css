@@ -1996,16 +1996,31 @@ small {
 .billing-notice {
   padding: 9px 3px 12px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
   font-size: 12px;
   color: var(--text-2);
   text-align: left;
 }
-.billing-notice > span:last-child {
+.billing-notice > span.notice-more {
   margin-left: auto;
   white-space: nowrap;
   color: var(--text-2);
+}
+.claude-sign-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.billing-notice .claude-sign-in {
+  margin-top: 0;
+  margin-left: auto;
+}
+.claude-sign-in code {
+  font-size: 12px;
 }
 .working-indicator {
   display: flex;
@@ -4201,7 +4216,7 @@ button:has(> .tab-dot) {
   .billing-notice {
     font-size: 12px;
   }
-  .billing-notice > span:last-child {
+  .billing-notice > span.notice-more {
     display: none;
   }
 }

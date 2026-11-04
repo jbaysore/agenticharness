@@ -12,6 +12,7 @@ import {
 import { Attachments } from "./attachments.jsx";
 import { useChatScroll } from "./chat-scroll.jsx";
 import { ModelPicker } from "./model-picker.jsx";
+import { ClaudeSignIn } from "./claude-sign-in.jsx";
 import { DirectoryPicker } from "./directory-picker.jsx";
 import { ContextBar } from "./context-bar.jsx";
 import { SkillSlash } from "./skills-modal.jsx";
@@ -1168,12 +1169,24 @@ export function ChatPane({
             ))}
           </ul>
         )}
-        {connected?.blockReason && (
-          <button className="billing-notice" onClick={onOpenConnections}>
+        {connected?.signIn ? (
+          <div className="billing-notice">
             <span className="status-dot warning" />
-            {connected.blockReason}
-            <span>View setup ↗</span>
-          </button>
+            <span>{connected.blockReason}</span>
+            <ClaudeSignIn
+              request={connected.signIn}
+              report={report}
+              onProviders={() => refresh()}
+            />
+          </div>
+        ) : (
+          connected?.blockReason && (
+            <button className="billing-notice" onClick={onOpenConnections}>
+              <span className="status-dot warning" />
+              {connected.blockReason}
+              <span className="notice-more">View setup ↗</span>
+            </button>
+          )
         )}
         <form
           className={"composer" + (dragging ? " dragging" : "")}

@@ -5,7 +5,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { contextReporter, contextSampler, claudeUsage } from "../core/context.mjs";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -124,30 +124,126 @@ const permissionModes = {
     allowDangerouslySkipPermissions: true,
   },
 };
+export const CLAUDE_SIGN_IN = {
+  provider: "claude",
+  label: "Sign in",
+  command: "claude auth login --claudeai",
+};
+const LOGIN_ARGS = ["auth", "login", "--claudeai"];
+const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+const loginGate = { current: null };
+
+// Claude Code 2.1 exits 1 when signed out and still prints this JSON. A
+// missing or non-boolean loggedIn is not a status. Never return the raw text.
+function authFromOutput(stdout) {
+  const text = Buffer.isBuffer(stdout)
+    ? stdout.toString("utf8")
+    : typeof stdout === "string"
+      ? stdout
+      : null;
+  if (text == null) return null;
+  try {
+    const auth = JSON.parse(text);
+    if (!auth || typeof auth.loggedIn !== "boolean") return null;
+    return auth;
+  } catch {
+    return null;
+  }
+}
+function loginUrl(output) {
+  const match = String(output).match(/https:\/\/[^\s<>"']+/);
+  return match ? match[0].replace(/[),.;]+$/, "") : null;
+}
 export async function claudeAuth({ run = exec, path = executable("claude") } = {}) {
   if (!path) throw new Error("Claude Code is not installed");
   for (let attempt = 0; attempt < 2; attempt++) {
-    const result = await run(path, ["auth", "status"], {
-      env: subscriptionEnvironment(),
-      windowsHide: true,
-      timeout: 20000,
-      maxBuffer: 128 * 1024,
-    });
+    let result;
     try {
-      const auth = JSON.parse(result.stdout);
-      if (!auth || typeof auth.loggedIn !== "boolean")
-        throw new Error("Missing sign-in status");
-      return auth;
+      result = await run(path, ["auth", "status"], {
+        env: subscriptionEnvironment(),
+        windowsHide: true,
+        timeout: 20000,
+        maxBuffer: 128 * 1024,
+      });
     } catch (cause) {
-      // This command is read-only: retry its response, never the model turn
-      // or tools that may already have performed work. Do not expose stdout.
-      if (attempt === 1)
-        throw new Error(
-          "Claude's sign-in check returned an empty or invalid response twice. Try continuing the chat; if it repeats, check Claude Code in Connections & usage.",
-          { cause },
-        );
+      // A non-zero exit can still carry a complete status. Real command
+      // failures have no status and are not retried. Do not expose stdout.
+      const auth = authFromOutput(cause?.stdout);
+      if (auth) return auth;
+      throw cause;
     }
+    const auth = authFromOutput(result.stdout);
+    if (auth) return auth;
+    // This command is read-only: retry its response, never the model turn
+    // or tools that may already have performed work. Do not expose stdout.
+    if (attempt === 1)
+      throw new Error(
+        "Claude's sign-in check returned an empty or invalid response twice. Try continuing the chat; if it repeats, check Claude Code in Connections & usage.",
+      );
   }
+}
+// Starts the subscription login only. The caller decides when the user asked.
+// One login at a time. Output stays off the provider; a URL is returned alone.
+export function startClaudeLogin({
+  path = executable("claude"),
+  spawnFn = spawn,
+  env = subscriptionEnvironment(),
+  timeoutMs = LOGIN_TIMEOUT_MS,
+  gate = loginGate,
+} = {}) {
+  if (gate.current) throw new Error("Claude sign-in is already in progress.");
+  if (!path) throw new Error("Claude Code is not installed");
+  const child = spawnFn(path, LOGIN_ARGS, {
+    env,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (!child) throw new Error("Claude sign-in could not start.");
+  gate.current = child;
+  let resolve;
+  let reject;
+  let resolveDone;
+  const result = new Promise((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  const done = new Promise((finish) => {
+    resolveDone = finish;
+  });
+  let settled = false;
+  let output = "";
+  const finish = (payload) => {
+    if (settled) return;
+    settled = true;
+    resolve(payload);
+  };
+  const clear = () => {
+    if (gate.current === child) gate.current = null;
+  };
+  const capture = (chunk) => {
+    output = (output + String(chunk)).slice(-8192);
+    const url = loginUrl(output);
+    if (url) finish({ url, pending: true });
+  };
+  child.stdout?.on?.("data", capture);
+  child.stderr?.on?.("data", capture);
+  const timer = setTimeout(() => child.kill?.(), timeoutMs);
+  child.on?.("error", (error) => {
+    clearTimeout(timer);
+    clear();
+    resolveDone();
+    if (!settled) {
+      settled = true;
+      reject(error);
+    }
+  });
+  child.on?.("close", () => {
+    clearTimeout(timer);
+    clear();
+    finish({ url: loginUrl(output), pending: false });
+    resolveDone();
+  });
+  return { result, done };
 }
 // Harness keeps Claude Code's setting sources off, so it would read neither
 // CLAUDE.md nor AGENTS.md. Pass the project's AGENTS.md on, plus anything
@@ -198,6 +294,7 @@ export async function inspectClaude(
       models: [],
       blockReason:
         "Run Claude Code authentication with your Claude subscription.",
+      signIn: CLAUDE_SIGN_IN,
     };
   const input = new AsyncQueue(),
     q = queryFn({ prompt: input, options: { ...baseOptions(cwd), tools: [] } });

@@ -41,6 +41,7 @@ import { serveBrowserScreenshot } from "./core/browser-images.mjs";
 import { browserStreams } from "./core/browser-stream.mjs";
 import { uploadAttachment, serveAttachment } from "./core/attachments.mjs";
 import { cursorAuth } from "./providers/cursor.mjs";
+import { startClaudeLogin } from "./providers/claude.mjs";
 import { openReviewer } from "./providers/workers.mjs";
 import { OpenRouter } from "./providers/openrouter.mjs";
 import { Terminals } from "./core/terminals.mjs";
@@ -532,6 +533,21 @@ export async function createHarness({
           return json(res, 200, {
             providers: await controller.refreshProviders(),
           });
+        if (path === "/api/providers/claude/login" && method === "POST") {
+          const login = startClaudeLogin();
+          const status = await login.result;
+          if (status.pending) {
+            login.done.then(
+              () => controller.refreshProviders().catch(() => {}),
+              () => {},
+            );
+            return json(res, 200, { url: status.url, pending: true });
+          }
+          return json(res, 200, {
+            url: status.url,
+            providers: await controller.refreshProviders(),
+          });
+        }
         if (path === "/api/providers/openrouter") {
           if (method === "GET") return json(res, 200, await openrouter.settings());
           if (method === "PUT") {

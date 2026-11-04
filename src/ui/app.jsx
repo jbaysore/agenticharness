@@ -24,6 +24,7 @@ import { RulesModal, ReviewerSettingsForm } from "./rules-modal.jsx";
 import { SkillsModal } from "./skills-modal.jsx";
 import { UsageGlance } from "./usage-glance.jsx";
 import { ClaudeResets } from "./claude-resets.jsx";
+import { ClaudeSignIn } from "./claude-sign-in.jsx";
 import { OpenRouterSettings } from "./openrouter-settings.jsx";
 import { useRestartProgress } from "./restart-progress.jsx";
 import {
@@ -1807,6 +1808,16 @@ function App() {
                   {p.route} <span className="muted">· {p.plan}</span>
                 </p>
                 {p.blockReason && <p className="error-text">{p.blockReason}</p>}
+                {p.signIn && (
+                  <ClaudeSignIn
+                    request={p.signIn}
+                    disabled={busy}
+                    report={report}
+                    onProviders={(providers) =>
+                      setState((s) => ({ ...s, providers }))
+                    }
+                  />
+                )}
                 {usageLabel && (
                   <p className="muted small" role="status" title={p.usage.lastConfirmedAt}>
                     {usageLabel}
