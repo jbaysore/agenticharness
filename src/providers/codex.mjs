@@ -30,28 +30,32 @@ export function checkCodexRoute(config) {
   return null;
 }
 
+// MXC runs each sandboxed command on the interactive desktop, so its console
+// takes focus. Elevated commands use a private desktop and stay hidden.
+// Unelevated isolation is weaker, and the private desktop stays on.
+export function codexServerArgs(platform = process.platform) {
+  return [
+    "app-server",
+    "-c",
+    'model_provider="openai"',
+    "-c",
+    'forced_login_method="chatgpt"',
+    "-c",
+    'service_tier="default"',
+    ...(platform === "win32"
+      ? ["-c", "features.prefer_mxc=false", "-c", 'windows.sandbox="elevated"']
+      : []),
+  ];
+}
+
 export async function openCodex(cwd, { signal } = {}) {
   signal?.throwIfAborted();
   const command = executable("codex");
   if (!command) throw new Error("Codex CLI is not installed");
-  const rpc = new RpcProcess(
-    command,
-    [
-      "app-server",
-      "-c",
-      'model_provider="openai"',
-      "-c",
-      'forced_login_method="chatgpt"',
-      "-c",
-      'service_tier="default"',
-      // The desktop app prefers MXC on supported Windows devices. Standalone
-      // app-server clients must opt in; otherwise they use the legacy sandbox.
-      ...(process.platform === "win32"
-        ? ["-c", "features.prefer_mxc=true"]
-        : []),
-    ],
-    { cwd, env: subscriptionEnvironment() },
-  );
+  const rpc = new RpcProcess(command, codexServerArgs(), {
+    cwd,
+    env: subscriptionEnvironment(),
+  });
   const stop = () => rpc.close();
   signal?.addEventListener("abort", stop, { once: true });
   try {

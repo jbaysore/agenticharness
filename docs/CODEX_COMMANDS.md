@@ -15,12 +15,14 @@ removed after startup. Existing healthy hosts are reused. A missing signed-in
 session or a failed handoff is reported instead of silently starting a broken
 service-session host. `--supervise` continues monitoring the resulting host.
 
-On Windows, Harness's Codex app-server also enables `features.prefer_mxc`.
-This follows the [official Windows sandbox guidance](https://learn.chatgpt.com/docs/windows/windows-sandbox#enable-mxc):
-supported devices use MXC, while unsupported devices retain their configured
-legacy fallback. Permission modes, managed restrictions, approval routing, and
-subscription billing boundaries are preserved. The user's Codex configuration,
-sandbox accounts, and filesystem ACLs are not rewritten.
+On Windows, Harness's Codex app-server turns MXC off and selects the elevated
+sandbox (`features.prefer_mxc=false`, `windows.sandbox="elevated"`). MXC runs
+each sandboxed command on the interactive desktop, so its console takes focus.
+Elevated commands run on a private desktop and stay off that screen. Permission
+modes, managed restrictions, approval routing, and subscription billing
+boundaries are preserved. The user's sandbox accounts and filesystem ACLs are
+not rewritten. The unelevated sandbox is not selected, and the private desktop
+stays on.
 
 Provider command environments append the installed Codex desktop app's bundled
 ripgrep directory to PATH. Existing PATH entries retain priority. Discovery
