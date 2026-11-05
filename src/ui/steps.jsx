@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { presentTense, summarize, verbLabels } from "../core/steps.mjs";
+import { activityLabel, verbLabels } from "../core/steps.mjs";
 import { IssueButton, TrackCheckButton } from "./reliability.jsx";
 
 const duration = (ms) =>
@@ -18,7 +18,8 @@ function Delta({ added, removed }) {
 export function StepSummary({ steps, active, onOpenWork, chatId }) {
   const [open, setOpen] = useState(false);
   if (!steps?.length) return null;
-  const current = active ? steps.findLast((s) => s.status === "running") : null;
+  const running = active && steps.some((step) => step.status === "running");
+  const label = activityLabel(steps);
   return (
     <div className={"steps" + (open ? " open" : "")}>
       <button
@@ -26,25 +27,9 @@ export function StepSummary({ steps, active, onOpenWork, chatId }) {
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        {current && <span className="pulse-dot" />}
+        {running && <span className="pulse-dot" />}
         <span className="steps-count">
-          {steps.length === 1 ? "1 step" : `${steps.length} steps`}
-        </span>
-        <span className="steps-parts">
-          {current ? (
-            <span className="steps-part now">{presentTense(current)}…</span>
-          ) : (
-            summarize(steps).map((part) => (
-              <span
-                key={part.verb}
-                className={"steps-part" + (part.failed ? " failed" : "")}
-              >
-                {part.text}
-                <Delta {...part} />
-                {part.verb === "run" && (part.failed ? " ✗" : " ✓")}
-              </span>
-            ))
-          )}
+          {label || (steps.length === 1 ? "1 step" : `${steps.length} steps`)}
         </span>
         <svg className="steps-chevron" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />

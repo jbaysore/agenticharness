@@ -73,12 +73,17 @@ function codexStep(p) {
   }
   if (item.type === "fileChange") {
     const changes = item.changes ?? [],
-      counts = changes.map((c) => diffCounts(c.diff));
+      counts = changes.map((c) => diffCounts(c.diff)),
+      fileActions = changes.map((c) => ({
+        name: basename(c.path),
+        action: c.kind?.type === "add" ? "create" : c.kind?.type === "delete" ? "delete" : "edit",
+      }));
     return {
       ...base,
       verb: "edit",
       target: changes.length === 1 ? basename(changes[0].path) : `${changes.length} files`,
-      files: changes.map((c) => basename(c.path)),
+      files: fileActions.map((file) => file.name),
+      fileActions,
       added: counts.reduce((sum, c) => sum + c.added, 0),
       removed: counts.reduce((sum, c) => sum + c.removed, 0),
     };
@@ -111,18 +116,22 @@ function claudeTool(block) {
     name = block.name ?? "",
     base = { id: "claude:" + block.id, status: "running" };
   if (name === "Read") return { ...base, verb: "read", target: basename(input.file_path) };
-  if (name === "Write")
-    return { ...base, verb: "edit", target: basename(input.file_path), ...textCounts("", input.content) };
-  if (name === "Edit")
-    return { ...base, verb: "edit", target: basename(input.file_path), ...textCounts(input.old_string, input.new_string) };
-  if (name === "MultiEdit") {
-    const counts = (input.edits ?? []).map((e) => textCounts(e.old_string, e.new_string));
+  if (name === "Write" || name === "Edit" || name === "MultiEdit") {
+    const file = basename(input.file_path);
+    const counts =
+      name === "Write"
+        ? textCounts("", input.content)
+        : name === "Edit"
+          ? textCounts(input.old_string, input.new_string)
+          : (input.edits ?? [])
+              .map((edit) => textCounts(edit.old_string, edit.new_string))
+              .reduce((sum, count) => ({ added: sum.added + count.added, removed: sum.removed + count.removed }), { added: 0, removed: 0 });
     return {
       ...base,
       verb: "edit",
-      target: basename(input.file_path),
-      added: counts.reduce((sum, c) => sum + c.added, 0),
-      removed: counts.reduce((sum, c) => sum + c.removed, 0),
+      target: file,
+      fileActions: [{ name: file, action: name === "Write" ? "create" : "edit" }],
+      ...counts,
     };
   }
   if (name === "Bash" || name === "PowerShell")
@@ -167,6 +176,12 @@ function cursorStep(p, existing) {
         : title.replace(/^(Read|Edit|Task:)\s*/, "") || undefined;
   if (target && !(existing?.target && target === "File")) step.target = target;
   if (diff) Object.assign(step, textCounts(diff.oldText, diff.newText));
+  if (verb === "edit") {
+    const action =
+      kind === "delete" ? "delete" : /^write\b/i.test(title) ? "create" : title.trim() ? "edit" : null;
+    const file = step.target || existing?.target;
+    if (action && file) step.fileActions = [{ name: file, action }];
+  }
   return step;
 }
 
@@ -235,11 +250,15 @@ export function applyWork(steps, p, after = null, sourceEventId = null) {
       step = { id, status: finished(p.item.status) ?? "ok" };
     }
   } else if (p.provider === "openrouter" && p.toolCallId) {
+    const verb =
+      ({ read_file: "read", edit_file: "edit", list_files: "search", search_files: "search", run_command: "run", browser: "browse" })[p.toolName] ?? "other";
+    const target = p.target ? short(p.target) : null;
     step = {
       id: "openrouter:" + p.toolCallId,
-      verb: ({ read_file: "read", edit_file: "edit", list_files: "search", search_files: "search", run_command: "run", browser: "browse" })[p.toolName] ?? "other",
+      verb,
       status: finished(p.status) ?? "running",
-      ...(p.target ? { target: short(p.target) } : {}),
+      ...(target ? { target } : {}),
+      ...(verb === "edit" && target ? { fileActions: [{ name: basename(target), action: "edit" }] } : {}),
     };
   } else if (p.provider === "cursor" && p.item?.toolCallId) {
     step = cursorStep(p, steps.find((s) => s.id === "cursor:" + p.item.toolCallId));
@@ -275,43 +294,36 @@ export function interleave(messages, steps = []) {
 export const settle = (steps) =>
   steps.map((s) => (s.status === "running" ? { ...s, status: "ok" } : s));
 
-const order = ["read", "search", "edit", "run", "browse", "subagent", "plan", "other"];
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-// One short phrase per kind of work, in reading order.
-export function summarize(steps) {
-  const groups = order
-    .map((verb) => [verb, steps.filter((s) => s.verb === verb)])
-    .filter(([, list]) => list.length);
-  return groups.map(([verb, list]) => {
-    const failed = list.filter((s) => s.status === "failed").length,
-      only = list.length === 1 ? list[0] : null;
-    let text;
-    if (verb === "read") {
-      const files = new Set(list.map((s) => s.target));
-      text = files.size === 1 ? `read ${only?.target ?? [...files][0]}` : `read ${plural(files.size, "file", "files")}`;
-    } else if (verb === "edit") {
-      const files = new Set(list.flatMap((s) => s.files ?? [s.target]));
-      text = files.size === 1 ? `edited ${[...files][0]}` : `edited ${plural(files.size, "file", "files")}`;
-    } else if (verb === "run")
-      text = only ? `ran ${only.target}` : `ran ${plural(list.length, "command", "commands")}`;
-    else if (verb === "search") text = only ? `searched ${only.target}` : `searched ${list.length}×`;
-    else if (verb === "browse") text = "used the browser";
-    else if (verb === "subagent") text = plural(list.length, "subagent", "subagents");
-    else if (verb === "plan") text = "updated the plan";
-    else
-      text = only?.target
-        ? only.target[0].toLowerCase() + only.target.slice(1)
-        : plural(list.length, "other tool", "other tools");
-    return {
-      verb,
-      text,
-      added: list.reduce((sum, s) => sum + (s.added ?? 0), 0),
-      removed: list.reduce((sum, s) => sum + (s.removed ?? 0), 0),
-      failed,
-      running: list.some((s) => s.status === "running"),
-    };
-  });
+function filesIn(step) {
+  if (step.fileActions?.length) return step.fileActions;
+  if (step.verb !== "edit") return [];
+  const names = step.files?.length ? step.files : step.target ? [step.target] : [];
+  return names.map((name) => ({ name, action: "edit" }));
+}
+
+// Collapsed line between replies: unique files created or edited, and commands run.
+// A file that was both created and edited counts once, as created. Deletes do not count.
+export function activityLabel(steps) {
+  const created = new Set();
+  const edited = new Set();
+  for (const step of steps) {
+    for (const file of filesIn(step)) {
+      if (!file.name || file.action === "delete") continue;
+      if (file.action === "create") created.add(file.name);
+      else edited.add(file.name);
+    }
+  }
+  for (const name of created) edited.delete(name);
+  const runs = steps.filter((step) => step.verb === "run").length;
+  return [
+    created.size ? `Created ${plural(created.size, "File", "Files")}` : "",
+    edited.size ? `Edited ${plural(edited.size, "File", "Files")}` : "",
+    runs ? `Ran ${plural(runs, "Command", "Commands")}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 export const verbLabels = {

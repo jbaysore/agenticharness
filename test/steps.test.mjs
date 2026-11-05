@@ -6,7 +6,7 @@ import {
   interleave,
   presentTense,
   settle,
-  summarize,
+  activityLabel,
 } from "../src/core/steps.mjs";
 
 const codex = (method, item) => ({ kind: "tool", provider: "codex", method, item });
@@ -120,20 +120,52 @@ test("Cursor tool calls merge their updates", () => {
   assert.equal(presentTense(steps[1]), "Running git status --short");
 });
 
-test("A summary gives one phrase per kind of work", () => {
-  const summary = summarize([
-    { verb: "read", target: "a.mjs", status: "ok" },
-    { verb: "read", target: "b.mjs", status: "ok" },
-    { verb: "edit", target: "a.mjs", status: "ok", added: 3, removed: 7 },
-    { verb: "run", target: "npm run build", status: "failed" },
-  ]);
-  assert.deepEqual(
-    summary.map((s) => s.text),
-    ["read 2 files", "edited a.mjs", "ran npm run build"],
+test("A summary counts files created, files edited, and commands run", () => {
+  assert.equal(
+    activityLabel([
+      { verb: "read", target: "a.mjs", status: "ok" },
+      { verb: "read", target: "b.mjs", status: "ok" },
+      { verb: "edit", target: "a.mjs", status: "ok", added: 3, removed: 7 },
+      { verb: "run", target: "npm run build", status: "failed" },
+      { verb: "run", target: "npm test", status: "running" },
+    ]),
+    "Edited 1 File, Ran 2 Commands",
   );
-  assert.deepEqual([summary[1].added, summary[1].removed], [3, 7]);
-  assert.equal(summary[2].failed, 1);
+  assert.equal(activityLabel([{ verb: "search", target: "title" }]), "");
   assert.equal(applyWork([], null).length, 0);
+});
+
+test("Creates, edits, and deletes count as unique files", () => {
+  const tool = (id, name, input) => ({ kind: "tool", provider: "claude", item: { type: "tool_use", id, name, input } });
+  const steps = buildSteps([
+    tool("w", "Write", { file_path: "C:\\repo\\new.mjs", content: "a\nb" }),
+    tool("e", "Edit", { file_path: "C:\\repo\\new.mjs", old_string: "a", new_string: "c" }),
+    tool("o", "Edit", { file_path: "C:\\repo\\old.mjs", old_string: "a", new_string: "b" }),
+    tool("b", "Bash", { command: "npm test" }),
+    codex("item/completed", {
+      type: "fileChange",
+      id: "c",
+      status: "completed",
+      changes: [
+        { path: "src/added.mjs", kind: { type: "add" }, diff: "@@\n+new" },
+        { path: "src/gone.mjs", kind: { type: "delete" }, diff: "@@\n-old" },
+        { path: "src/old.mjs", kind: { type: "update" }, diff: "@@\n-a\n+b" },
+      ],
+    }),
+  ]);
+  assert.equal(activityLabel(steps), "Created 2 Files, Edited 1 File, Ran 1 Command");
+});
+
+test("A Cursor write stays created when a later update has no title", () => {
+  const call = (item, kind = "tool_call") => ({ kind, provider: "cursor", item: { toolCallId: "w", ...item } });
+  const steps = buildSteps([
+    call({ title: "Write `src/new.mjs`", kind: "edit", status: "pending", locations: [{ path: "src/new.mjs" }] }),
+    call({ status: "completed" }, "tool_call_update"),
+    call({ toolCallId: "d", title: "Delete `src/old.mjs`", kind: "delete", status: "completed", locations: [{ path: "src/old.mjs" }] }),
+  ]);
+  assert.equal(steps[0].fileActions[0].action, "create");
+  assert.equal(steps[1].fileActions[0].action, "delete");
+  assert.equal(activityLabel(steps), "Created 1 File");
 });
 
 test("Steps are placed after the reply they followed", () => {
