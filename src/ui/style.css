@@ -1462,6 +1462,29 @@ small {
   padding: 10px max(24px, calc((100% - 760px) / 2)) 16px;
   flex-shrink: 0;
 }
+.goal-progress { margin-bottom: 10px; color: var(--text-2); font-size: 12px; }
+.goal-progress summary { position: relative; padding: 7px 22px 7px 2px; list-style: none; cursor: pointer; border-radius: 5px; }
+.goal-progress summary::-webkit-details-marker { display: none; }
+.goal-progress summary:hover { background: var(--hover); }
+.goal-progress summary:focus-visible { outline: 2px solid var(--agent); outline-offset: 2px; }
+.goal-progress-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.goal-progress-heading strong { font-weight: 500; }
+.goal-progress-count { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.goal-progress-current { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
+.goal-progress-current .pulse-dot { display: inline-block; margin-right: 7px; }
+.goal-progress-chevron { position: absolute; right: 2px; top: 9px; transform: rotate(90deg); }
+.goal-progress details[open] .goal-progress-chevron { transform: rotate(-90deg); }
+.goal-progress-body { max-height: min(240px, 28dvh); overflow: auto; overscroll-behavior: contain; padding: 6px 2px 8px; border-top: 1px solid var(--line); }
+.goal-progress-status { display: block; color: var(--text-3); font-size: 11px; margin-bottom: 8px; }
+.goal-progress ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.goal-progress li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.goal-progress li > span:nth-child(2), .goal-progress-body p { overflow-wrap: anywhere; }
+.goal-progress li small { color: var(--text-3); font-size: 10px; padding-top: 2px; }
+.goal-phase-mark { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--line-strong); border-radius: 50%; font-size: 10px; }
+.goal-progress li.completed .goal-phase-mark { color: var(--agent); border-color: var(--agent); }
+.goal-progress li.in_progress > span:nth-child(2) { color: var(--text); font-weight: 500; }
+.goal-progress-body p { margin: 10px 0 0; white-space: pre-wrap; }
+.goal-progress time { display: block; margin-top: 10px; color: var(--text-3); font-size: 10px; }
 .context-meter { position: relative; min-width: 0; color: var(--text-3); }
 .context-trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 30px; padding: 6px 2px 2px; text-align: left; font-size: 11px; }
 .context-label { flex-shrink: 0; }

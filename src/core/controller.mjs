@@ -92,6 +92,7 @@ import {
   ownerAnswerPrompt,
 } from "./owner-pause.mjs";
 import { Watchers } from "./watchers.mjs";
+import { GOAL_PROGRESS_INSTRUCTIONS, goalPlanTracker, goalProgressContext } from "./goal-progress.mjs";
 
 function clearOwnerPauseAttempt(active) {
   if (!active?.ownerPause) return;
@@ -1068,6 +1069,12 @@ export class Controller extends EventEmitter {
     const continueAfterUsage = Boolean(activeEntry?.continueAfterUsage);
     const resumeAfterUsageReset = Boolean(activeEntry?.resumeAfterUsageReset);
     const savedGoal = chat.sessions[run.provider]?.goal;
+    if (chat.mode === "goal") {
+      const replacement = modeChange?.mode === "goal" ||
+        (!continuing && !resumeGoal && !continueAfterUsage && !resumeAfterUsageReset && !activeEntry?.moveOrigin);
+      const progress = this.store.beginGoalProgress(chat.id, run.provider, run.id, replacement);
+      this.event(chat.id, run.id, "goal-progress", progress);
+    }
     if (
       chat.mode === "goal" ||
       blockingGoals(chat).some((g) => g.provider === run.provider)
@@ -1119,7 +1126,14 @@ export class Controller extends EventEmitter {
       this.store.clearUsageStop(chat.id);
       this.event(chat.id, null, "chat", this.store.conversation(chat.id));
     };
+    const trackGoalPlan = goalPlanTracker(run.provider);
     const emit = (type, payload) => {
+      if (type === "work" && chat.mode === "goal" && !abort.signal.aborted &&
+          this.active.get(chat.id)?.abort === abort) {
+        const report = trackGoalPlan(payload);
+        const progress = report && this.store.updateGoalProgress(chat.id, run.provider, run.id, report);
+        if (progress) this.event(chat.id, run.id, "goal-progress", progress);
+      }
       if (type === "context-usage") {
         if (abort.signal.aborted || this.active.get(chat.id)?.run.id !== run.id || payload.sessionId !== contextSessionId) return;
         this.event(chat.id, run.id, type, { ...payload, provider: run.provider, runId: run.id });
@@ -1663,6 +1677,7 @@ export class Controller extends EventEmitter {
       chat.mode === "plan" ? PLAN_INSTRUCTIONS : "",
       standingInstructions(rules),
       chat.mode === "goal" ? GOAL_INSTRUCTIONS : MODE_SUGGESTION_INSTRUCTIONS,
+      chat.mode === "goal" ? GOAL_PROGRESS_INSTRUCTIONS : "",
       delegationInstructions(plan, this.providers, COMMAND_SHELL),
       chat.mode === "ask" ? ASK_INSTRUCTIONS : "",
     ]
@@ -1673,6 +1688,7 @@ export class Controller extends EventEmitter {
     const blocks = [
       { key: "skills", text: skillInstructions(skills), repeat: skills.length > 0 && !continuing },
       { key: "memory-web", text: memory },
+      { key: "goal-progress", text: chat.mode === "goal" ? goalProgressContext(this.store.conversation(chat.id)?.goalProgress) : "" },
       { key: "workspace", text: notice, clear: "Workspace update: no other Harness chats are currently working in this directory. Other chats can start later; continue to check workspace_activity before committing." },
     ];
     const addendumBody = blocks.map((b) => b.text)

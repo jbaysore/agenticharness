@@ -13,12 +13,61 @@ import { runClaude, pauseClaudeGoal } from "../src/providers/claude.mjs";
 import { claudeContent } from "../src/providers/attachments.mjs";
 import { GOAL_INSTRUCTIONS } from "../src/core/modes.mjs";
 import { WATCH_INSTRUCTIONS } from "../src/core/watch-tools.mjs";
+import { goalPlanTracker } from "../src/core/goal-progress.mjs";
 
 const deferred = () => Promise.withResolvers();
 const flush = async () => {
   await nextTick();
   await nextTick();
 };
+
+test("Codex forwards only its root plan across native Goal turns", async () => {
+  const reports = [], track = goalPlanTracker("codex");
+  const f = codexFixture({ emit: (type, payload) => {
+    if (type === "work") { const report = track(payload); if (report) reports.push(report); }
+  } });
+  try {
+    await f.started;
+    const plan = [{ step: "Finish the whole Goal", status: "inProgress" }];
+    f.notify("turn/plan/updated", { threadId: "child", plan });
+    f.notify("turn/plan/updated", { plan, explanation: "Starting implementation" });
+    f.notify("turn/completed", { turn: { id: "turn-1", status: "completed" } });
+    f.notify("turn/started", { turn: { id: "turn-2" } });
+    f.notify("turn/plan/updated", { plan: [{ ...plan[0], status: "completed" }] });
+    f.notify("turn/completed", { turn: { id: "turn-2", status: "completed" } });
+    f.notify("thread/goal/updated", { goal: { status: "complete" } });
+    await f.run;
+    assert.equal(reports.length, 2);
+    assert.equal(reports[0].phases[0].status, "in_progress");
+    assert.equal(reports[1].phases[0].status, "completed");
+  } finally { f.rpc.close(); await f.run.catch(() => {}); }
+});
+
+test("Claude forwards successful root todos and ignores child and failed updates", async () => {
+  const reports = [], track = goalPlanTracker("claude");
+  const f = claudeFixture({ emit: (type, payload) => {
+    if (type === "work") { const report = track(payload); if (report) reports.push(report); }
+  } });
+  try {
+    await f.started;
+    for (const [id, marker, isError] of [
+      ["child-agent", { agent_id: "child" }, false],
+      ["child-tool", { parent_tool_use_id: "child" }, false],
+      ["failed", {}, true],
+      ["root", {}, false],
+    ]) {
+      f.events.push({ type: "assistant", ...marker, message: {
+        id, content: [{ type: "tool_use", id, name: "TodoWrite", input: { todos: [{ content: "Verify the whole Goal", status: "in_progress", activeForm: "Verifying" }] } }],
+      } });
+      // SDK events need not include tool_use_result. The correlated result is sufficient.
+      f.events.push({ type: "user", ...marker, message: { content: [{ type: "tool_result", tool_use_id: id, is_error: isError, content: "Updated" }] } });
+    }
+    f.events.push({ type: "active_goal", value: null });
+    f.events.push({ type: "result" });
+    await f.run;
+    assert.deepEqual(reports, [{ phases: [{ label: "Verify the whole Goal", status: "in_progress" }], explanation: "" }]);
+  } finally { f.events.end(); await f.run.catch(() => {}); }
+});
 
 test("a user Codex pause interrupts promptly and waits beyond the old kill deadline for both acknowledgments", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });

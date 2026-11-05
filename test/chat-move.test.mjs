@@ -145,8 +145,19 @@ for (const provider of ["codex", "claude"]) {
       if (seen.length === 1) {
         ctx.saveSession({ id: "old-goal-session" });
         ctx.goalState("active", objective);
+        if (provider === "codex") ctx.emit("work", { kind: "plan", plan: [
+          { step: "Inspect the parser", status: "completed" }, { step: "Verify it", status: "pending" },
+        ] });
+        else {
+          ctx.emit("work", { kind: "tool", provider, item: { id: "phases", name: "TodoWrite", input: { todos: [
+            { content: "Inspect the parser", status: "completed" }, { content: "Verify it", status: "pending" },
+          ] } } });
+          ctx.emit("work", { kind: "tool-result", provider, toolUseId: "phases", isError: false });
+        }
         await ctx.history("move_chat", { directory: f.destination });
       } else {
+        assert.match(ctx.addendum, /\[completed\] Inspect the parser/);
+        assert.equal(f.store.conversation(f.chat.id).goalProgress.phases[0].status, "completed");
         assert.equal(ctx.startGoal, true);
         assert.equal(ctx.resumeGoal, false);
         assert.equal(ctx.session?.id, undefined);
@@ -168,6 +179,9 @@ for (const provider of ["codex", "claude"]) {
     await waitFor(() => !f.controller.active.has(f.chat.id));
     assertCompleted(f.events);
     assert.equal(seen.length, 2);
+    const progress = f.store.conversation(f.chat.id).goalProgress;
+    assert.equal(progress.goalId, seen[0].runId);
+    assert.equal(progress.status, "complete");
     assert.equal(
       f.store.conversation(f.chat.id).sessions[provider].goal.objective,
       objective,

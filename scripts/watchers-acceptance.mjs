@@ -57,7 +57,13 @@ const project = app.store.addProject("Watcher acceptance", projectPath);
 app.controller.runners.codex = async (ctx) => {
   modelCalls++;
   if (ctx.text === "Register CI") {
-    if (mode === "goal") ctx.goalState("active", "Make CI pass");
+    if (mode === "goal") {
+      ctx.goalState("active", "Make CI pass");
+      ctx.emit("work", { kind: "plan", plan: [
+        { step: "Push the fix", status: "completed" },
+        { step: "Check CI", status: "inProgress" },
+      ] });
+    }
     watch = await ctx.history("watch_github_ci", {
       repository: "owner/repo",
       commit: sha,
@@ -88,7 +94,11 @@ app.controller.runners.codex = async (ctx) => {
       nativeId: randomUUID(),
       text: "Watcher follow-up reviewed.",
     });
-    if (ctx.mode === "goal") ctx.goalState("complete");
+    if (ctx.mode === "goal") {
+      expect(ctx.addendum).toContain("[completed] Push the fix");
+      expect(ctx.addendum).toContain("[in_progress] Check CI");
+      ctx.goalState("complete");
+    }
   }
   return { status: "completed" };
 };
@@ -190,6 +200,9 @@ try {
     page.getByText("Goal waiting for CI.", { exact: true }),
   ).toHaveCount(0);
   await expect(cards).toContainText("Authorized follow-up is armed");
+  const progress = page.getByRole("region", { name: "Goal progress", exact: true });
+  await expect(progress).toContainText("1 of 2 phases complete");
+  await expect(progress).toContainText("Waiting for CI");
   await expect(
     page.getByRole("button", { name: "Stop work", exact: true }),
   ).toBeVisible();
@@ -204,6 +217,8 @@ try {
     page.getByText("Watcher follow-up reviewed.", { exact: true }),
   ).toBeVisible();
   expect(modelCalls).toBe(before + 1);
+  await expect(progress).toContainText("2 of 2 phases complete");
+  await expect(progress).toContainText("Goal complete");
   expect(app.store.conversation(goalChat.id).sessions.codex.goal.status).toBe(
     "complete",
   );

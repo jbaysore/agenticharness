@@ -46,6 +46,7 @@ function summarize(row) {
     last_ended_at,
     pending_approvals,
     active_watches,
+    goal_progress,
     ...c
   } = row;
   return {
@@ -53,6 +54,7 @@ function summarize(row) {
     directoryless: Boolean(c.directoryless),
     sessions: JSON.parse(c.sessions),
     worktree: c.worktree ? JSON.parse(c.worktree) : null,
+    goalProgress: goal_progress ? JSON.parse(goal_progress) : null,
     owner_pause,
     ...chatStatus({
       ...c,
@@ -134,6 +136,8 @@ export class Store {
     if (!columns("plan_reviews").includes("plan"))
       this.db.exec("ALTER TABLE plan_reviews ADD COLUMN plan TEXT");
     const conversation = columns("conversations");
+    if (!conversation.includes("goal_progress"))
+      this.db.exec("ALTER TABLE conversations ADD COLUMN goal_progress TEXT");
     if (!conversation.includes("permissions"))
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN permissions TEXT NOT NULL DEFAULT 'auto'",
@@ -398,6 +402,18 @@ export class Store {
     const next = goalStatus(status);
     const pause =
       next === "owner" ? ownerPause ?? session?.goal?.ownerPause : null;
+    const progress = chat.goalProgress;
+    if (progress?.provider === provider && progress.runId === runId) {
+      const completed = next === "complete" && progress.status !== "complete";
+      this.saveGoalProgress(id, {
+        ...progress,
+        status: next,
+        ...(completed && {
+          phases: progress.phases.map((phase) => ({ ...phase, status: "completed" })),
+          updatedAt: this.now(),
+        }),
+      });
+    }
     return this.updateConversation(id, {
       sessions: {
         ...chat.sessions,
@@ -424,6 +440,32 @@ export class Store {
         "SELECT model FROM runs WHERE conversation_id=? AND provider=? ORDER BY created_at DESC, rowid DESC LIMIT 1",
       )
       .get(conversationId, provider)?.model;
+  }
+  saveGoalProgress(id, progress) {
+    this.db.prepare("UPDATE conversations SET goal_progress=? WHERE id=?")
+      .run(JSON.stringify(progress), id);
+    return progress;
+  }
+  beginGoalProgress(id, provider, runId, replace = false) {
+    const previous = this.conversation(id)?.goalProgress;
+    return this.saveGoalProgress(id, {
+      ...(replace ? null : previous),
+      goalId: !replace && previous ? previous.goalId : runId,
+      provider,
+      runId,
+      status: "starting",
+      phases: !replace && previous ? previous.phases : [],
+      explanation: !replace && previous ? previous.explanation : "",
+      updatedAt: !replace && previous ? previous.updatedAt : null,
+    });
+  }
+  updateGoalProgress(id, provider, runId, report) {
+    const chat = this.conversation(id), progress = chat?.goalProgress;
+    if (chat?.mode !== "goal" || progress?.provider !== provider || progress.runId !== runId ||
+        !["starting", "active", "unknown"].includes(progress.status)) return null;
+    if (JSON.stringify([progress.phases, progress.explanation]) ===
+        JSON.stringify([report.phases, report.explanation])) return null;
+    return this.saveGoalProgress(id, { ...progress, ...report, updatedAt: this.now() });
   }
   stopGoals(id) {
     const chat = this.conversation(id);

@@ -916,27 +916,31 @@ export async function runClaude(
             ...(event.parent_tool_use_id && {
               parentId: event.parent_tool_use_id,
             }),
+            ...(event.agent_id && { agentId: event.agent_id }),
             item: block,
           });
         }
       }
-      if (event.type === "user" && event.tool_use_result) {
+      if (event.type === "user") {
         // The result names its tool call, so the chat can mark that step done or failed.
-        const result = Array.isArray(event.message?.content)
-          ? event.message.content.find((c) => c.type === "tool_result")
-          : null;
-        ctx.emit("work", {
-          kind: "tool-result",
-          provider: "claude",
-          ...(result && {
-            toolUseId: result.tool_use_id,
-            isError: !!result.is_error,
-          }),
-          ...(event.parent_tool_use_id && {
-            parentId: event.parent_tool_use_id,
-          }),
-          item: event.tool_use_result,
-        });
+        const results = Array.isArray(event.message?.content)
+          ? event.message.content.filter((c) => c.type === "tool_result")
+          : [];
+        for (const result of results.length ? results : event.tool_use_result ? [null] : []) {
+          ctx.emit("work", {
+            kind: "tool-result",
+            provider: "claude",
+            ...(result && {
+              toolUseId: result.tool_use_id,
+              isError: !!result.is_error,
+            }),
+            ...(event.parent_tool_use_id && {
+              parentId: event.parent_tool_use_id,
+            }),
+            ...(event.agent_id && { agentId: event.agent_id }),
+            item: event.tool_use_result,
+          });
+        }
       }
       if (
         event.type === "system" &&

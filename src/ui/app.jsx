@@ -632,6 +632,11 @@ function App() {
       if (["run", "reliability-update", "reliability-transition"].includes(e.type) || (e.type === "context-usage" && e.payload.state === "compacting"))
         window.dispatchEvent(new CustomEvent("harness-reliability", { detail: e }));
       if (!tracked.current.has(e.conversationId)) return;
+      if (e.type === "goal-progress" && e.id > (floors.current[e.conversationId] ?? 0))
+        setChats((all) => {
+          const chat = all[e.conversationId];
+          return chat ? { ...all, [chat.id]: { ...chat, goalProgress: e.payload } } : all;
+        });
       if (e.type === "work" && ["provider-startup", "cancellation"].includes(e.payload.kind))
         setChats((all) => {
           const chat = all[e.conversationId];

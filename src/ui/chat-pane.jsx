@@ -46,6 +46,7 @@ import { interleave } from "../core/steps.mjs";
 import { blockingGoals, ownerPauses, resumeOffers } from "../core/goals.mjs";
 import { planRevisionRequest, visibleReply } from "../core/plans.mjs";
 import { OwnerPauseCard } from "./owner-pause.jsx";
+import { GoalProgress } from "./goal-progress.jsx";
 import { WatchCards, useWatchPolling } from "./watch-cards.jsx";
 import { placeWatches } from "./watch-order.mjs";
 
@@ -1255,6 +1256,7 @@ export function ChatPane({
         ))}
       </div>
       <div className="composer-area">
+        <GoalProgress chat={chat} />
         <SkillSlash
           ref={slash}
           skills={skills}
