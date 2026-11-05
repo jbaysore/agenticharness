@@ -7,6 +7,7 @@ import "./style.css";
 import { api } from "./api.mjs";
 import { refreshQueue } from "./refresh-queue.mjs";
 import { resolveFileLink } from "./file-links.mjs";
+import { installListCopy } from "./list-copy.mjs";
 import { mergeContextSnapshots } from "./context.mjs";
 import { serverClock } from "./clock.mjs";
 import { createTurnSound } from "./turn-sound.mjs";
@@ -198,6 +199,8 @@ function App() {
     window.addEventListener("keydown", dismiss);
     return () => window.removeEventListener("keydown", dismiss);
   }, []);
+  // Plain-text copies of visible lists include their numbers and bullets.
+  useEffect(() => installListCopy(document), []);
   const [search, setSearch] = useState(""),
     [results, setResults] = useState([]),
     [searchScope, setSearchScope] = useState("project");
