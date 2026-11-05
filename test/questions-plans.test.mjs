@@ -11,7 +11,7 @@ import {
   codexQuestionAnswers,
   questionPage,
 } from "../src/core/questions.mjs";
-import { proposalText, taggedProposal } from "../src/core/plans.mjs";
+import { proposalText, taggedProposal, visibleReply } from "../src/core/plans.mjs";
 import { readClaudePlan } from "../src/providers/claude.mjs";
 import { createHarness } from "../src/server.mjs";
 
@@ -188,6 +188,44 @@ test("cancelling a shared question releases its tool and bridge", async (t) => {
   await task;
   assert.equal(received.allow, false);
   assert.equal(controller.bridgeQuestions.size, 0);
+});
+
+test("the chat bubble keeps notes and hides the plan body", () => {
+  assert.equal(
+    visibleReply(
+      "Changed the cache.\n<proposed_plan>Add caching.</proposed_plan>",
+      "Add caching.",
+    ),
+    "Changed the cache.",
+  );
+  assert.equal(
+    visibleReply("<proposed_plan>Add caching.</proposed_plan>", "Add caching."),
+    "",
+  );
+  assert.equal(
+    visibleReply("Checking.\n<proposed_plan>Still streaming", "Add caching."),
+    "Checking.",
+  );
+  assert.equal(
+    visibleReply(
+      "Use a short note.\n\nAdd caching.\n\n<proposed_plan>Add caching.</proposed_plan>",
+      "Add caching.",
+    ),
+    "Use a short note.",
+  );
+  assert.equal(
+    visibleReply(
+      "<proposed_plan>Old</proposed_plan>\nNote\n<proposed_plan>New</proposed_plan>",
+      "New",
+    ),
+    "Note",
+  );
+  assert.equal(visibleReply("## Plan\n\nAdd caching.", "## Plan\n\nAdd caching."), "");
+  assert.equal(
+    visibleReply("Which cache should I use?", null),
+    "Which cache should I use?",
+  );
+  assert.equal(visibleReply("Inspecting the code.", "Add caching."), "Inspecting the code.");
 });
 
 test("proposal extraction keeps the last complete proposal and ignores partial tags", () => {

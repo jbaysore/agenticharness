@@ -129,6 +129,11 @@ try {
       await expect(card.locator(".plan-body")).not.toContainText(
         "Old proposal",
       );
+      if (kind === "fallback") {
+        await expect(page.locator(".reply", { hasText: "Inspecting the code." })).toBeVisible();
+        await expect(page.locator(".reply", { hasText: "complete proposal" })).toHaveCount(0);
+        await expect(page.locator(".reply", { hasText: "Old proposal" })).toHaveCount(0);
+      }
       await expect(confirm).toBeEnabled();
       const copyPlan = card.getByRole("button", { name: "Copy plan" });
       await copyPlan.click();

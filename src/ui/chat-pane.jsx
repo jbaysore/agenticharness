@@ -44,7 +44,7 @@ import { StepSummary } from "./steps.jsx";
 import { IssueButton } from "./reliability.jsx";
 import { interleave } from "../core/steps.mjs";
 import { blockingGoals, ownerPauses, resumeOffers } from "../core/goals.mjs";
-import { planRevisionRequest } from "../core/plans.mjs";
+import { planRevisionRequest, visibleReply } from "../core/plans.mjs";
 import { OwnerPauseCard } from "./owner-pause.jsx";
 import { WatchCards, useWatchPolling } from "./watch-cards.jsx";
 import { placeWatches } from "./watch-order.mjs";
@@ -75,15 +75,26 @@ function Conversation({ chat, onOpenWork, watchCards }) {
           <UserTurn message={user} />
         </React.Fragment>
       );
-    const first = replies[0],
-      model = first.model !== lastModel ? first.model : null;
-    lastModel = first.model;
+    const first = replies[0];
     const active = !!first.run_id && chat.activeRun?.id === first.run_id,
-      parts = interleave(
+      shown = interleave(
         replies,
         first.run_id ? chat.steps?.[first.run_id] : [],
-      ),
-      lastWork = parts.findLastIndex((part) => part.steps.length),
+      ).map((part) => ({
+        ...part,
+        reply: part.message
+          ? visibleReply(
+              part.message.content,
+              chat.proposedPlans?.[part.message.run_id],
+            )
+          : "",
+      }));
+    // A turn whose only text was the plan leaves no empty byline. The card
+    // already shows that plan.
+    if (!shown.some((part) => part.reply || part.steps.length)) return null;
+    const model = first.model !== lastModel ? first.model : null;
+    lastModel = first.model;
+    const lastWork = shown.findLastIndex((part) => part.steps.length),
       timing = active ? null : turnTiming(runs.get(first.run_id));
     return (
       <article
@@ -107,14 +118,14 @@ function Conversation({ chat, onOpenWork, watchCards }) {
             <Icon name="link" size={13} />
           </a>
         </div>
-        {parts.map(({ message, steps }, i) => (
+        {shown.map(({ message, steps, reply }, i) => (
           <React.Fragment key={message?.id ?? "start"}>
-            {message?.content?.trim() && (
+            {reply && (
               <div
                 className={"reply" + (i <= lastWork ? " update" : "")}
                 id={message === first ? undefined : message.id}
               >
-                <Markdown text={message.content} />
+                <Markdown text={reply} />
                 <IssueButton chatId={chat.id} messageId={message.id} menu />
               </div>
             )}
