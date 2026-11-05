@@ -529,10 +529,12 @@ export async function createHarness({
             return json(res, 409, { error: "Self restart is unavailable" });
           return json(res, 200, { selfRestart: await selfRestart.retry() });
         }
-        if (path === "/api/providers/refresh" && method === "POST")
+        if (path === "/api/providers/refresh" && method === "POST") {
+          const body = await readJson(req);
           return json(res, 200, {
-            providers: await controller.refreshProviders(),
+            providers: body.provider ? await controller.refreshProvider(body.provider) : await controller.refreshProviders(),
           });
+        }
         if (path === "/api/providers/claude/login" && method === "POST") {
           const login = startClaudeLogin();
           const status = await login.result;
@@ -689,7 +691,7 @@ export async function createHarness({
           });
           if (project.scratch) controller.event(null, null, "projects", {});
           controller.event(chat.id, null, "chat", chat);
-          return json(res, 201, chat);
+          return json(res, 201, store.conversationSnapshot(chat.id));
         }
         if ((match = path.match(/^\/api\/chats\/([^/]+)\/reliability(?:\/(actions|evidence\/(\d+)))?$/))) {
           const id = match[1];
@@ -760,7 +762,7 @@ export async function createHarness({
             if (Object.hasOwn(body, "mode")) controller.setMode(id, body.mode);
             const chat = store.updateConversation(id, fields);
             controller.event(id, null, "chat", chat);
-            return json(res, 200, chat);
+            return json(res, 200, Object.hasOwn(body, "projectId") ? store.conversationSnapshot(id) : chat);
           }
         }
         if (

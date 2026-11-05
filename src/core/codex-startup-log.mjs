@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { stripVTControlCharacters } from "node:util";
 import { DatabaseSync } from "node:sqlite";
+import { retryFileOperation } from "./file-retry.mjs";
 
 const writes = new Map();
 const MAX_LINE = 16_384;
@@ -68,9 +69,10 @@ export function appendStartupRecord(
         },
       );
       if (size && size + Buffer.byteLength(line) > maxBytes) {
-        await rm(path + ".3", { force: true });
+        await retryFileOperation(() => rm(path + ".3", { force: true }));
         for (let n = 2; n >= 0; n--)
-          await rename(n ? path + "." + n : path, path + "." + (n + 1)).catch(
+          await retryFileOperation(() =>
+            rename(n ? path + "." + n : path, path + "." + (n + 1))).catch(
             (e) => {
               if (e.code !== "ENOENT") throw e;
             },

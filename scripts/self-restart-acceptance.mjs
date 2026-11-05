@@ -74,7 +74,9 @@ try {
   ).toBeVisible();
   await input.fill("Unsent draft survives a Harness update");
   const goalChat = app.store.conversations()[0];
-  app.store.setGoalState(goalChat.id, "codex", "unconfirmed-goal", "unknown");
+  app.store.setGoalState(goalChat.id, "codex", app.store.conversationSnapshot(goalChat.id).runs[0].id, "unknown");
+  app.store.updateConversation(goalChat.id, { sessions: { codex: { ...app.store.conversation(goalChat.id).sessions.codex, id: "fixture-goal" } } });
+  app.controller.pauseRunners.codex = async () => "paused";
   app.controller.event(
     goalChat.id,
     null,
@@ -89,12 +91,19 @@ try {
   await expect(
     page.getByRole("button", { name: "Stop work", exact: true }),
   ).toBeVisible();
+  // A pause also settles when the event stream is disconnected.
+  await page.route("**/api/events?*", (route) => route.abort());
+  await page.reload();
+  await expect(input).toHaveValue("Unsent draft survives a Harness update");
   await page.getByRole("button", { name: "Stop work", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Stop work", exact: true }),
   ).not.toBeVisible();
   if (app.store.restartBlockingGoals().length)
     throw new Error("Explicit Stop did not release the unconfirmed Goal hold");
+  await expect(input).toHaveValue("Unsent draft survives a Harness update");
+  await page.unroute("**/api/events?*");
+  await page.reload();
   await expect(input).toHaveValue("Unsent draft survives a Harness update");
   await page.evaluate(() => {
     window.restartBrowserMarker = true;

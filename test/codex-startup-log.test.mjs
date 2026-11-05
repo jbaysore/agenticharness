@@ -81,6 +81,22 @@ test("Codex startup records milestones, timing and filtered stderr, then stops b
   }
 });
 
+test("initialization survives the old 30-second deadline and reports its cancelable 120-second window", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const dir = await directory(t);
+  const f = fixture(echo, join(dir, "missing.sqlite"));
+  delete f.deps.timeoutMs;
+  const progress = [];
+  const opening = openCodex(process.cwd(), { dataDir: dir, progress: (value) => progress.push(value) }, f.deps);
+  t.mock.timers.tick(31000);
+  const rpc = await opening;
+  try {
+    assert.equal(Date.parse(progress[0].deadlineAt) - Date.parse(progress[0].startedAt), 120000);
+    assert.equal(progress.at(-1).state, "ready");
+    assert.equal((await records(dir)).find((r) => r.phase === "initialize-sent").timeoutMs, 120000);
+  } finally { rpc.close(); }
+});
+
 test("Codex initialization timeout leaves an actionable log without retrying or submitting a prompt", async (t) => {
   const dir = await directory(t);
   const nativePath = join(dir, "native.sqlite");

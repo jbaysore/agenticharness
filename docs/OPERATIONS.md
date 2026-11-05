@@ -25,6 +25,8 @@ Pick a project in the sidebar, then choose an agent and model in the composer.
 Before sending the first message, click the folder path or **Change** above the
 composer to choose an existing project or enter another directory. Your draft,
 attachments, and model settings stay with the conversation.
+Applying a directory waits for the assignment and attachment copies; sidebar
+refreshes run in the background.
 After a conversation has started, ask its agent to move the chat to another
 directory. Harness applies the move after the turn ends, resets the native
 session, and automatically starts a new turn in the destination to continue the
@@ -67,6 +69,20 @@ those actions. A question is shown for 60 seconds. If it is not answered, the
 agent chooses the path that best completes the objective and continues. The
 same question does not wait again after it times out, and after three timeouts
 further questions are answered by the agent at once.
+
+**Stop work** requests a Goal pause and waits for the provider to acknowledge it.
+The composer shows **Pausing…** while confirmation is pending. A disconnected
+provider leaves the Goal unconfirmed; press **Stop work** again to reconnect and
+verify the pause without submitting a new prompt. Unconfirmed Goals keep updates
+waiting. After usage runs out, **Continue with a new provider** keeps the original
+objective and saved progress. Retrying the same choice reuses its submission ID.
+**Check connections** refreshes the alternative providers independently.
+
+Codex initialization has a two-minute deadline; starting or restoring a thread
+has a three-minute deadline. The composer shows the current phase and elapsed
+time, and **Stop work** remains available during startup. Session setup failures
+retain the saved native session. Startup and thread-setup diagnostics are saved
+under `diagnostics/codex-startup.jsonl` in the data folder.
 
 When a Goal is blocked on something only you can do, such as merging a pull
 request or running a command on a machine the agent cannot reach, it calls

@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { AsyncQueue } from "../src/core/queue.mjs";
-import { runCodex } from "../src/providers/codex.mjs";
-import { runClaude } from "../src/providers/claude.mjs";
+import { runCodex, pauseCodexGoal } from "../src/providers/codex.mjs";
+import { runClaude, pauseClaudeGoal } from "../src/providers/claude.mjs";
 import { claudeContent } from "../src/providers/attachments.mjs";
 import { GOAL_INSTRUCTIONS } from "../src/core/modes.mjs";
 import { WATCH_INSTRUCTIONS } from "../src/core/watch-tools.mjs";
@@ -19,6 +19,143 @@ const flush = async () => {
   await nextTick();
   await nextTick();
 };
+
+test("a user Codex pause interrupts promptly and waits beyond the old kill deadline for both acknowledgments", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let acknowledged = false;
+  const f = codexFixture({ pauseConfirmed: () => { acknowledged = true; } });
+  const pause = deferred();
+  await f.started;
+  await flush();
+  const call = f.rpc.call;
+  f.rpc.call = (method, params) => method === "thread/goal/set" && params.status === "paused" ? pause.promise : call(method, params);
+  try {
+    f.abort.abort({ kind: "user-pause" });
+    await flush();
+    assert.ok(f.calls.some((c) => c.method === "turn/interrupt"));
+    t.mock.timers.tick(9000);
+    assert.equal(f.closes, 0);
+    f.notify("turn/completed", { turn: { id: "turn-1", status: "interrupted" } });
+    await flush();
+    assert.equal(f.settled, false);
+    assert.equal(acknowledged, false);
+    pause.resolve({ goal: { status: "paused" } });
+    assert.equal((await f.run).status, "cancelled");
+    assert.equal(acknowledged, true);
+    assert.equal(f.calls.find((c) => c.method === "thread/resume").params.excludeTurns, true);
+    assert.equal(f.calls.find((c) => c.method === "thread/resume").timeoutMs, 180000);
+  } finally { f.rpc.close(); await f.run.catch(() => {}); }
+});
+
+test("Claude's empty cancellation result is never retried or followed by context sampling", async () => {
+  let acknowledged = false;
+  const f = claudeFixture({ pauseConfirmed: () => { acknowledged = true; } },
+    { type: "result", duration_api_ms: 0, queued_turn_count: 2 });
+  await f.started;
+  f.abort.abort({ kind: "user-pause" });
+  assert.equal((await f.run).status, "cancelled");
+  assert.equal(acknowledged, true);
+  assert.equal(f.closes, 1);
+});
+
+test("a user pause arriving before turn/start returns still interrupts that turn and waits for its end", async () => {
+  let acknowledged = false;
+  const f = codexFixture({ session: undefined, startGoal: true, continuing: false, pauseConfirmed: () => { acknowledged = true; } });
+  const start = deferred(), requested = deferred();
+  const call = f.rpc.call;
+  f.rpc.call = (method, params) => {
+    if (method === "turn/start") { requested.resolve(); return start.promise; }
+    return call(method, params);
+  };
+  try {
+    await requested.promise;
+    f.abort.abort({ kind: "user-pause" });
+    await flush();
+    assert.equal(f.settled, false);
+    start.resolve({ turn: { id: "late-start" } });
+    await flush();
+    assert.ok(f.calls.some((c) => c.method === "turn/interrupt" && c.params.turnId === "late-start"));
+    assert.equal(acknowledged, false);
+    f.notify("turn/completed", { turn: { id: "late-start", status: "interrupted" } });
+    assert.equal((await f.run).status, "cancelled");
+    assert.equal(acknowledged, true);
+  } finally { f.rpc.close(); await f.run.catch(() => {}); }
+});
+
+test("Claude acknowledges a pause between Goal turns without waiting for a nonexistent result", async () => {
+  let acknowledged = false;
+  const f = claudeFixture({ pauseConfirmed: () => { acknowledged = true; } }, null);
+  await f.started;
+  f.events.push({ type: "active_goal", value: { condition: "Ship it", iterations: 1 } });
+  f.events.push({ type: "result", result: "Checkpoint", duration_api_ms: 10 });
+  await flush();
+  assert.equal(f.settled, false);
+  f.abort.abort({ kind: "user-pause" });
+  assert.equal((await f.run).status, "cancelled");
+  assert.equal(acknowledged, true);
+  assert.equal(f.closes, 1);
+});
+
+test("rechecking a disconnected Goal waits for native confirmation and rejects new work meanwhile", async () => {
+  const store = new Store(":memory:"), controller = new Controller(store, {});
+  const chat = store.createConversation({ projectId: store.addProject("Fixture", process.cwd()).id, mode: "goal" });
+  const run = store.createRun({ conversationId: chat.id, actionId: "disconnected-goal-fixture", provider: "codex", model: "m", text: "Ship it" });
+  store.setRun(run.id, "failed");
+  store.setGoalState(chat.id, "codex", run.id, "unknown", "Ship it");
+  store.updateConversation(chat.id, { sessions: { codex: { ...store.conversation(chat.id).sessions.codex, id: "native" } } });
+  const confirmation = deferred();
+  let checks = 0;
+  controller.pauseRunners.codex = async () => { checks++; return confirmation.promise; };
+  try {
+    controller.cancel(chat.id);
+    controller.cancel(chat.id);
+    await flush();
+    assert.equal(checks, 1);
+    assert.equal(store.conversationSnapshot(chat.id).pause.state, "requested");
+    assert.equal(store.restartBlockingGoals().length, 1);
+    assert.throws(() => controller.prepareSend(chat.id, { actionId: "new-work-during-pause", provider: "codex", model: "m", text: "More work" }), /confirm the Goal pause/);
+    confirmation.resolve("paused");
+    await controller.pauseChecks.get(chat.id).task;
+    assert.equal(store.restartBlockingGoals().length, 0);
+    assert.equal(store.conversationSnapshot(chat.id).pause.state, "confirmed");
+  } finally { confirmation.resolve("paused"); await controller.close(); store.close(); }
+});
+
+test("Codex saved-Goal pause checks never submit a turn and wait for an interrupted native turn", async () => {
+  const rpc = new EventEmitter(), interrupted = deferred();
+  const calls = [];
+  rpc.close = () => {};
+  rpc.call = async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/resume") return { thread: { id: "native" } };
+    if (method === "thread/goal/set") return { goal: { status: "paused" } };
+    if (method === "thread/turns/list") return { data: [{ id: "turn", status: "inProgress" }] };
+    if (method === "turn/interrupt") { interrupted.resolve(); return {}; }
+    assert.fail(method);
+  };
+  let settled = false;
+  const pause = pauseCodexGoal(process.cwd(), { id: "native" }, {}, { open: async () => rpc });
+  pause.then(() => { settled = true; });
+  await interrupted.promise;
+  await flush();
+  assert.equal(settled, false);
+  rpc.emit("notification", { method: "turn/completed", params: { threadId: "native", turn: { id: "turn", status: "interrupted" } } });
+  assert.equal(await pause, "paused");
+  assert.ok(calls.every((c) => !["turn/start", "thread/start"].includes(c.method)));
+});
+
+test("Claude saved-Goal pause checks use control requests without enqueuing a prompt", async () => {
+  let input, closed = false;
+  assert.equal(await pauseClaudeGoal(process.cwd(), { id: "native" }, {}, {
+    baseOptions: () => ({}), queryFn: ({ prompt, options }) => {
+      input = prompt;
+      assert.equal(options.resume, "native");
+      return { interrupt: async () => {}, close: () => { closed = true; } };
+    },
+  }), "paused");
+  assert.equal(closed, true);
+  assert.equal((await input.next()).done, true);
+});
 
 function codexFixture(extra = {}, savedGoal = "active") {
   const rpc = new EventEmitter(),
@@ -38,8 +175,8 @@ function codexFixture(extra = {}, savedGoal = "active") {
     rpc.closed = true;
     rpc.emit("closed", new Error("fixture connection closed"));
   };
-  rpc.call = async (method, params) => {
-    calls.push({ method, params });
+  rpc.call = async (method, params, timeoutMs) => {
+    calls.push({ method, params, timeoutMs });
     if (method === "account/read")
       return { account: { type: "chatgpt", planType: "pro" } };
     if (method === "account/rateLimits/read")
@@ -375,7 +512,7 @@ test("resuming a saved session verifies Goal state before allowing its hold to c
     });
 });
 
-function claudeFixture(extra = {}) {
+function claudeFixture(extra = {}, interruptResult = { type: "result" }) {
   const events = new AsyncQueue(),
     states = [],
     started = deferred();
@@ -410,7 +547,7 @@ function claudeFixture(extra = {}) {
       }),
       queryFn: ({ prompt }) => ({
         interrupt: async () => {
-          events.push({ type: "result" });
+          if (interruptResult) events.push(interruptResult);
         },
         close() {
           closes++;
@@ -528,10 +665,13 @@ test("legacy Goal holds persist across mode/provider changes, archiving and reop
     store.setArchived(chat.id, true);
     assert.equal(store.restartBlockingGoals()[0].status, "unknown");
     const controller = new Controller(store, {});
+    controller.pauseRunners.codex = async () => "paused";
     assert.deepEqual(controller.cancel(chat.id), { requested: true });
+    await controller.pauseChecks.get(chat.id).task;
     assert.equal(store.restartBlockingGoals().length, 0);
     assert.equal(store.conversation(chat.id).sessions.codex.id, "legacy");
     assert.deepEqual(controller.cancel(chat.id), { requested: false });
+    await controller.close();
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });
@@ -577,6 +717,9 @@ test("permission continuations and stale callbacks cannot release a Goal hold", 
     assert.equal(store.restartBlockingGoals().length, 1);
     controller.cancel(chat.id);
     assert.equal(store.restartBlockingGoals().length, 1);
+    turns[0].pauseConfirmed();
+    assert.equal(store.restartBlockingGoals().length, 1);
+    turns[1].pauseConfirmed();
     finish[1].resolve();
     await task;
     assert.equal(store.restartBlockingGoals().length, 0);
@@ -623,7 +766,9 @@ test("a runner ending without confirming its Goal leaves a durable unknown hold"
         store.recover();
         callback("complete");
         assert.equal(store.restartBlockingGoals().length, 1);
+        controller.pauseRunners.codex = async () => "paused";
         controller.cancel(chat.id);
+        await controller.pauseChecks.get(chat.id).task;
         assert.equal(store.restartBlockingGoals().length, 0);
       } finally {
         await controller.close();
@@ -652,6 +797,7 @@ test("a stopped Goal pauses with its objective and resumes without retyping it",
     await new Promise((resolve) =>
       ctx.signal.addEventListener("abort", resolve, { once: true }),
     );
+    ctx.pauseConfirmed();
     return { status: "cancelled" };
   };
   const goal = () => store.conversation(chat.id).sessions.codex.goal;

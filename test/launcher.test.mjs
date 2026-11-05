@@ -26,6 +26,7 @@ async function fixture(port = 0) {
     new URL("../src/core/restart-state.mjs", import.meta.url),
     join(root, "src", "core", "restart-state.mjs"),
   );
+  await copyFile(new URL("../src/core/file-retry.mjs", import.meta.url), join(root, "src", "core", "file-retry.mjs"));
   await mkdir(data);
   await copyFile(
     new URL("../scripts/launch.mjs", import.meta.url),
@@ -92,6 +93,30 @@ test("launcher starts an isolated host and reuses its saved runtime", async () =
     assert.equal(health.instanceId, first.instanceId);
   } finally {
     await app.close();
+  }
+});
+
+test("a slow healthy host is reused while its live PID still owns the runtime", async () => {
+  const app = await fixture();
+  let probes = 0;
+  const host = createServer((req, res) => {
+    probes++;
+    res.setHeader("Content-Type", "application/json");
+    if (probes < 3) { res.statusCode = 503; res.end("{}"); }
+    else res.end(JSON.stringify({ app: "Agentic Harness", instanceId: "slow-fixture" }));
+  });
+  await new Promise((resolve) => host.listen(0, "127.0.0.1", resolve));
+  await writeFile(join(app.data, "runtime.json"), JSON.stringify({
+    pid: process.pid, instanceId: "slow-fixture", origin: `http://127.0.0.1:${host.address().port}`,
+  }));
+  try {
+    assert.match((await app.launch()).stdout, /Harness host ready/);
+    assert.ok(probes >= 3);
+    await assert.rejects(readFile(join(app.data, "host.log")), { code: "ENOENT" });
+  } finally {
+    await new Promise((resolve) => host.close(resolve));
+    assert.ok(resolve(app.root).startsWith(resolve(tmpdir()) + sep));
+    await rm(app.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

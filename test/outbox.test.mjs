@@ -5,6 +5,7 @@ import {
   readAllPending,
   readPending,
   savePending,
+  prepareControlAction,
 } from "../src/ui/outbox.mjs";
 import {
   readDraft,
@@ -21,6 +22,19 @@ const memory = (initial = {}) => {
     removeItem: (k) => data.delete(k),
   };
 };
+
+test("control retries keep their exact action ID across reloads and prevent ambiguous model changes", () => {
+  const storage = memory();
+  const choice = { chatId: "chat", provider: "claude", model: "m", effort: null, permissions: "auto", mode: "goal", continueAfterUsage: true };
+  const first = prepareControlAction(choice, storage);
+  assert.equal(prepareControlAction(choice, storage).actionId, first.actionId);
+  const reloaded = memory(Object.fromEntries(storage.data));
+  assert.equal(prepareControlAction(choice, reloaded).actionId, first.actionId);
+  assert.throws(() => prepareControlAction({ ...choice, model: "another" }, reloaded), /awaiting confirmation/);
+  assert.equal(readPending("chat", reloaded).model, "m");
+  savePending("chat", null, reloaded);
+  assert.notEqual(prepareControlAction(choice, reloaded).actionId, first.actionId);
+});
 const blocked = {
   getItem: () => {
     throw Error("disabled");

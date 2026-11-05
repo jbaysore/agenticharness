@@ -3,8 +3,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { inspectCodex, runCodex } from "../providers/codex.mjs";
-import { inspectClaude, runClaude } from "../providers/claude.mjs";
+import { inspectCodex, runCodex, pauseCodexGoal } from "../providers/codex.mjs";
+import { inspectClaude, runClaude, pauseClaudeGoal } from "../providers/claude.mjs";
 import { runOpenRouter } from "../providers/openrouter-runner.mjs";
 import {
   inspectCursor,
@@ -141,6 +141,8 @@ export class Controller extends EventEmitter {
     this.openrouter = openrouter;
     this.providers = [];
     this.active = new Map();
+    this.pauseChecks = new Map();
+    this.pauseRunners = { codex: pauseCodexGoal, claude: pauseClaudeGoal };
     this.approvalWaiters = new Map();
     this.bridgeTokens = new Map();
     this.browser = browser;
@@ -191,43 +193,37 @@ export class Controller extends EventEmitter {
   async refreshProviders() {
     if (this.refreshing) return this.refreshing;
     this.refreshing = (async () => {
-      const functions = [
-        () => inspectCodex(this.probePath, { dataDir: this.dataDir }),
-        () => inspectClaude(this.probePath),
-        () =>
-          inspectCursor(
-            this.probePath,
-            this.store.setting("cursor-billing"),
-            (options) => this.learnCursorEfforts(options),
-          ),
-      ];
-      const ids = ["codex", "claude", "cursor"],
-        names = ["Codex", "Claude Code", "Cursor"];
-      if (this.openrouter) {
-        functions.push(() => this.openrouter.inspect({ refresh: true }));
-        ids.push("openrouter");
-        names.push("OpenRouter");
-      }
-      const settled = await Promise.allSettled(functions.map((fn) => fn()));
-      this.providers = settled.map((r, i) =>
-        r.status === "fulfilled"
-          ? r.value
-          : {
-              id: ids[i],
-              name: names[i],
-              connected: false,
-              models: [],
-              blockReason: r.reason.message,
-              usage: { authoritative: false, windows: [] },
-            },
-      );
-      this.event(null, null, "providers", { providers: this.providers });
+      await Promise.all(["codex", "claude", "cursor", ...(this.openrouter ? ["openrouter"] : [])].map((id) => this.refreshProvider(id)));
       this.scheduleProviderRefresh();
       return this.providers;
     })().finally(() => {
       this.refreshing = null;
     });
     return this.refreshing;
+  }
+  async refreshProvider(id) {
+    const inspect = {
+      codex: () => inspectCodex(this.probePath, { dataDir: this.dataDir }),
+      claude: () => inspectClaude(this.probePath),
+      cursor: () => inspectCursor(this.probePath, this.store.setting("cursor-billing"), (options) => this.learnCursorEfforts(options)),
+      ...(this.openrouter && { openrouter: () => this.openrouter.inspect({ refresh: true }) }),
+    }[id];
+    if (!inspect) throw new Error("Unknown agent");
+    this.providerRefreshes ??= new Map();
+    if (this.providerRefreshes.has(id)) return this.providerRefreshes.get(id);
+    const task = Promise.resolve().then(inspect).catch((error) => ({
+      id, name: { codex: "Codex", claude: "Claude Code", cursor: "Cursor", openrouter: "OpenRouter" }[id],
+      connected: false, models: [], blockReason: error.message, usage: { authoritative: false, windows: [] },
+    })).then((provider) => {
+      const order = ["codex", "claude", "cursor", "openrouter"];
+      this.providers = [...this.providers.filter((p) => p.id !== id), provider]
+        .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      this.event(null, null, "providers", { providers: this.providers });
+      this.scheduleProviderRefresh();
+      return this.providers;
+    }).finally(() => this.providerRefreshes.delete(id));
+    this.providerRefreshes.set(id, task);
+    return task;
   }
   async refreshOpenRouter() {
     if (!this.openrouter) return;
@@ -346,6 +342,16 @@ export class Controller extends EventEmitter {
     const chat = this.store.conversation(chatId);
     if (!chat) throw new Error("Conversation not found");
     let continuedGoalObjective, continuedGoalPrompt;
+    if (typeof actionId !== "string" || !/^[-\w]{16,100}$/.test(actionId))
+      throw new Error("A stable action ID is required");
+    const receipt = this.store.runForAction(actionId) ?? this.store.inputForAction(actionId);
+    if (receipt) {
+      if (receipt.conversation_id !== chatId) throw new Error("Action ID belongs to another conversation");
+      return { duplicate: { ...receipt, duplicate: true,
+        ...(receipt.status === "queued" && { queued: true }),
+        ...(receipt.status === "steered" && { steered: true }) } };
+    }
+    if (this.pauseChecks.has(chatId)) throw new Error("Wait for the provider to confirm the Goal pause before sending more work");
     // Resuming reactivates the saved Goal; the message only marks the turn.
     if (resumeGoal) {
       if (!resumableGoals(chat).some((g) => g.provider === provider))
@@ -389,8 +395,6 @@ export class Controller extends EventEmitter {
     }
     if (typeof text !== "string" || text.length > 250000)
       throw new Error("Enter a message under 250,000 characters");
-    if (typeof actionId !== "string" || !/^[-\w]{16,100}$/.test(actionId))
-      throw new Error("A stable action ID is required");
     if (!["codex", "claude", "cursor", "openrouter"].includes(provider))
       throw new Error("Unknown agent");
     permissions ??= chat.permissions;
@@ -402,25 +406,6 @@ export class Controller extends EventEmitter {
     const body = opened.text.trim();
     mode = opened.mode ?? mode ?? chat.mode;
     checkMode(mode, provider);
-    const prior = this.store.runForAction(actionId);
-    if (prior) {
-      if (prior.conversation_id !== chatId)
-        throw new Error("Action ID belongs to another conversation");
-      return { duplicate: { ...prior, duplicate: true } };
-    }
-    const existing = this.store.inputForAction(actionId);
-    if (existing) {
-      if (existing.conversation_id !== chatId)
-        throw new Error("Action ID belongs to another conversation");
-      return {
-        duplicate: {
-          ...existing,
-          duplicate: true,
-          queued: existing.status === "queued",
-          steered: existing.status === "steered",
-        },
-      };
-    }
     const files = resolveAttachments(
       this.store,
       chat.project_id,
@@ -1061,7 +1046,7 @@ export class Controller extends EventEmitter {
         noteUsageStop(billingStop);
       } else if (
         type === "work" &&
-        !["token-usage", "error"].includes(payload?.kind)
+        !["token-usage", "error", "provider-startup", "cancellation", "goal"].includes(payload?.kind)
       )
         noteActivity();
       if (type === "usage") {
@@ -1670,6 +1655,10 @@ export class Controller extends EventEmitter {
       tools: [...hostTools, ...plan.tools, ...browserTools],
       browser,
       signal: abort.signal,
+      attachClose: (close) => {
+        const current = this.active.get(chat.id);
+        if (current?.abort === abort) current.closeProvider = close;
+      },
       // The provider calls this once its session can take another user message.
       attachSteer: (deliver) => {
         const current = this.active.get(chat.id);
@@ -1704,6 +1693,14 @@ export class Controller extends EventEmitter {
             : undefined,
         );
         this.event(chat.id, run.id, "chat", updated);
+      },
+      pauseConfirmed: (status = "paused") => {
+        const current = this.active.get(chat.id);
+        if (current?.run.id !== run.id || current.abort !== abort || !current.goalStopRequested ||
+            (chat.mode !== "goal" && (!savedGoal || goalStopped(savedGoal.status)))) return;
+        current.pauseConfirmed = true;
+        this.store.setGoalState(chat.id, run.provider, run.id, status === "complete" ? "complete" : "paused");
+        this.event(chat.id, run.id, "work", { kind: "cancellation", state: "confirmed", text: status === "complete" ? "The provider confirmed the Goal is complete." : "Goal paused at your request. Resume it any time." });
       },
       watchParked: () => {
         if (abort.signal.reason?.kind === "watch-yield" && this.active.get(chat.id)?.run.id === run.id)
@@ -1886,7 +1883,12 @@ export class Controller extends EventEmitter {
       error = null;
       if (chat.mode === "goal") this.store.setGoalState(chat.id, run.provider, run.id, "waiting");
       this.watchers.parked(chat.id, active);
-    } else if (active?.goalStopRequested) this.store.stopGoals(chat.id);
+    } else if (active?.goalStopRequested) {
+      if (!active.pauseConfirmed && (chat.mode === "goal" || (savedGoal && !goalStopped(savedGoal.status)))) {
+        this.store.setGoalState(chat.id, run.provider, run.id, "unknown");
+        this.event(chat.id, run.id, "work", { kind: "cancellation", state: "unconfirmed", text: "The provider disconnected before confirming the Goal pause." });
+      }
+    }
     else {
       const goal = this.store.conversation(chat.id)?.sessions[run.provider]
         ?.goal;
@@ -1909,7 +1911,7 @@ export class Controller extends EventEmitter {
     if (usageStopReason && !abort.signal.aborted) {
       status = "failed";
       error = usageStopReason;
-      this.store.setUsageStop(chat.id, usageStopReason);
+      this.store.setUsageStop(chat.id, usageStopReason, run.id);
     }
     if (active?.watchYield && !parked) {
       this.watchers.invalidate(chat.id, "The turn did not confirm suspension. CI will only notify.");
@@ -2368,20 +2370,48 @@ export class Controller extends EventEmitter {
     this.watchers.invalidate(chatId, "Stop revoked automatic follow-up.");
     const active = this.active.get(chatId);
     if (active) {
+      if (active.goalStopRequested) return { requested: true };
       active.cancelled = true;
       active.goalStopRequested = true;
-      active.abort.abort();
       this.event(chatId, active.run.id, "work", {
         kind: "cancellation",
+        state: "requested",
         text: "Stop requested. Waiting for the agent to acknowledge.",
       });
-    } else if (this.store.stopGoals(chatId)) {
-      this.event(chatId, null, "chat", this.store.conversation(chatId));
-      this.event(chatId, null, "work", {
-        kind: "cancellation",
-        text: "Goal paused at your request. Resume it any time.",
-      });
-      return { requested: true };
+      active.abort.abort({ kind: "user-pause" });
+    } else {
+      if (this.pauseChecks.has(chatId)) return { requested: true };
+      const chat = this.store.conversation(chatId);
+      const goals = blockingGoals(chat);
+      if (goals.length) {
+        const abort = new AbortController();
+        const task = Promise.resolve().then(async () => {
+          for (const goal of goals) {
+            this.event(chatId, goal.runId ?? null, "work", { kind: "cancellation", state: "requested", text: "Reconnecting to verify the Goal pause…" });
+            try {
+              const session = chat.sessions[goal.provider];
+              const saved = typeof session === "string" ? { id: session } : session;
+              if (!saved?.id) throw new Error("The Goal has no saved native session to verify");
+              const status = await this.pauseRunners[goal.provider](this.store.project(chat.project_id).path, saved, { dataDir: this.dataDir, signal: abort.signal });
+              if (!goalStopped(status)) throw new Error("The provider did not confirm the Goal stopped");
+              if (abort.signal.aborted || this.active.has(chatId)) return;
+              const latest = this.store.conversation(chatId)?.sessions[goal.provider];
+              if ((typeof latest === "string" ? latest : latest?.id) !== saved.id || latest?.goal?.runId !== goal.runId) continue;
+              this.store.setGoalState(chatId, goal.provider, goal.runId, status === "complete" ? "complete" : "paused");
+              this.event(chatId, goal.runId ?? null, "work", { kind: "cancellation", state: "confirmed", text: "The provider confirmed the Goal stopped." });
+            } catch (error) {
+              this.event(chatId, goal.runId ?? null, "work", { kind: "cancellation", state: "unconfirmed", text: "Could not verify the Goal pause: " + error.message });
+            }
+          }
+          this.event(chatId, null, "chat", this.store.conversation(chatId));
+        }).finally(() => this.pauseChecks.delete(chatId));
+        this.pauseChecks.set(chatId, { abort, task });
+        return { requested: true };
+      }
+      if (this.store.stopGoals(chatId)) {
+        this.event(chatId, null, "chat", this.store.conversation(chatId));
+        return { requested: true };
+      }
     }
     return { requested: !!active };
   }
@@ -2391,16 +2421,23 @@ export class Controller extends EventEmitter {
     this.openrouter?.off("change", this.openrouterChanged);
     this.openrouter?.close();
     for (const { abort } of this.planReviewJobs.values()) abort.abort();
+    for (const { abort } of this.pauseChecks.values()) abort.abort();
     const active = [...this.active.values()];
+    const shutdownTimers = [];
     for (const work of active) {
       work.cancelled = true;
+      if (work.abort.signal.aborted && work.closeProvider)
+        shutdownTimers.push(setTimeout(() => work.closeProvider(), 8000));
       work.abort.abort();
     }
     await Promise.allSettled([
       ...active.map((a) => a.task),
       ...this.planReviewTasks,
       this.refreshing,
+      ...(this.providerRefreshes?.values() ?? []),
+      ...[...this.pauseChecks.values()].map((check) => check.task),
     ]);
+    shutdownTimers.forEach(clearTimeout);
     this.browser?.close();
     await this.memoryWeb?.close();
   }

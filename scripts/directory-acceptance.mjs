@@ -286,8 +286,24 @@ try {
     .click();
   await expect(useFolder).toBeEnabled();
   expect(app.store.conversation(empty.id).project_id).toBe(second.id);
-  await useFolder.click();
-  await expect(dialog).toBeHidden();
+  // Applying a folder must not wait for unrelated state/snapshot refreshes.
+  const refreshGate = Promise.withResolvers();
+  const slowAssignment = async (route) => {
+    if (route.request().method() === "GET") await refreshGate.promise;
+    else await new Promise((resolve) => setTimeout(resolve, 200));
+    await route.continue().catch(() => {});
+  };
+  const refreshPaths = ["**/api/state", `**/api/chats/${empty.id}`, "**/api/projects"];
+  for (const path of refreshPaths) await page.route(path, slowAssignment);
+  try {
+    const choosingAt = performance.now();
+    await useFolder.click();
+    await expect(dialog).toBeHidden({ timeout: 1000 });
+    expect(performance.now() - choosingAt).toBeLessThan(1000);
+  } finally {
+    refreshGate.resolve();
+    for (const path of refreshPaths) await page.unroute(path, slowAssignment);
+  }
   await expect(trigger).toHaveAttribute(
     "title",
     `Change directory: ${newPath}`,

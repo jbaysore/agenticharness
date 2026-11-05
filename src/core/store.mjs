@@ -15,7 +15,8 @@ import { WatchStore } from "./watch-store.mjs";
 const historyScopes = ["none", "project", "all"];
 // A chat's newest run is its only possible active one: createRun refuses a second.
 const summary = `SELECT c.*, (SELECT scratch FROM projects WHERE id=c.project_id) AS directoryless, l.status AS last_status, l.ended_at AS last_ended_at, l.error AS last_error,
-  (SELECT r.provider FROM runs r WHERE r.conversation_id=c.id AND c.usage_stopped_at IS NOT NULL AND r.error=c.usage_stopped_reason ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1) AS usage_stopped_provider,
+  COALESCE((SELECT r.provider FROM runs r WHERE r.id=c.usage_stopped_run_id),
+    (SELECT r.provider FROM runs r WHERE r.conversation_id=c.id AND c.usage_stopped_at IS NOT NULL AND r.error=c.usage_stopped_reason ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1)) AS usage_stopped_provider,
   (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals,
   (SELECT count(*) FROM background_watches w WHERE w.conversation_id=c.id AND w.status IN ('registering','pending','settling','retrying')) AS active_watches,
   (SELECT MAX(result_at) FROM background_watches w WHERE w.conversation_id=c.id) AS last_watch_at
@@ -169,6 +170,12 @@ export class Store {
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN usage_dismissed_run_id TEXT",
       );
+    if (!conversation.includes("usage_stopped_run_id")) {
+      this.db.exec("ALTER TABLE conversations ADD COLUMN usage_stopped_run_id TEXT");
+      this.db.exec(`UPDATE conversations SET usage_stopped_run_id=(SELECT r.id FROM runs r
+        WHERE r.conversation_id=conversations.id AND r.error=conversations.usage_stopped_reason
+        ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1) WHERE usage_stopped_at IS NOT NULL`);
+    }
     // Run on a chat's rebased branch before it lands on the project's branch.
     if (!columns("projects").includes("check_command"))
       this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
@@ -440,22 +447,25 @@ export class Store {
       .run(pinned ? this.now() : null, id);
   }
   // Leaves updated_at alone, so the reminder does not reorder the chat.
-  setUsageStop(id, reason) {
+  setUsageStop(id, reason, runId = null) {
     const text = String(reason ?? "")
       .trim()
       .slice(0, 500);
     if (!text) throw new Error("A usage stop needs a reason");
+    if (runId && this.run(runId)?.conversation_id !== id)
+      throw new Error("Usage stop run belongs to another conversation");
     this.db
       .prepare(
-        "UPDATE conversations SET usage_stopped_at=?, usage_stopped_reason=?, usage_dismissed_run_id=NULL WHERE id=?",
+        `UPDATE conversations SET usage_stopped_at=?, usage_stopped_reason=?, usage_dismissed_run_id=NULL,
+         usage_stopped_run_id=COALESCE(?,(SELECT r.id FROM runs r WHERE r.conversation_id=? AND r.error=? ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1)) WHERE id=?`,
       )
-      .run(this.now(), text, id);
+      .run(this.now(), text, runId, id, text, id);
     return this.conversation(id);
   }
   clearUsageStop(id) {
     this.db
       .prepare(
-        "UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL, usage_dismissed_run_id=NULL WHERE id=?",
+        "UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL, usage_stopped_run_id=NULL, usage_dismissed_run_id=NULL WHERE id=?",
       )
       .run(id);
     return this.conversation(id);
@@ -465,10 +475,10 @@ export class Store {
     // notice. Keep its recorded error and allow later failures to surface.
     this.db
       .prepare(
-        `UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL,
-          usage_dismissed_run_id=(SELECT id FROM runs WHERE conversation_id=?
+        `UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL, usage_stopped_run_id=NULL,
+          usage_dismissed_run_id=COALESCE(usage_stopped_run_id,(SELECT id FROM runs WHERE conversation_id=?
             AND status='failed' AND error=conversations.usage_stopped_reason
-            ORDER BY created_at DESC, rowid DESC LIMIT 1)
+            ORDER BY created_at DESC, rowid DESC LIMIT 1))
           WHERE id=? AND usage_stopped_at IS NOT NULL`,
       )
       .run(id, id);
@@ -1213,14 +1223,18 @@ export class Store {
     return approved ? null : { runId: run.id, plan, mode: run.mode };
   }
   conversationSnapshot(id) {
+    const activeRun = this.activeRun(id);
+    if (activeRun) Object.assign(activeRun, this.runProgress(activeRun.id));
+    const latestRun = activeRun ?? this.db.prepare("SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1").get(id);
     return {
       ...this.conversation(id),
+      pause: latestRun ? this.runProgress(latestRun.id).pause : undefined,
       contextByProvider: this.contextByProvider(id),
       messages: this.messages(id),
       proposedPlans: this.proposedPlans(id),
       planReviews: this.planReviews(id),
       openPlan: this.openPlan(id),
-      activeRun: this.activeRun(id),
+      activeRun,
       queue: this.queuedInputs(id),
       watches: this.watchStore.list(id).map(({ checkpoint, rootId, originRunId, ...watch }) => watch),
       approvals: this.pendingApprovals(id),
@@ -1238,5 +1252,14 @@ export class Store {
       steps: this.steps(id),
       lastEventId: this.latestEventId(),
     };
+  }
+  runProgress(runId) {
+    const progress = {};
+    for (const [key, kind] of [["startup", "provider-startup"], ["pause", "cancellation"]]) {
+      const row = this.db.prepare(`SELECT payload FROM events WHERE run_id=? AND type='work'
+        AND json_extract(payload,'$.kind')=? ORDER BY id DESC LIMIT 1`).get(runId, kind);
+      if (row) progress[key] = JSON.parse(row.payload);
+    }
+    return progress;
   }
 }

@@ -21,6 +21,20 @@ export function readAllPending(storage = window.sessionStorage) {
 export function readPending(chatId, storage = window.sessionStorage) {
   return readAllPending(storage)[chatId] ?? null;
 }
+// Preserve the exact control request until its receipt is known. A lost response
+// must not turn a different model/effort choice into a second continuation.
+export function prepareControlAction(spec, storage = window.sessionStorage) {
+  const pending = readPending(spec.chatId, storage);
+  if (pending) {
+    const fields = ["provider", "model", "effort", "permissions", "mode", "continueAfterUsage", "resumeGoal"];
+    if (!fields.every((key) => (pending[key] ?? null) === (spec[key] ?? null)))
+      throw new Error("A submission is awaiting confirmation. Retry the same choice or reload to reconcile it before choosing another model.");
+    return pending;
+  }
+  const body = { ...spec, actionId: crypto.randomUUID(), text: "" };
+  savePending(spec.chatId, body, storage);
+  return body;
+}
 // A send paints before the chat snapshot returns. Keep that local row until
 // the snapshot has the same user message or queued action.
 export function keepPendingMessages(previous, incoming) {

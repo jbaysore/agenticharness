@@ -5,6 +5,7 @@ import "@fontsource-variable/newsreader/opsz.css";
 import "@fontsource-variable/newsreader/opsz-italic.css";
 import "./style.css";
 import { api } from "./api.mjs";
+import { refreshQueue } from "./refresh-queue.mjs";
 import { resolveFileLink } from "./file-links.mjs";
 import { mergeContextSnapshots } from "./context.mjs";
 import { serverClock } from "./clock.mjs";
@@ -237,14 +238,14 @@ function App() {
       window.removeEventListener("online", online);
     };
   }, []);
-  const refresh = useCallback(async () => {
-    const next = await api("/api/state");
-    setState(next);
+  const stateRefresh = useRef(null);
+  stateRefresh.current ??= refreshQueue(() => api("/api/state"), (next) => {
+    setState((previous) => previous.lastEventId > next.lastEventId ? previous : next);
     setSelectedProject(
       (p) => p || next.projects.find((p) => !p.scratch)?.id || NO_DIRECTORY,
     );
-    return next;
-  }, []);
+  });
+  const refresh = useCallback(() => stateRefresh.current(), []);
   // A chat is tracked from the moment its snapshot arrives, so no streamed
   // text between that snapshot and the next render is dropped.
   const admit = useCallback((next) => {
@@ -300,10 +301,14 @@ function App() {
       return { ...all, [chatId]: { ...chat, messages, queue } };
     });
   }, []);
+  const reloadJobs = useRef(new Map());
   const reload = useCallback(
     async (id) => {
-      const next = await api("/api/chats/" + id);
-      return tracked.current.has(id) ? admit(next) : next;
+      if (!reloadJobs.current.has(id)) reloadJobs.current.set(id,
+        refreshQueue(() => api("/api/chats/" + id), (next) => {
+          if (tracked.current.has(id)) admit(next);
+        }));
+      return reloadJobs.current.get(id)();
     },
     [admit],
   );
@@ -354,7 +359,10 @@ function App() {
       );
     previousOpen.current = openIds;
     for (const id of tracked.current)
-      if (!open.has(id)) tracked.current.delete(id);
+      if (!open.has(id)) {
+        tracked.current.delete(id);
+        reloadJobs.current.delete(id);
+      }
     setChats((all) => {
       const kept = Object.entries(all).filter(([id]) => open.has(id));
       return kept.length === Object.keys(all).length
@@ -621,6 +629,17 @@ function App() {
       if (["run", "reliability-update", "reliability-transition"].includes(e.type) || (e.type === "context-usage" && e.payload.state === "compacting"))
         window.dispatchEvent(new CustomEvent("harness-reliability", { detail: e }));
       if (!tracked.current.has(e.conversationId)) return;
+      if (e.type === "work" && ["provider-startup", "cancellation"].includes(e.payload.kind))
+        setChats((all) => {
+          const chat = all[e.conversationId];
+          if (!chat || e.id <= (floors.current[chat.id] ?? 0)) return all;
+          const key = e.payload.kind === "cancellation" ? "pause" : "startup";
+          if (chat.activeRun?.id === e.runId)
+            return { ...all, [chat.id]: { ...chat, ...(key === "pause" && { pause: e.payload }), activeRun: { ...chat.activeRun, [key]: e.payload } } };
+          if (key === "pause" && chat.runs?.[0]?.id === e.runId)
+            return { ...all, [chat.id]: { ...chat, pause: e.payload } };
+          return all;
+        });
       if (e.type === "context-usage" && e.id > (floors.current[e.conversationId] ?? 0))
         setChats((all) => {
           const c = all[e.conversationId];
@@ -938,9 +957,9 @@ function App() {
       projectId: chosen.projectId ?? paneProject(p)?.id,
       ...chosen,
     });
-    const next = admit(await api("/api/chats/" + c.id));
+    const next = admit(c);
     setView((v) => setPaneChat(v, p.key, c.id));
-    await refresh();
+    refresh().catch(report);
     return next;
   }
   async function followLink(id, beside, anchor) {
@@ -953,11 +972,10 @@ function App() {
       );
   }
   async function changePaneProject(p, target, chosen) {
-    await refresh();
+    if (target) setState((s) => ({ ...s, projects: [...s.projects.filter((item) => item.id !== target.id), target] }));
     if (p.chatId) {
-      await api("/api/chats/" + p.chatId, { projectId: target?.id ?? null }, "PATCH");
-      await reload(p.chatId);
-      await refresh();
+      admit(await api("/api/chats/" + p.chatId, { projectId: target?.id ?? null }, "PATCH"));
+      refresh().catch(report);
     } else {
       await ensureChat(p, { ...chosen, projectId: target?.id ?? null });
     }

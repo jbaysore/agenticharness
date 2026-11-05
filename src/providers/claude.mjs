@@ -273,6 +273,27 @@ export async function usageOf(q) {
   if (typeof fn !== "function") return null;
   return await fn.call(q, { skipBehaviors: true });
 }
+// A control-only query verifies interruption without sending a user message.
+export async function pauseClaudeGoal(cwd, session, { signal } = {}, { queryFn = query, baseOptions = claudeOptions, timeoutMs = 120000 } = {}) {
+  signal?.throwIfAborted();
+  const input = new AsyncQueue();
+  const q = queryFn({ prompt: input, options: { ...baseOptions(cwd), resume: session.id, tools: [] } });
+  const stop = () => q.close();
+  signal?.addEventListener("abort", stop, { once: true });
+  let timer;
+  try {
+    await Promise.race([q.interrupt(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Claude has not confirmed interruption")), timeoutMs);
+    })]);
+    signal?.throwIfAborted();
+    return "paused";
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+    input.end();
+    q.close();
+  }
+}
 export async function inspectClaude(
   cwd,
   {
@@ -741,10 +762,26 @@ export async function runClaude(
     pendingResult = null,
     sawModel = false,
     retriedUnread = false,
-    phase = "sign-in check";
+    phase = "sign-in check",
+    interrupting,
+    pauseAcknowledged = false,
+    queryClosed = false;
+  const closeQuery = () => { if (!queryClosed) { queryClosed = true; q.close(); } };
+  ctx.attachClose?.(closeQuery);
   const cancel = () => {
-    q.interrupt().catch(() => q.close());
-    killTimer ??= setTimeout(() => q.close(), 8000);
+    interrupting ??= q.interrupt().then(() => {
+      // An idle gap between Goal turns has no further result to wait for.
+      if (ctx.signal.reason?.kind === "user-pause" && pendingResult) {
+        pauseAcknowledged = true;
+        closeQuery();
+      }
+    }).catch((error) => {
+      if (ctx.signal.reason?.kind !== "user-pause" || ctx.mode !== "goal") closeQuery();
+      throw error;
+    });
+    interrupting.catch(() => {});
+    if (ctx.signal.reason?.kind !== "user-pause" || ctx.mode !== "goal")
+      killTimer ??= setTimeout(closeQuery, 8000);
   };
   ctx.signal.addEventListener("abort", cancel, { once: true });
   try {
@@ -935,6 +972,14 @@ export async function runClaude(
         void contextRead.sample(true);
       }
       if (event.type === "result") {
+        // An interrupted empty result is terminal, never an unread-input retry.
+        if (ctx.signal.aborted) {
+          await interrupting;
+          ctx.pauseConfirmed?.();
+          if (ctx.signal.reason?.kind === "watch-yield") ctx.watchParked?.();
+          if (ctx.signal.reason?.kind === "owner-pause") ctx.ownerParked?.();
+          return { status: "cancelled" };
+        }
         // A resumed session can emit a leftover background-task result before
         // it reads the new prompt. That result is not this turn.
         const queuedFollows =
@@ -996,6 +1041,10 @@ export async function runClaude(
         return result;
       }
     }
+    if (ctx.signal.aborted && pauseAcknowledged) {
+      ctx.pauseConfirmed?.();
+      return { status: "cancelled" };
+    }
     if (retriedUnread && !sawModel)
       return {
         status: "failed",
@@ -1020,7 +1069,7 @@ export async function runClaude(
     clearTimeout(killTimer);
     ctx.signal.removeEventListener("abort", cancel);
     input.end();
-    q.close();
+    closeQuery();
     if (stopped) ctx.goalState?.("usageLimited");
   }
 }

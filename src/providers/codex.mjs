@@ -51,12 +51,12 @@ export function codexServerArgs(platform = process.platform) {
 
 export async function openCodex(
   cwd,
-  { signal, dataDir, chatId, runId, purpose } = {},
+  { signal, dataDir, chatId, runId, purpose, progress } = {},
   {
     resolveExecutable = executable,
     environment = subscriptionEnvironment,
     createRpc = (...args) => new RpcProcess(...args),
-    timeoutMs = 30_000,
+    timeoutMs = 120_000,
     nativeLogPath,
   } = {},
 ) {
@@ -76,6 +76,8 @@ export async function openCodex(
   signal?.addEventListener("abort", stop, { once: true });
   try {
     signal?.throwIfAborted();
+    const startedAt = Date.now();
+    progress?.({ phase: "initialize", state: "starting", startedAt: new Date(startedAt).toISOString(), deadlineAt: new Date(startedAt + timeoutMs).toISOString() });
     rpc = createRpc(command, codexServerArgs(), { cwd, env: environment() });
     startup.attach(rpc, command);
     startup.record("initialize-sent", { timeoutMs });
@@ -95,8 +97,11 @@ export async function openCodex(
     rpc.notify("initialized");
     await startup.finish("ready");
     signal?.throwIfAborted();
+    progress?.({ phase: "initialize", state: "ready" });
     return rpc;
   } catch (error) {
+    rpc?.close();
+    progress?.({ phase: "initialize", state: signal?.aborted ? "cancelled" : "failed" });
     const saved = await startup.finish(
       signal?.aborted ? "cancelled" : "failed",
       error,
@@ -156,6 +161,63 @@ export async function inspectCodex(cwd, { dataDir } = {}) {
     rpc.close();
   }
 }
+// Reconnect only to stop a saved Goal. No prompt or active Goal is submitted.
+export async function pauseCodexGoal(cwd, session, options = {}, { open = openCodex, timeoutMs = 180000 } = {}) {
+  const rpc = await open(cwd, { ...options, purpose: "pause-verification" });
+  const active = new Map(), ended = new Set();
+  let pausing = false;
+  const interrupt = (id) => {
+    if (ended.has(id) || active.has(id)) return;
+    const done = Promise.withResolvers();
+    done.promise.catch(() => {});
+    active.set(id, done);
+    if (pausing) rpc.call("turn/interrupt", { threadId: session.id, turnId: id }, timeoutMs).catch(done.reject);
+  };
+  const notification = ({ method, params: p }) => {
+    if (p?.threadId !== session.id) return;
+    if (method === "turn/started") interrupt(p.turn.id);
+    if (method === "turn/completed") {
+      ended.add(p.turn.id);
+      active.get(p.turn.id)?.resolve();
+      active.delete(p.turn.id);
+    }
+  };
+  const stopped = () => rpc.close();
+  options.signal?.addEventListener("abort", stopped, { once: true });
+  rpc.on("notification", notification);
+  rpc.on("closed", (error) => { for (const turn of active.values()) turn.reject(error); });
+  let timer;
+  try {
+    try {
+      await rpc.call("thread/resume", { threadId: session.id, excludeTurns: true }, timeoutMs);
+    } catch (error) {
+      if (/no rollout found for thread id/i.test(error.message)) return "cleared";
+      throw error;
+    }
+    pausing = true;
+    const pause = rpc.call("thread/goal/set", { threadId: session.id, status: "paused", origin: "user" }, timeoutMs)
+      .catch(async (error) => {
+        const state = await rpc.call("thread/goal/get", { threadId: session.id }, timeoutMs);
+        if (state.goal === null) return { goal: { status: "cleared" } };
+        throw error;
+      });
+    for (const id of active.keys()) rpc.call("turn/interrupt", { threadId: session.id, turnId: id }, timeoutMs).catch(active.get(id).reject);
+    const { goal } = await pause;
+    if (!goalStopped(normalizeGoalStatus(goal?.status))) throw new Error("Codex did not confirm the Goal pause");
+    const { data } = await rpc.call("thread/turns/list", { threadId: session.id, limit: 1, sortDirection: "desc", itemsView: "notLoaded" }, timeoutMs);
+    for (const turn of data ?? []) if (turn.status === "inProgress") interrupt(turn.id);
+    await Promise.race([
+      (async () => { while (active.size) await Promise.all([...active.values()].map((turn) => turn.promise)); })(),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Codex has not confirmed the active turn ended")), timeoutMs); }),
+    ]);
+    return goal.status;
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", stopped);
+    rpc.removeListener("notification", notification);
+    rpc.close();
+  }
+}
 // Harness's permission modes in Codex's terms: its auto-review subagent decides
 // sandbox escapes in auto, and anything it passes on is reviewed by Harness.
 // Override drops both the prompts and the sandbox.
@@ -199,14 +261,28 @@ const permissionModes = {
     sandbox: "danger-full-access",
   },
 };
-export async function runCodex(ctx, { open = openCodex } = {}) {
+export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000 } = {}) {
+  const progress = (value) => ctx.emit("work", { kind: "provider-startup", ...value });
   const rpc = await open(ctx.project.path, {
     signal: ctx.signal,
     dataDir: ctx.dataDir,
     chatId: ctx.chat?.id,
     runId: ctx.runId,
     purpose: "chat",
+    progress,
   });
+  ctx.attachClose?.(() => rpc.close());
+  const setupLog = rpc.child ? new CodexStartupLog({ dataDir: ctx.dataDir, cwd: ctx.project.path, chatId: ctx.chat?.id, runId: ctx.runId, purpose: "session-setup" }) : null;
+  setupLog?.attach(rpc, "codex");
+  const setupCall = async (method, params) => {
+    ctx.signal.throwIfAborted();
+    const startedAt = Date.now();
+    progress({ phase: method, state: "starting", startedAt: new Date(startedAt).toISOString(), deadlineAt: new Date(startedAt + setupTimeoutMs).toISOString() });
+    setupLog?.record(method + "-sent", { timeoutMs: setupTimeoutMs });
+    const response = await rpc.call(method, params, setupTimeoutMs);
+    progress({ phase: method, state: "ready" });
+    return response;
+  };
   const context = contextReporter(ctx, "codex");
   let compacting = false;
   let turnId,
@@ -227,14 +303,27 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     reportedGoalStatus,
     turnOpen = false,
     completedTurn = null,
-    onTurnStarted;
+    onTurnStarted,
+    pauseAcknowledged = false,
+    cancelling;
   const goal = ctx.mode === "goal";
+  const hasRunningGoal = goal || (goalStatus !== null && !goalStopped(goalStatus));
+  const userGoalPause = () => ctx.signal.reason?.kind === "user-pause" && hasRunningGoal;
   const done = new Promise((resolve, reject) => {
     resolveDone = resolve;
     rejectDone = reject;
   });
   done.catch(() => {});
+  const finishPause = () => {
+    if (!userGoalPause() || finished || turnOpen || !pauseAcknowledged) return false;
+    finished = true;
+    ctx.pauseConfirmed?.(goalStatus);
+    resolveDone({ status: "cancelled" });
+    return true;
+  };
   const finishCompleted = () => {
+    if (finishPause()) return;
+    if (userGoalPause()) return;
     if (finished || turnOpen || !completedTurn) return;
     // Silence between native Goal turns is not evidence that the Goal stopped.
     if (
@@ -314,25 +403,39 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       if (!finished) rejectDone(error);
     });
   };
-  const cancel = async () => {
-    killTimer ??= setTimeout(() => rpc.close(), 8000);
-    // Stopping pauses the goal, as interrupting it does in Codex.
-    if ((goal || goalStatus !== null) && threadId && !rpc.closed)
-      await rpc
-        .call(
-          "thread/goal/set",
-          { threadId, status: "paused", origin: "user" },
-          5000,
-        )
-        .then(({ goal: paused }) => updateGoal(paused?.status ?? "paused"))
-        .catch(() => {});
-    if (threadId && turnId && turnOpen && !rpc.closed) {
-      try {
-        await rpc.call("turn/interrupt", { threadId, turnId }, 5000);
-      } catch {
+  const cancel = () => {
+    if (cancelling) return cancelling;
+    if (!userGoalPause()) killTimer ??= setTimeout(() => rpc.close(), 8000);
+    cancelling = (async () => {
+      if (!threadId || rpc.closed) {
+        if (!ctx.session?.id) ctx.pauseConfirmed?.();
         rpc.close();
+        return;
       }
-    } else rpc.close();
+      const requests = [];
+      if (hasRunningGoal) requests.push(rpc.call("thread/goal/set",
+        { threadId, status: "paused", origin: "user" }, userGoalPause() ? 120000 : 5000)
+        .catch(async (error) => {
+          if (!userGoalPause()) throw error;
+          const state = await rpc.call("thread/goal/get", { threadId }, 120000);
+          if (state.goal === null) return { goal: { status: "cleared" } };
+          throw error;
+        })
+        .then(({ goal: paused }) => {
+          pauseAcknowledged = goalStopped(normalizeGoalStatus(paused?.status));
+          updateGoal(paused?.status ?? "unknown");
+        }).catch((error) => { if (userGoalPause()) throw error; }));
+      if (turnId && turnOpen) requests.push(rpc.call("turn/interrupt", { threadId, turnId }, userGoalPause() ? 120000 : 5000));
+      await Promise.all(requests);
+      if (!finishPause() && !turnOpen && !userGoalPause()) rpc.close();
+    })().catch((error) => {
+      if (userGoalPause() && !rpc.closed) {
+        // A control timeout is not proof the Goal stopped. Keep listening.
+        ctx.emit("work", { kind: "cancellation", state: "requested", text: "Still waiting for the provider to confirm the Goal pause." });
+        cancelling = null;
+      } else rpc.close();
+    });
+    return cancelling;
   };
   ctx.signal.addEventListener("abort", cancel, { once: true });
   rpc.on("closed", (error) => {
@@ -431,6 +534,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       onTurnStarted?.();
       ctx.emit("nativeTurn", { id: turnId });
       pumpSteer();
+      if (ctx.signal.aborted) { cancelling = null; void cancel(); }
     }
     if (method === "item/agentMessage/delta")
       ctx.emit("text", { nativeId: p.itemId, delta: p.delta });
@@ -454,6 +558,8 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     }
     if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
       goalVersion++;
+      if (ctx.signal.aborted && (method === "thread/goal/cleared" || goalStopped(normalizeGoalStatus(p.goal?.status))))
+        pauseAcknowledged = true;
       updateGoal(
         method === "thread/goal/cleared" ? "cleared" : p.goal?.status,
         p.goal?.objective,
@@ -579,9 +685,10 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
     let response;
     if (ctx.session?.id) {
       try {
-        response = await rpc.call("thread/resume", {
+        response = await setupCall("thread/resume", {
           ...options,
           threadId: ctx.session.id,
+          excludeTurns: true,
         });
       } catch (error) {
         // thread/start can return an id before any rollout is persisted.
@@ -597,12 +704,14 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       }
     }
     if (!response)
-      response = await rpc.call("thread/start", {
+      response = await setupCall("thread/start", {
         ...options,
         allowProviderModelFallback: false,
       });
     threadId = response.thread.id;
+    if (ctx.signal.aborted) { cancelling = null; await cancel(); return await done; }
     ctx.saveSession({ id: threadId });
+    await setupLog?.finish("ready");
     context.start(threadId);
     if (ctx.session?.id && !ctx.startGoal && (goal || ctx.session.goal)) {
       const version = goalVersion;
@@ -665,6 +774,7 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       });
       turnId = start.turn.id;
       ctx.promptAccepted?.();
+      if (ctx.signal.aborted) { cancelling = null; await cancel(); return await done; }
     }
     if (goal && ctx.startGoal) {
       // A resumed Plan session must first receive Default collaboration mode.
@@ -702,6 +812,13 @@ export async function runCodex(ctx, { open = openCodex } = {}) {
       }
     }, 20000);
     return await done;
+  } catch (error) {
+    if (setupLog) {
+      const saved = await setupLog.finish(ctx.signal.aborted ? "cancelled" : "failed", error);
+      if (saved && !ctx.signal.aborted) error.message += ` Startup diagnostics: ${setupLog.path}`;
+    }
+    progress({ phase: "session", state: ctx.signal.aborted ? "cancelled" : "failed" });
+    throw error;
   } finally {
     context.finish();
     finished = true;

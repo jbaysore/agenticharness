@@ -5,6 +5,36 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Store } from "../src/core/store.mjs";
+
+test("usage-stop origins survive later equal errors and migrate from legacy databases", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-usage-origin-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "workspace.sqlite");
+  let store = new Store(path);
+  const chat = store.createConversation({ projectId: store.addProject("Fixture", dir).id });
+  const source = store.createRun({ conversationId: chat.id, actionId: "original-quota-stop", provider: "codex", model: "m", text: "Task" });
+  store.setRun(source.id, "failed", null, "Included usage exhausted");
+  store.setUsageStop(chat.id, "Included usage exhausted", source.id);
+  const later = store.createRun({ conversationId: chat.id, actionId: "later-equal-error", provider: "claude", model: "m", text: "Continuation" });
+  store.setRun(later.id, "failed", null, "Included usage exhausted");
+  assert.equal(store.conversation(chat.id).usage_stopped_provider, "codex");
+  store.close();
+  store = new Store(path);
+  assert.equal(store.conversation(chat.id).usage_stopped_run_id, source.id);
+  store.dismissUsageStop(chat.id);
+  assert.equal(store.conversation(chat.id).usage_dismissed_run_id, source.id);
+  store.setUsageStop(chat.id, "Included usage exhausted", later.id);
+  store.close();
+  const legacy = new DatabaseSync(path);
+  legacy.exec("ALTER TABLE conversations DROP COLUMN usage_stopped_run_id");
+  legacy.close();
+  store = new Store(path);
+  try {
+    assert.equal(store.conversation(chat.id).usage_stopped_run_id, later.id);
+    assert.equal(store.conversation(chat.id).usage_stopped_provider, "claude");
+    assert.equal(store.messages(chat.id).length, 2);
+  } finally { store.close(); }
+});
 import {
   boundHistoryContent,
   historyCall,

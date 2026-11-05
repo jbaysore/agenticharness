@@ -163,6 +163,57 @@ try {
           message.content.startsWith("Included usage ran out on Codex."),
       ),
   ).toBe(true);
+  for (const [from, to] of [["codex", "claude"], ["claude", "codex"]]) {
+    const objective = "Finish every requirement and preserve completed work. ".repeat(100);
+    const goal = app.store.createConversation({ projectId: project.id, title: `Goal ${from} to ${to}`, provider: from, model: "fixture", mode: "goal" });
+    const origin = app.store.createRun({ conversationId: goal.id, actionId: crypto.randomUUID(), provider: from, model: "fixture", text: objective });
+    app.store.setRun(origin.id, "failed", null, reason);
+    app.store.setGoalState(goal.id, from, origin.id, "usageLimited", objective);
+    app.store.setUsageStop(goal.id, reason, origin.id);
+    let starts = 0, lostBody;
+    const previous = app.controller.runners[to];
+    app.controller.runners[to] = async (ctx) => {
+      starts++;
+      expect(ctx.goalObjective).toContain(objective);
+      ctx.emit("work", { kind: "provider-startup", phase: "initialize", state: "starting" });
+      if (starts === 1) throw new Error("Fixture startup unavailable");
+      ctx.emit("nativeTurn", { id: "continued-goal" });
+      ctx.emit("text", { nativeId: crypto.randomUUID(), text: "Goal continued exactly once." });
+      ctx.goalState("complete");
+      return { status: "completed" };
+    };
+    await page.goto(`${app.runtime.origin}/?chat=${goal.id}`);
+    await page.getByLabel("Message your coding agent").fill("Keep my unsent draft");
+    const continueGoal = async () => {
+      await page.getByRole("button", { name: "Continue with a new provider", exact: true }).click();
+      await page.locator(".model-popup").getByRole("menuitem", { name: to === "codex" ? "Codex" : "Claude Code", exact: true }).click();
+      await page.locator(".model-popup").getByRole("menuitemradio", { name: "Fixture", exact: true }).click();
+    };
+    try {
+      await continueGoal();
+      await expect.poll(() => starts).toBe(1);
+      await expect(page.getByRole("button", { name: "Continue with a new provider", exact: true })).toBeEnabled();
+      expect(app.store.conversation(goal.id).usage_stopped_run_id).toBe(origin.id);
+      await page.route(`**/api/chats/${goal.id}/messages`, async (route) => {
+        lostBody = route.request().postDataJSON();
+        await route.fetch();
+        await route.abort();
+      });
+      await continueGoal();
+      await expect(page.getByText("Goal continued exactly once.", { exact: true })).toBeVisible();
+      await expect.poll(() => starts).toBe(2);
+      await page.unroute(`**/api/chats/${goal.id}/messages`);
+      await page.reload();
+      await expect(page.getByLabel("Message your coding agent")).toHaveValue("Keep my unsent draft");
+      await expect(page.getByText("Goal continued exactly once.", { exact: true })).toBeVisible();
+      const duplicate = await fetch(`${app.runtime.origin}/api/chats/${goal.id}/messages`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Harness-Client": "1" }, body: JSON.stringify(lostBody),
+      }).then((response) => response.json());
+      expect(duplicate.duplicate).toBe(true);
+      expect(starts).toBe(2);
+      expect(app.store.conversation(goal.id).usage_stopped_at).toBeNull();
+    } finally { app.controller.runners[to] = previous; }
+  }
   await page.screenshot({ path: ".local/screenshots/usage-stop.png" });
   expect(errors).toEqual([]);
   console.log(

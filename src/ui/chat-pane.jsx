@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { flushSync } from "react-dom";
 import { api } from "./api.mjs";
 import { Icon, Markdown, Approval } from "./components.jsx";
-import { readPending, savePending } from "./outbox.mjs";
+import { readPending, savePending, prepareControlAction } from "./outbox.mjs";
 import {
   readDraft,
   saveDraft,
@@ -252,6 +252,8 @@ export function ChatPane({
     [permissionsBusy, setPermissionsBusy] = useState(false),
     [mode, setMode] = useState(chat?.mode ?? "default"),
     [modeBusy, setModeBusy] = useState(false),
+    [checkingConnections, setCheckingConnections] = useState(false),
+    [stopping, setStopping] = useState(""),
     [keptPlans, setKeptPlans] = useState(() => new Set()),
     [caret, setCaret] = useState(0);
   const messages = useChatScroll(chat),
@@ -260,10 +262,30 @@ export function ChatPane({
     fileInput = useRef(null),
     headerDragAllowed = useRef(false),
     uploadingRef = useRef(false),
-    sending = useRef(false);
+    sending = useRef(false),
+    stopTarget = useRef(chat?.id);
+  stopTarget.current = chat?.id;
   const connected = providers.find((p) => p.id === provider),
     selectedModel = connected?.models?.find((m) => m.id === model);
   useWatchPolling(chat, reload, report);
+  useEffect(() => { setStopping(""); }, [chat?.id]);
+  useEffect(() => {
+    if (stopping !== "waiting" || !chat?.id) return;
+    let ignored = false, timer;
+    const poll = async () => {
+      try {
+        const next = await reload(chat.id);
+        if (ignored) return;
+        if (!next.activeRun && next.pause?.state !== "requested") {
+          setStopping("");
+          return;
+        }
+      } catch (error) { if (!ignored) report(error); }
+      if (!ignored) timer = setTimeout(poll, 1000);
+    };
+    void poll();
+    return () => { ignored = true; clearTimeout(timer); };
+  }, [stopping, chat?.id, reload, report]);
   useEffect(() => {
     saveDraft(draftKey, draft);
   }, [draftKey, draft]);
@@ -306,12 +328,19 @@ export function ChatPane({
     api("/api/actions/" + encodeURIComponent(pending.actionId))
       .then(({ run, input }) => {
         if (ignore || sending.current) return;
-        savePending(chat.id, null);
         if (run || input) {
-          setDraft("");
-          setAttachments([]);
+          savePending(chat.id, null);
+          if (!pending.continueAfterUsage && !pending.resumeGoal) {
+            setDraft("");
+            setAttachments([]);
+          }
           return reload(chat.id);
         }
+        if (pending.continueAfterUsage || pending.resumeGoal) {
+          report(new Error("The continuation was not received. Choose the same action to retry safely."));
+          return;
+        }
+        savePending(chat.id, null);
         setDraft(pending.text);
         setAttachments(pending.attachmentFiles ?? []);
         setProvider(pending.provider);
@@ -698,18 +727,14 @@ export function ChatPane({
     setBusy(true);
     sending.current = true;
     try {
-      await api(`/api/chats/${chat.id}/messages`, {
-        actionId: crypto.randomUUID(),
-        provider: goal.provider,
-        model: agentModel,
-        effort: sameAgent ? effort || null : null,
-        permissions,
-        mode: "goal",
-        resumeGoal: true,
-      });
+      const body = prepareControlAction({ chatId: chat.id, provider: goal.provider,
+        model: agentModel, effort: sameAgent ? effort || null : null, permissions, mode: "goal", resumeGoal: true });
+      await api(`/api/chats/${chat.id}/messages`, body);
+      savePending(chat.id, null);
       await reload(chat.id);
       await refresh();
     } catch (e) {
+      if (e.status >= 400 && e.status < 500 && !e.unreachable) savePending(chat.id, null);
       report(e);
     } finally {
       sending.current = false;
@@ -721,24 +746,20 @@ export function ChatPane({
   async function continueAfterUsage(choice) {
     if (!chat || busy || sending.current || chat.activeRun || !choice?.model)
       return;
-    setProvider(choice.provider);
-    setModel(choice.model);
-    setEffort(choice.effort ?? "");
     setBusy(true);
     sending.current = true;
     try {
-      await api(`/api/chats/${chat.id}/messages`, {
-        actionId: crypto.randomUUID(),
-        provider: choice.provider,
-        model: choice.model,
-        effort: choice.effort || null,
-        permissions,
-        mode: chat.mode ?? mode,
-        continueAfterUsage: true,
-      });
+      const body = prepareControlAction({ chatId: chat.id, provider: choice.provider, model: choice.model,
+        effort: choice.effort || null, permissions, mode: chat.mode ?? mode, continueAfterUsage: true });
+      await api(`/api/chats/${chat.id}/messages`, body);
+      savePending(chat.id, null);
+      setProvider(choice.provider);
+      setModel(choice.model);
+      setEffort(choice.effort ?? "");
       await reload(chat.id);
-      await refresh();
+      refresh().catch(report);
     } catch (e) {
+      if (e.status >= 400 && e.status < 500 && !e.unreachable) savePending(chat.id, null);
       report(e);
     } finally {
       sending.current = false;
@@ -749,6 +770,17 @@ export function ChatPane({
     send,
     focus: () => input.current?.focus(),
   }));
+  async function checkContinuationConnections() {
+    if (checkingConnections) return;
+    setCheckingConnections(true);
+    try {
+      const targets = (chat.mode === "goal" ? ["codex", "claude"] : ["codex", "claude", "cursor", "openrouter"])
+        .filter((id) => id !== (chat.usage_stopped_provider ?? chat.provider));
+      await Promise.all(targets.map((provider) => api("/api/providers/refresh", { provider })));
+      await refresh();
+    } catch (error) { report(error); }
+    finally { setCheckingConnections(false); }
+  }
   const act = (fn) => async () => {
     try {
       await fn();
@@ -756,6 +788,18 @@ export function ChatPane({
       report(e);
     }
   };
+  async function stopWork() {
+    if (stopping || !chat) return;
+    const id = chat.id;
+    setStopping("sending");
+    try {
+      await api(`/api/chats/${id}/cancel`, {});
+      if (stopTarget.current === id) setStopping("waiting");
+    } catch (error) {
+      if (stopTarget.current === id) setStopping("");
+      throw error;
+    }
+  }
   // Chat links open in a pane. File links open that document in the Files panel.
   const followLink = (e) => {
     const link = e.target.closest?.("a[href]");
@@ -964,7 +1008,10 @@ export function ChatPane({
             }
           >
             <span className="pulse-dot" />
-            {workingLine(
+            {stopping || chat.activeRun.pause?.state === "requested" ? "Pausing… waiting for provider confirmation"
+              : chat.activeRun.pause?.state === "confirmed" ? "Finishing pause…"
+              : chat.activeRun.startup?.state === "starting" ? ({ initialize: "Initializing Codex…", "thread/resume": "Restoring Codex session…", "thread/start": "Starting Codex session…" }[chat.activeRun.startup.phase] ?? "Starting provider…")
+              : workingLine(
               chat.activeRun.provider,
               chat.activeRun.status === "waiting",
             )}
@@ -983,6 +1030,9 @@ export function ChatPane({
             {chat.usage_stopped_reason} Come back after it resets, or continue
             with another agent.
             <div className="notice-actions">
+              <button type="button" className="notice-action" disabled={checkingConnections} onClick={checkContinuationConnections}>
+                {checkingConnections ? "Checking connections…" : "Check connections"}
+              </button>
               {continuationChoices.length > 0 ? (
                 <ModelPicker
                   className="notice-continue"
@@ -998,7 +1048,7 @@ export function ChatPane({
                       className="notice-action"
                       disabled={busy || modeBusy || permissionsBusy}
                     >
-                      Continue with a new provider
+                      {busy ? "Starting continuation…" : "Continue with a new provider"}
                     </button>
                   )}
                 />
@@ -1034,8 +1084,9 @@ export function ChatPane({
         )}
         {!chat?.activeRun && blockingGoals(chat).length > 0 && (
           <div className="notice">
-            This Goal has not been confirmed stopped, so Harness updates are
-            waiting. Send a message to continue, or use Stop work to stop it.
+            {stopping || chat.pause?.state === "requested" ? "Reconnecting to verify the Goal pause…"
+              : chat.pause?.state === "unconfirmed" ? chat.pause.text
+              : "This Goal has not been confirmed stopped. Use Stop work to reconnect and verify the pause."}
           </div>
         )}
         {!chat?.activeRun &&
@@ -1311,12 +1362,13 @@ export function ChatPane({
                 type="button"
                 className="send-button stopping"
                 aria-label="Stop work"
+                disabled={!!stopping || chat?.pause?.state === "requested" || chat?.activeRun?.pause?.state === "requested"}
                 title={
                   mode === "goal"
                     ? "Pause the goal. You can resume it later."
                     : "Stop work"
                 }
-                onClick={act(() => api(`/api/chats/${chat.id}/cancel`, {}))}
+                onClick={act(stopWork)}
               >
                 <Icon name="stop" size={16} />
               </button>

@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
+import { retryFileOperation } from "./file-retry.mjs";
 
 export const restartFile = (dataDir) => join(dataDir, "self-restart.json");
 export async function readRestartState(dataDir) {
@@ -19,11 +20,11 @@ export async function readRestartState(dataDir) {
     throw error;
   }
 }
-export async function atomicJson(path, value) {
+export async function atomicJson(path, value, { replace = rename, retry = {} } = {}) {
   const temporary = path + "." + randomUUID() + ".tmp";
   try {
     await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
-    await rename(temporary, path);
+    await retryFileOperation(() => replace(temporary, path), retry);
   } finally {
     await rm(temporary, { force: true });
   }

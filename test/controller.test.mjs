@@ -1469,3 +1469,67 @@ test("usage continuation retries retain the stopped provider and its original Go
     assert.throws(() => controller.prepareSend(chat.id, {actionId: 'retry-stopped-provider', provider: 'claude', model: 'm', continueAfterUsage: true}), /different provider/);
   } finally { await controller.close(); store.close(); }
 });
+
+test("usage continuations preserve their origin through failed startup and deduplicate after usage clears", async (t) => {
+  for (const [from, to] of [["codex", "claude"], ["claude", "codex"]]) await t.test(`${from} to ${to}`, async () => {
+    const store = new Store(":memory:"), controller = new Controller(store, {});
+    controller.providers = [from, to].map((id) => ({ id, name: id, connected: true, models: [{ id: "m", efforts: [] }] }));
+    const chat = store.createConversation({ projectId: store.addProject("Fixture", process.cwd()).id, provider: from, model: "m", mode: "goal" });
+    const original = "Ship every requirement. ".repeat(220);
+    const source = store.createRun({ conversationId: chat.id, actionId: `origin-${from}-usage-stop`, provider: from, model: "m", text: original });
+    store.setRun(source.id, "failed", null, "Included usage exhausted");
+    store.setGoalState(chat.id, from, source.id, "usageLimited", original);
+    store.setUsageStop(chat.id, "Included usage exhausted", source.id);
+    let starts = 0;
+    controller.runners[to] = async (ctx) => {
+      starts++;
+      assert.ok(ctx.goalObjective.includes(original));
+      assert.ok(ctx.text.includes(original.trim()));
+      ctx.emit("work", { kind: "provider-startup", phase: "initialize", state: "starting" });
+      if (starts === 1) throw new Error("Startup timed out");
+      ctx.emit("nativeTurn", { id: "working" });
+      ctx.emit("text", { nativeId: "reply", text: "Continuing" });
+      ctx.goalState("complete");
+      return { status: "completed" };
+    };
+    const submit = (actionId) => controller.send(chat.id, { actionId, provider: to, model: "m", mode: "goal", continueAfterUsage: true });
+    try {
+      const failed = submit(`failed-transfer-${from}-to-${to}`);
+      await controller.active.get(chat.id).task;
+      assert.equal(store.run(failed.id).status, "failed");
+      assert.equal(store.conversation(chat.id).usage_stopped_provider, from);
+      assert.equal(store.conversation(chat.id).usage_stopped_run_id, source.id);
+      const actionId = `retry-transfer-${from}-to-${to}`;
+      const success = submit(actionId);
+      await controller.active.get(chat.id).task;
+      assert.equal(store.run(success.id).status, "completed", store.run(success.id).error);
+      assert.equal(store.conversation(chat.id).usage_stopped_at, null);
+      controller.providers = [];
+      const duplicate = submit(actionId);
+      assert.equal(duplicate.id, success.id);
+      assert.equal(duplicate.duplicate, true);
+      assert.equal(starts, 2);
+    } finally { await controller.close(); store.close(); }
+  });
+});
+
+test("stopping an ordinary chat never creates a resumable Goal", async () => {
+  const store = new Store(":memory:"), controller = new Controller(store, {});
+  const chat = store.createConversation({ projectId: store.addProject("Fixture", process.cwd()).id, provider: "claude", model: "m" });
+  controller.providers = [{ id: "claude", models: [{ id: "m", efforts: [] }] }];
+  const ready = Promise.withResolvers();
+  controller.runners.claude = async (ctx) => {
+    ready.resolve();
+    await new Promise((resolve) => ctx.signal.addEventListener("abort", resolve, { once: true }));
+    ctx.pauseConfirmed();
+    return { status: "cancelled" };
+  };
+  try {
+    controller.send(chat.id, { actionId: "stop-ordinary-chat-fixture", text: "Task", provider: "claude", model: "m" });
+    const task = controller.active.get(chat.id).task;
+    await ready.promise;
+    controller.cancel(chat.id);
+    await task;
+    assert.equal(store.conversation(chat.id).sessions.claude?.goal, undefined);
+  } finally { await controller.close(); store.close(); }
+});

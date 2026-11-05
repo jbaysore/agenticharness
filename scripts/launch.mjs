@@ -40,14 +40,18 @@ const dataDir =
   join(process.env.LOCALAPPDATA, "AgenticHarness");
 await mkdir(dataDir, { recursive: true });
 let lastHealthError;
+let savedRuntime;
 async function running() {
   try {
     const r = JSON.parse(await readFile(join(dataDir, "runtime.json"), "utf8"));
+    savedRuntime = r;
     const response = await fetch(r.origin + "/health", {
       signal: AbortSignal.timeout(1200),
     });
-    if (!response.ok)
+    if (!response.ok) {
+      await response.arrayBuffer();
       throw new Error(`Health check returned HTTP ${response.status}`);
+    }
     const h = await response.json();
     if (h.app !== "Agentic Harness" || h.instanceId !== r.instanceId)
       throw new Error("The running host does not match the saved runtime file");
@@ -116,6 +120,14 @@ try {
     savedRestart = await readRestartState(dataDir);
   }
   let runtime = await running();
+  // A slow live host still owns its port. Keep the launcher lock while waiting.
+  const healthDeadline = Date.now() + 20000;
+  while (!runtime && savedRuntime?.pid && processAlive(savedRuntime.pid)) {
+    if (Date.now() >= healthDeadline)
+      throw new Error(`Harness host ${savedRuntime.pid} is alive but unresponsive. Last health check: ${lastHealthError}.`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    runtime = await running();
+  }
   if (
     runtime &&
     (process.argv.includes("--stop") || process.argv.includes("--restart"))
@@ -271,8 +283,7 @@ try {
   }
   if (process.argv.includes("--no-browser")) {
     console.log("Harness host ready at " + runtime.origin);
-    process.exit(0);
-  }
+  } else {
   const response = await fetch(runtime.origin + "/internal/launch", {
     method: "POST",
     headers: { Authorization: "Bearer " + runtime.controlToken },
@@ -311,6 +322,7 @@ try {
         windowsHide: true,
       });
   child.unref();
+  }
 } catch (error) {
   await releaseControl?.();
   await appendFile(

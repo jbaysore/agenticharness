@@ -382,6 +382,8 @@ export class SelfRestart {
       reasons.push("Terminals running a command");
     if (
       this.controller.refreshing ||
+      this.controller.providerRefreshes?.size ||
+      this.controller.pauseChecks?.size ||
       this.controller.tidying.size ||
       this.jobs()
     )
