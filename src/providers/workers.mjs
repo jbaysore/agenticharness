@@ -218,7 +218,7 @@ export async function runCodexWorker(
 ) {
   const reviewing = ["review", "plan-review"].includes(mode),
     planReview = mode === "plan-review",
-    rpc = await open(cwd, { signal });
+    rpc = await open(cwd, { signal, purpose: mode });
   let threadId,
     turnId,
     text = "",
@@ -595,7 +595,7 @@ export async function openCodexReviewer(
   { cwd, model, effort, signal },
   { open = openCodex } = {},
 ) {
-  const rpc = await open(cwd, { signal });
+  const rpc = await open(cwd, { signal, purpose: "permission-review" });
   let threadId,
     turnId,
     text = "",

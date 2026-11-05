@@ -731,6 +731,35 @@ from another database, then relaunch. Native session resumption
 also requires the provider's own saved session to still exist; otherwise use a new
 conversation and consult the restored history.
 
+## Codex startup diagnostics
+
+Codex connection attempts write local JSONL records to
+`%LOCALAPPDATA%\AgenticHarness\diagnostics\codex-startup.jsonl` (or
+`diagnostics/codex-startup.jsonl` inside a custom `HARNESS_DATA_DIR`). A failed
+startup includes the log path in its error. Use the attempt ID, UTC time, chat/run
+ID when present, launch purpose, executable, working directory and child PID to
+find the attempt. Connection checks and permission reviewers are logged too.
+
+Records show spawn and initialize milestones, elapsed time, the configured
+timeout, exit status, stdout/stderr byte counts, recent protocol method names,
+and a filtered stderr tail. Capture ends at initialization, before any thread
+or user prompt is submitted. RPC parameters/results and the child environment
+are excluded. Credential/payload lines, HTTP headers and URL details are omitted
+from diagnostic text; individual lines and histories are capped.
+
+On failure, Harness also tries a read-only snapshot of that PID's native Codex
+startup records in `CODEX_HOME/logs_2.sqlite` (default `~/.codex/logs_2.sqlite`).
+It searches at most the latest 20,000 rows and retains at most 40 matching rows
+from the startup window, using the same filtering. The snapshot status records
+when the native database is absent, incompatible, busy or has no matching rows.
+These diagnostics can identify the last startup operation; a silent internal
+stall may still need investigation in Codex itself.
+
+The log rotates at 2 MiB with three backups (`.1` through `.3`). Logging failures
+report a brief message in `host-errors.log` and do not prevent a connection. This
+adds observation only: the 30-second initialization deadline and no-retry behavior
+are unchanged. Restart Harness after updating to enable logging in the host.
+
 ## Update or stop the host
 
 When Harness runs from a clean Git checkout, changes delivered to its own source

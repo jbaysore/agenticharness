@@ -192,7 +192,7 @@ export class Controller extends EventEmitter {
     if (this.refreshing) return this.refreshing;
     this.refreshing = (async () => {
       const functions = [
-        () => inspectCodex(this.probePath),
+        () => inspectCodex(this.probePath, { dataDir: this.dataDir }),
         () => inspectClaude(this.probePath),
         () =>
           inspectCursor(
@@ -1598,6 +1598,7 @@ export class Controller extends EventEmitter {
     });
     const ctx = {
       project,
+      runId: run.id,
       dataDir: this.dataDir,
       chat,
       attachments: files,

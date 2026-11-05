@@ -116,9 +116,13 @@ export class RpcProcess extends EventEmitter {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(
-          new Error(`Agent request timed out: ${method}. It was not retried.`),
+        const error = new Error(
+          `Agent request timed out: ${method}. It was not retried.`,
         );
+        error.code = "AGENT_RPC_TIMEOUT";
+        error.method = method;
+        error.timeoutMs = timeoutMs;
+        reject(error);
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try {

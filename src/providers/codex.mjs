@@ -1,4 +1,5 @@
 import { RpcProcess } from "../core/rpc.mjs";
+import { CodexStartupLog } from "../core/codex-startup-log.mjs";
 import { contextReporter, openAIUsage, tokenCount } from "../core/context.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
@@ -48,38 +49,68 @@ export function codexServerArgs(platform = process.platform) {
   ];
 }
 
-export async function openCodex(cwd, { signal } = {}) {
+export async function openCodex(
+  cwd,
+  { signal, dataDir, chatId, runId, purpose } = {},
+  {
+    resolveExecutable = executable,
+    environment = subscriptionEnvironment,
+    createRpc = (...args) => new RpcProcess(...args),
+    timeoutMs = 30_000,
+    nativeLogPath,
+  } = {},
+) {
   signal?.throwIfAborted();
-  const command = executable("codex");
+  const command = resolveExecutable("codex");
   if (!command) throw new Error("Codex CLI is not installed");
-  const rpc = new RpcProcess(command, codexServerArgs(), {
+  const startup = new CodexStartupLog({
+    dataDir,
     cwd,
-    env: subscriptionEnvironment(),
+    chatId,
+    runId,
+    purpose,
+    nativeLogPath,
   });
-  const stop = () => rpc.close();
+  let rpc;
+  const stop = () => rpc?.close();
   signal?.addEventListener("abort", stop, { once: true });
   try {
     signal?.throwIfAborted();
-    await rpc.call("initialize", {
-      clientInfo: {
-        name: "agentic_harness",
-        title: "Agentic Harness",
-        version: "0.1.0",
+    rpc = createRpc(command, codexServerArgs(), { cwd, env: environment() });
+    startup.attach(rpc, command);
+    startup.record("initialize-sent", { timeoutMs });
+    await rpc.call(
+      "initialize",
+      {
+        clientInfo: {
+          name: "agentic_harness",
+          title: "Agentic Harness",
+          version: "0.1.0",
+        },
+        capabilities: { experimentalApi: true },
       },
-      capabilities: { experimentalApi: true },
-    });
+      timeoutMs,
+    );
     signal?.throwIfAborted();
     rpc.notify("initialized");
+    await startup.finish("ready");
+    signal?.throwIfAborted();
     return rpc;
   } catch (error) {
-    rpc.close();
+    const saved = await startup.finish(
+      signal?.aborted ? "cancelled" : "failed",
+      error,
+    );
+    rpc?.close();
+    if (saved && !signal?.aborted)
+      error.message += ` Startup diagnostics: ${startup.path}`;
     throw error;
   } finally {
     signal?.removeEventListener("abort", stop);
   }
 }
-export async function inspectCodex(cwd) {
-  const rpc = await openCodex(cwd);
+export async function inspectCodex(cwd, { dataDir } = {}) {
+  const rpc = await openCodex(cwd, { dataDir, purpose: "connection-check" });
   try {
     const { account } = await rpc.call("account/read");
     const usage = await rpc.call("account/rateLimits/read");
@@ -169,7 +200,13 @@ const permissionModes = {
   },
 };
 export async function runCodex(ctx, { open = openCodex } = {}) {
-  const rpc = await open(ctx.project.path);
+  const rpc = await open(ctx.project.path, {
+    signal: ctx.signal,
+    dataDir: ctx.dataDir,
+    chatId: ctx.chat?.id,
+    runId: ctx.runId,
+    purpose: "chat",
+  });
   const context = contextReporter(ctx, "codex");
   let compacting = false;
   let turnId,
