@@ -1533,3 +1533,266 @@ test("stopping an ordinary chat never creates a resumable Goal", async () => {
     assert.equal(store.conversation(chat.id).sessions.claude?.goal, undefined);
   } finally { await controller.close(); store.close(); }
 });
+
+test("a usage reset resume continues the same model once a reading is clear", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  const project = store.addProject("resume", process.cwd());
+  const reason = "Included Codex quota is exhausted.";
+  controller.providers = [{
+    id: "codex",
+    name: "Codex",
+    connected: true,
+    blockReason: reason,
+    models: [{ id: "m", efforts: [] }],
+  }];
+  const stopped = (name) => {
+    const chat = store.createConversation({
+      projectId: project.id,
+      provider: "codex",
+      model: "m",
+      title: name,
+    });
+    const run = store.createRun({
+      conversationId: chat.id,
+      actionId: `usage-stop-${name}`,
+      provider: "codex",
+      model: "m",
+      text: "Do the work",
+    });
+    store.setRun(run.id, "failed", null, reason);
+    store.setUsageStop(chat.id, reason, run.id);
+    store.addMessage({
+      conversationId: chat.id,
+      role: "assistant",
+      provider: "codex",
+      model: "m",
+      content: `${name} made partial progress.`,
+    });
+    store.updateConversation(chat.id, {
+      sessions: { codex: { id: `thread-${name}`, tools: hostToolsKey } },
+    });
+    return chat;
+  };
+  const first = stopped("first"),
+    second = stopped("second");
+  let release = () => {};
+  let entered;
+  const seen = [];
+  controller.runners.codex = async (ctx) => {
+    seen.push({
+      text: ctx.text,
+      model: ctx.model,
+      session: ctx.session?.id,
+      handoff: ctx.handoff,
+    });
+    if (seen.length === 1) {
+      entered();
+      await new Promise((resolve) => { release = resolve; });
+    }
+    ctx.emit("nativeTurn", { id: `resumed-${seen.length}` });
+    ctx.emit("text", { nativeId: `reply-${seen.length}`, text: `Continued ${seen.length}` });
+    return { status: "completed" };
+  };
+  try {
+    controller.armUsageResume(first.id);
+    controller.armUsageResume(second.id);
+    assert.equal(controller.active.size, 0);
+    assert.throws(
+      () => controller.prepareSend(first.id, {
+        actionId: "usage-reset-still-exhausted",
+        provider: "codex",
+        model: "m",
+        resumeAfterUsageReset: true,
+      }),
+      /Usage has not reset yet/,
+    );
+    assert.throws(
+      () => controller.prepareSend(first.id, {
+        actionId: "usage-reset-other-provider",
+        provider: "claude",
+        model: "m",
+        resumeAfterUsageReset: true,
+      }),
+      /provider that ran out/,
+    );
+    const action = store.conversation(first.id).usage_resume_action;
+    controller.providers[0].blockReason = null;
+    const running = new Promise((resolve) => { entered = resolve; });
+    controller.resumeUsageWaits();
+    assert.equal(controller.active.get(first.id)?.run.model, "m");
+    assert.equal(store.conversation(first.id).usage_resume_at, null);
+    assert.ok(store.conversation(second.id).usage_resume_at);
+    assert.equal(controller.active.has(second.id), false);
+    await running;
+    release();
+    await controller.active.get(first.id).task;
+    assert.equal(seen[0].model, "m");
+    assert.equal(seen[0].session, "thread-first");
+    assert.equal(seen[0].handoff, "");
+    assert.match(seen[0].text, /Included usage has reset/);
+    assert.equal(store.conversation(first.id).provider, "codex");
+    controller.resumeUsageWaits();
+    await controller.active.get(second.id).task;
+    assert.equal(seen.length, 2);
+    assert.equal(seen[1].session, "thread-second");
+    store.setUsageStop(first.id, reason, store.conversation(first.id).usage_stopped_run_id);
+    store.db.prepare(
+      "UPDATE conversations SET usage_resume_at=?, usage_resume_action=?, usage_resume_error=NULL WHERE id=?",
+    ).run(new Date().toISOString(), action, first.id);
+    controller.resumeUsageWaits();
+    assert.equal(seen.length, 2);
+    assert.equal(store.conversation(first.id).usage_resume_at, null);
+  } finally {
+    release?.();
+    await controller.close();
+    store.close();
+  }
+});
+
+test("cancelling a usage resume leaves the stopped chat unchanged", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  const reason = "Included Codex quota is exhausted.";
+  controller.providers = [{
+    id: "codex",
+    name: "Codex",
+    connected: true,
+    blockReason: reason,
+    models: [{ id: "m", efforts: ["low"] }],
+  }];
+  const project = store.addProject("cancel-resume", process.cwd());
+  const chat = store.createConversation({
+    projectId: project.id,
+    provider: "codex",
+    model: "m",
+    effort: "low",
+  });
+  const run = store.createRun({
+    conversationId: chat.id,
+    actionId: "cancel-usage-stop-run",
+    provider: "codex",
+    model: "m",
+    text: "Keep going",
+  });
+  store.setRun(run.id, "failed", null, reason);
+  store.setUsageStop(chat.id, reason, run.id);
+  let starts = 0;
+  controller.runners.codex = async (ctx) => {
+    starts += 1;
+    ctx.emit("nativeTurn", { id: "user-turn" });
+    ctx.emit("text", { nativeId: "user-reply", text: ctx.text });
+    return { status: "completed" };
+  };
+  try {
+    controller.armUsageResume(chat.id);
+    controller.setMode(chat.id, "ask");
+    assert.equal(store.conversation(chat.id).usage_resume_at, null);
+    assert.equal(store.conversation(chat.id).usage_stopped_at !== null, true);
+    controller.armUsageResume(chat.id);
+    controller.providers[0].blockReason = null;
+    const sent = controller.send(chat.id, {
+      actionId: "user-message-cancels-usage-resume",
+      text: "Take a different approach",
+      provider: "codex",
+      model: "m",
+      effort: "low",
+    });
+    await controller.active.get(chat.id).task;
+    assert.equal(store.run(sent.id).status, "completed");
+    assert.equal(store.conversation(chat.id).usage_resume_at, null);
+    assert.equal(starts, 1);
+    assert.ok(
+      store.messages(chat.id).some(
+        (message) => message.role === "user" && message.content === "Take a different approach",
+      ),
+    );
+    store.setUsageStop(chat.id, reason, run.id);
+    controller.providers[0].models[0].disabled = true;
+    controller.armUsageResume(chat.id);
+    assert.equal(store.conversation(chat.id).usage_resume_at, null);
+    assert.match(store.conversation(chat.id).usage_resume_error, /available model/);
+    assert.equal(starts, 1);
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+test("a Goal resumes its saved objective on the same provider after usage resets", async () => {
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {});
+  const reason = "Included Codex quota is exhausted.";
+  controller.providers = [{
+    id: "codex",
+    name: "Codex",
+    connected: true,
+    blockReason: reason,
+    models: [{ id: "m", efforts: [] }],
+  }];
+  const chat = store.createConversation({
+    projectId: store.addProject("goal-resume", process.cwd()).id,
+    provider: "codex",
+    model: "m",
+    mode: "goal",
+  });
+  const run = store.createRun({
+    conversationId: chat.id,
+    actionId: "goal-usage-stop-run",
+    provider: "codex",
+    model: "m",
+    text: "Ship the parser",
+  });
+  store.setRun(run.id, "failed", null, reason);
+  store.setUsageStop(chat.id, reason, run.id);
+  store.updateConversation(chat.id, {
+    mode: "goal",
+    sessions: { codex: { id: "goal-thread" } },
+  });
+  store.setGoalState(chat.id, "codex", run.id, "usageLimited", "Ship the parser");
+  store.addMessage({
+    conversationId: chat.id,
+    role: "assistant",
+    provider: "codex",
+    model: "m",
+    content: "Started the parser.",
+  });
+  let seen;
+  controller.runners.codex = async (ctx) => {
+    seen = {
+      text: ctx.text,
+      resumeGoal: ctx.resumeGoal,
+      goalObjective: ctx.goalObjective,
+      handoff: ctx.handoff,
+      session: ctx.session?.id,
+    };
+    ctx.emit("nativeTurn", { id: "goal-resumed" });
+    ctx.emit("text", { nativeId: "goal-reply", text: "Continuing the goal." });
+    ctx.goalState("active");
+    return { status: "completed" };
+  };
+  try {
+    controller.armUsageResume(chat.id);
+    assert.equal(controller.active.size, 0);
+    controller.providers[0].blockReason = null;
+    controller.resumeUsageWaits();
+    await controller.active.get(chat.id).task;
+    assert.equal(seen.resumeGoal, true);
+    assert.equal(seen.goalObjective, "Ship the parser");
+    assert.equal(seen.session, "goal-thread");
+    assert.equal(seen.handoff, "");
+    assert.match(seen.text, /Included usage has reset/);
+    assert.match(seen.text, /The goal is still:\nShip the parser/);
+    assert.equal(store.conversation(chat.id).provider, "codex");
+    assert.equal(store.conversation(chat.id).model, "m");
+    assert.equal(store.conversation(chat.id).usage_stopped_at, null);
+    assert.equal(store.conversation(chat.id).usage_resume_at, null);
+    assert.equal(
+      store.messages(chat.id).filter((message) => message.role === "user").at(-1).content,
+      seen.text,
+    );
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});

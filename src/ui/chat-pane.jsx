@@ -29,6 +29,8 @@ import {
   continuationProviders,
   continuationUnavailableTitle,
   providerStatusLabel,
+  resetLabel,
+  usageResetAt,
   workspacePeersLabel,
 } from "./status.mjs";
 import {
@@ -164,6 +166,15 @@ function Elapsed({ since }) {
   }, []);
   return <span>{since ? elapsed(since, now) : ""}</span>;
 }
+function ResetWait({ at }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, [at]);
+  if (!at) return <>Checking until a reading shows usage is available.</>;
+  return <>{resetLabel(at, now)}.</>;
+}
 
 const permissionModes = [
   [
@@ -253,6 +264,7 @@ export function ChatPane({
     [mode, setMode] = useState(chat?.mode ?? "default"),
     [modeBusy, setModeBusy] = useState(false),
     [checkingConnections, setCheckingConnections] = useState(false),
+    [resumeBusy, setResumeBusy] = useState(false),
     [stopping, setStopping] = useState(""),
     [keptPlans, setKeptPlans] = useState(() => new Set()),
     [caret, setCaret] = useState(0);
@@ -766,6 +778,19 @@ export function ChatPane({
       setBusy(false);
     }
   }
+  async function setUsageResume(armed) {
+    if (!chat || resumeBusy || sending.current) return;
+    setResumeBusy(true);
+    try {
+      await api(`/api/chats/${chat.id}`, { usageResume: armed }, "PATCH");
+      await reload(chat.id);
+      refresh().catch(report);
+    } catch (error) {
+      report(error);
+    } finally {
+      setResumeBusy(false);
+    }
+  }
   useImperativeHandle(ref, () => ({
     send,
     focus: () => input.current?.focus(),
@@ -843,6 +868,13 @@ export function ChatPane({
     providers,
     continuationOptions,
   );
+  const stoppedProvider = providers.find(
+    (item) => item.id === (chat?.usage_stopped_provider ?? chat?.provider),
+  );
+  const stoppedRun = chat?.runs?.find((run) => run.id === chat?.usage_stopped_run_id);
+  const stoppedModelName =
+    stoppedProvider?.models?.find((item) => item.id === stoppedRun?.model)?.name ??
+    stoppedRun?.model;
   // The plan the latest finished run left open. Runs saved before run modes
   // were recorded still need the composer in Plan mode, as they did before.
   const openPlan = chat?.openPlan;
@@ -891,7 +923,7 @@ export function ChatPane({
             <span
               className={"chat-marker marker-" + marker}
               role="img"
-              aria-label={chatMarkerLabel(marker)}
+              aria-label={chatMarkerLabel(marker, chat)}
             />
           )}
           {project && <span>{project.name}</span>}
@@ -1027,9 +1059,37 @@ export function ChatPane({
         {!chat?.activeRun && chat?.usage_stopped_at && (
           <div className="notice failed">
             <strong>This turn stopped because usage ran out.</strong>{" "}
-            {chat.usage_stopped_reason} Come back after it resets, or continue
-            with another agent.
+            {chat.usage_stopped_reason}{" "}
+            {chat.usage_resume_at ? (
+              <>
+                It will resume on {providerName(stoppedProvider?.id ?? chat.usage_stopped_provider)}
+                {stoppedModelName ? ` · ${stoppedModelName}` : ""} when usage resets.{" "}
+                <ResetWait at={usageResetAt(stoppedProvider)} />
+              </>
+            ) : (
+              <>Come back after it resets, or continue with another agent.</>
+            )}
+            {chat.usage_resume_error ? <> {chat.usage_resume_error}</> : null}
             <div className="notice-actions">
+              {chat.usage_resume_at ? (
+                <button
+                  type="button"
+                  className="notice-action"
+                  disabled={resumeBusy || busy}
+                  onClick={() => setUsageResume(false)}
+                >
+                  {resumeBusy ? "Cancelling…" : "Cancel resume"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="notice-action"
+                  disabled={resumeBusy || busy || modeBusy || permissionsBusy}
+                  onClick={() => setUsageResume(true)}
+                >
+                  {resumeBusy ? "Saving…" : "Resume when usage resets"}
+                </button>
+              )}
               <button type="button" className="notice-action" disabled={checkingConnections} onClick={checkContinuationConnections}>
                 {checkingConnections ? "Checking connections…" : "Check connections"}
               </button>

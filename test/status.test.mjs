@@ -16,6 +16,7 @@ import {
   resetCountdown,
   resetLabel,
   resetTimestamp,
+  usageResetAt,
   sidebarOrder,
   usageGlance,
   usageWindows,
@@ -139,6 +140,36 @@ test("a chat is marked by what it needs, and a seen result is no longer marked",
     assert.ok(chatMarkerLabel(marker));
   assert.equal(chatMarkerLabel("watching"), "Watching CI");
   assert.equal(chatMarkerLabel(null), "");
+  assert.equal(chatMarkerLabel("usage"), "Stopped because usage ran out");
+  assert.equal(
+    chatMarkerLabel("usage", { usage_resume_at: "2026-01-02T00:00:00.000Z" }),
+    "Waiting for usage to reset",
+  );
+});
+
+test("a usage resume follows an exhausted window's reported reset, not an assumed date", () => {
+  const now = 1_700_000_000_000;
+  assert.equal(
+    usageResetAt({
+      id: "codex",
+      usage: {
+        windows: [
+          { bucket: "codex", usedPercent: 100, windowMinutes: 300, resetsAt: (now + 60_000) / 1000 },
+          { bucket: "codex", usedPercent: 100, windowMinutes: 10080, resetsAt: (now + 3_600_000) / 1000 },
+          { bucket: "codex", usedPercent: 10, windowMinutes: 300, resetsAt: now / 1000 },
+        ],
+      },
+    }, now),
+    now + 60_000,
+  );
+  assert.equal(usageResetAt({ id: "cursor" }, now), null);
+  assert.equal(
+    usageResetAt({
+      id: "codex",
+      usage: { windows: [{ bucket: "codex", usedPercent: 100, windowMinutes: 300, resetsAt: (now - 1000) / 1000 }] },
+    }, now),
+    null,
+  );
 });
 
 test("the active list puts chats that need you first and leaves out archived ones", () => {

@@ -49,6 +49,17 @@ export function usageContinuationText({ from, mode, objective } = {}) {
 }
 // What the new provider's Goal is set to. The saved objective stays intact;
 // the extra line is only the prompt that asks the new provider to pick up.
+// The same provider continues its own session once included usage is back.
+export function usageResetResumeText({ mode, objective } = {}) {
+  const base =
+    "Included usage has reset. Continue this task from the latest progress in this session. Do not repeat completed work. Inspect the repository before assuming what already changed.";
+  if (mode === "goal" && objective)
+    return `${base}\n\nThe goal is still:\n${objective}`;
+  if (mode === "ask" || mode === "plan")
+    return `${base}\n\nStay in ${mode} mode.`;
+  return base;
+}
+
 export function usageGoalPrompt({ from, objective, fallback } = {}) {
   const who = from || "the previous provider";
   const line = `Included usage ran out on ${who}. Continue this goal from the latest progress and do not repeat completed work.`;

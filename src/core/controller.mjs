@@ -51,6 +51,7 @@ import {
   questionKey,
   usageContinuationText,
   usageGoalPrompt,
+  usageResetResumeText,
 } from "./modes.mjs";
 import {
   invokedSkills,
@@ -220,6 +221,7 @@ export class Controller extends EventEmitter {
         .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
       this.event(null, null, "providers", { providers: this.providers });
       this.scheduleProviderRefresh();
+      this.resumeUsageWaits();
       return this.providers;
     }).finally(() => this.providerRefreshes.delete(id));
     this.providerRefreshes.set(id, task);
@@ -294,6 +296,9 @@ export class Controller extends EventEmitter {
     const prepared = this.prepareSend(chatId, input);
     if (prepared.duplicate) return prepared.duplicate;
     this.selfRestart?.assertAdmission();
+    // Any other turn replaces a usage-reset wait. The wait itself is cleared
+    // only once its own turn has actually started.
+    if (!prepared.resumeAfterUsageReset) this.store.clearUsageResume(chatId);
     const active = this.active.get(chatId);
     if (!releasing && (!watchOrigin || watchOrigin.manual)) {
       this.watchers.invalidate(chatId, "New user instructions superseded automatic follow-up.");
@@ -308,6 +313,11 @@ export class Controller extends EventEmitter {
       (active || this.store.queuedInputs(chatId).length)
     )
       throw new Error("Resume the Goal after this chat's current work ends");
+    if (
+      prepared.resumeAfterUsageReset &&
+      (active || this.store.queuedInputs(chatId).length)
+    )
+      throw new Error("Usage resume waits until this chat is idle");
     // A running turn keeps the message until it finishes, unless /steer
     // redirects that turn. A stopped turn still drains its queue afterward.
     if (active && !releasing) {
@@ -336,6 +346,7 @@ export class Controller extends EventEmitter {
       parsed = false,
       resumeGoal = false,
       continueAfterUsage = false,
+      resumeAfterUsageReset = false,
       ownerDisplay = null,
     },
   ) {
@@ -393,6 +404,29 @@ export class Controller extends EventEmitter {
         });
       }
     }
+    // The stopped model continues its own session. The host writes the prompt.
+    // A resumable Goal is reactivated instead of being replaced by that prompt.
+    if (resumeAfterUsageReset) {
+      if (continueAfterUsage || resumeGoal)
+        throw new Error("Resume after a usage reset on its own.");
+      if (!chat.usage_stopped_at || !chat.usage_resume_at)
+        throw new Error("This chat is not waiting for usage to reset");
+      const stoppedProvider = chat.usage_stopped_provider ?? chat.provider;
+      if (provider !== stoppedProvider)
+        throw new Error("Resume the provider that ran out of usage.");
+      const stoppedRun = this.store.run(chat.usage_stopped_run_id);
+      if (!stoppedRun || stoppedRun.model !== model)
+        throw new Error("Resume the model that ran out of usage.");
+      parsed = true;
+      mode = chat.mode;
+      const objective = chat.sessions[provider]?.goal?.objective || null;
+      if (
+        mode === "goal" &&
+        resumableGoals(chat).some((goal) => goal.provider === provider)
+      )
+        resumeGoal = true;
+      text = usageResetResumeText({ mode, objective });
+    }
     if (typeof text !== "string" || text.length > 250000)
       throw new Error("Enter a message under 250,000 characters");
     if (!["codex", "claude", "cursor", "openrouter"].includes(provider))
@@ -416,6 +450,8 @@ export class Controller extends EventEmitter {
       throw new Error("Enter a message or attach a file");
     const selected = this.providers.find((p) => p.id === provider);
     if (!selected) throw new Error("Refresh provider connections first");
+    if (resumeAfterUsageReset && isUsageExhausted(selected.blockReason))
+      throw new Error("Usage has not reset yet.");
     if (selected.blockReason) throw new Error(selected.blockReason);
     const selectedModel = selected.models.find((m) => m.id === model);
     if (!selectedModel || selectedModel.disabled)
@@ -429,6 +465,7 @@ export class Controller extends EventEmitter {
       owner &&
       mode === "goal" &&
       !continueAfterUsage &&
+      !resumeAfterUsageReset &&
       ownerDisplay == null &&
       (body || files.length || resumeGoal)
     ) {
@@ -462,6 +499,7 @@ export class Controller extends EventEmitter {
       mode,
       resumeGoal: Boolean(resumeGoal),
       continueAfterUsage: Boolean(continueAfterUsage),
+      resumeAfterUsageReset: Boolean(resumeAfterUsageReset),
       continuedGoalObjective,
       continuedGoalPrompt,
     };
@@ -471,6 +509,7 @@ export class Controller extends EventEmitter {
     const { chat, chatId } = prepared;
     if (this.active.has(chatId))
       throw new Error("This chat already has active work");
+    if (prepared.resumeAfterUsageReset) this.store.clearUsageResume(chatId);
     const run = this.store.createRun({
       conversationId: chatId,
       actionId: prepared.actionId,
@@ -493,6 +532,7 @@ export class Controller extends EventEmitter {
       pendingSteers: [],
       resumeGoal: prepared.resumeGoal,
       continueAfterUsage: prepared.continueAfterUsage,
+      resumeAfterUsageReset: prepared.resumeAfterUsageReset,
       continuedGoalObjective: prepared.continuedGoalObjective,
       continuedGoalPrompt: prepared.continuedGoalPrompt,
       watchOrigin: prepared.watchOrigin,
@@ -698,8 +738,94 @@ export class Controller extends EventEmitter {
     const chat = this.store.conversation(chatId);
     if (!chat) throw new Error("Conversation not found");
     checkMode(mode, chat.provider);
-    if (mode !== chat.mode) this.watchers.invalidate(chatId, "The chat mode changed. Automatic follow-up was revoked.");
+    if (mode !== chat.mode) {
+      this.watchers.invalidate(chatId, "The chat mode changed. Automatic follow-up was revoked.");
+      this.store.clearUsageResume(chatId);
+    }
     return this.store.updateConversation(chatId, { mode });
+  }
+  armUsageResume(chatId) {
+    const chat = this.store.armUsageResume(chatId);
+    this.event(chatId, null, "chat", chat);
+    this.resumeUsageWaits();
+    return this.store.conversation(chatId);
+  }
+  cancelUsageResume(chatId) {
+    const chat = this.store.conversation(chatId);
+    if (!chat) throw new Error("Conversation not found");
+    const next = this.store.clearUsageResume(chatId);
+    this.event(chatId, null, "chat", next);
+    return next;
+  }
+  // A fresh provider reading starts at most one armed chat for that provider.
+  // The clock and an assumed reset date do not count: the block reason has to
+  // be gone. A second refresh uses the same action id, so it cannot duplicate.
+  resumeUsageWaits() {
+    if (this.usageResumeActive) {
+      this.usageResumeAgain = true;
+      return;
+    }
+    this.usageResumeActive = true;
+    try {
+      do {
+        this.usageResumeAgain = false;
+        this.dispatchUsageResumes();
+      } while (this.usageResumeAgain);
+    } finally {
+      this.usageResumeActive = false;
+    }
+  }
+  dispatchUsageResumes() {
+    let waiting = [];
+    try {
+      waiting = this.store.usageResumes();
+    } catch {
+      return;
+    }
+    for (const chat of waiting) {
+      const providerId = chat.usage_stopped_provider ?? chat.provider;
+      if (
+        [...this.active.values()].some((entry) => entry.run.provider === providerId) ||
+        this.active.has(chat.id) ||
+        this.store.queuedInputs(chat.id).length ||
+        ownerPauseFor(chat, providerId)
+      )
+        continue;
+      const provider = this.providers.find((item) => item.id === providerId);
+      if (!provider?.connected || provider.blockReason) continue;
+      const stopped = this.store.run(chat.usage_stopped_run_id);
+      if (!stopped?.model || !chat.usage_resume_action) {
+        this.failUsageResume(chat.id, "The stopped turn has no model to resume");
+        continue;
+      }
+      const selected = provider.models.find((item) => item.id === stopped.model);
+      const effort = selected?.efforts?.includes(chat.effort) ? chat.effort : null;
+      try {
+        const result = this.send(chat.id, {
+          actionId: chat.usage_resume_action,
+          provider: providerId,
+          model: stopped.model,
+          effort,
+          permissions: chat.permissions,
+          mode: chat.mode,
+          resumeAfterUsageReset: true,
+        });
+        if (result?.duplicate) this.store.clearUsageResume(chat.id);
+      } catch (error) {
+        const message = error?.message ?? "";
+        if (
+          /Select an available model|no model to resume|Unknown agent|Resume the model that ran out|does not expose that effort/.test(
+            message,
+          )
+        )
+          this.failUsageResume(chat.id, message);
+      }
+    }
+  }
+  failUsageResume(chatId, message) {
+    const chat = this.store.failUsageResume(chatId, message);
+    this.event(chatId, null, "chat", chat);
+    return chat;
   }
   // The folder a chat works in: its own worktree, created on its first turn,
   // or the project folder when that is not a Git repository on a branch or the
@@ -785,6 +911,7 @@ export class Controller extends EventEmitter {
       return { queued: false, moved: false, directory: path };
     active.pendingMove = { path };
     this.watchers.invalidate(chatId, "The chat is moving to another directory.", true);
+    this.store.clearUsageResume(chatId);
     return {
       queued: true,
       directory: path,
@@ -939,6 +1066,7 @@ export class Controller extends EventEmitter {
     const activeEntry = this.active.get(chat.id);
     const resumeGoal = chat.mode === "goal" && Boolean(activeEntry?.resumeGoal);
     const continueAfterUsage = Boolean(activeEntry?.continueAfterUsage);
+    const resumeAfterUsageReset = Boolean(activeEntry?.resumeAfterUsageReset);
     const savedGoal = chat.sessions[run.provider]?.goal;
     if (
       chat.mode === "goal" ||
@@ -954,7 +1082,7 @@ export class Controller extends EventEmitter {
         // handoff keeps the stopped Goal's objective instead of the prompt.
         modeChange?.mode === "goal" && chat.mode === "goal"
           ? modeChange.objective
-          : chat.mode === "goal" && !resumeGoal && !continuing
+          : chat.mode === "goal" && !resumeGoal && !continuing && !resumeAfterUsageReset
             ? activeEntry?.moveOrigin?.goalObjective ??
               (continueAfterUsage ? activeEntry.continuedGoalObjective : text)
             : undefined,
@@ -1597,7 +1725,7 @@ export class Controller extends EventEmitter {
       resumeGoal,
       goalObjective: startGoal
         ? modeChange?.objective ?? activeEntry?.moveOrigin?.goalObjective ?? text
-        : resumeGoal
+        : resumeGoal || (resumeAfterUsageReset && chat.mode === "goal")
           ? savedGoal?.objective
           : continueAfterUsage && chat.mode === "goal" && !continuing
             ? activeEntry?.continuedGoalPrompt

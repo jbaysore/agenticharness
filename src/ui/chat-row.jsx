@@ -19,7 +19,7 @@ export function ChatRow({
   const [title, setTitle] = useState(null),
     settled = useRef(true);
   const marker = chatMarker(chat),
-    label = chatMarkerLabel(marker);
+    label = chatMarkerLabel(marker, chat);
   // Enter, Escape and losing focus can all end a rename; only the first counts.
   const finish = (keep) => {
     if (settled.current) return;

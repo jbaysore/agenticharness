@@ -45,7 +45,9 @@ export function chatMarker(chat) {
   if (!chat?.unread) return null;
   return "unread";
 }
-export function chatMarkerLabel(marker) {
+export function chatMarkerLabel(marker, chat) {
+  if (marker === "usage" && chat?.usage_resume_at)
+    return "Waiting for usage to reset";
   return (
     {
       approval: "Waiting for your approval",
@@ -301,6 +303,14 @@ export function resetCountdown(at, now = Date.now()) {
     return `${Math.floor(minutes / 60)}h` + (minutes % 60 ? ` ${minutes % 60}m` : "");
   const hours = Math.ceil(minutes / 60);
   return `${Math.floor(hours / 24)}d` + (hours % 24 ? ` ${hours % 24}h` : "");
+}
+// The soonest exhausted window that has not reached its reported reset.
+// An assumed monthly date is not a usage window, so it cannot arm a resume.
+export function usageResetAt(provider, now = Date.now()) {
+  const times = usageWindows(provider)
+    .filter((window) => window.remaining === 0 && window.resetsAt > now)
+    .map((window) => window.resetsAt);
+  return times.length ? Math.min(...times) : null;
 }
 export function resetLabel(at, now = Date.now()) {
   if (!Number.isFinite(at) || at <= 0) return "";

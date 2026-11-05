@@ -176,6 +176,13 @@ export class Store {
         WHERE r.conversation_id=conversations.id AND r.error=conversations.usage_stopped_reason
         ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1) WHERE usage_stopped_at IS NOT NULL`);
     }
+    // Set while this chat should continue the stopped model after usage resets.
+    if (!conversation.includes("usage_resume_at"))
+      this.db.exec("ALTER TABLE conversations ADD COLUMN usage_resume_at TEXT");
+    if (!conversation.includes("usage_resume_action"))
+      this.db.exec("ALTER TABLE conversations ADD COLUMN usage_resume_action TEXT");
+    if (!conversation.includes("usage_resume_error"))
+      this.db.exec("ALTER TABLE conversations ADD COLUMN usage_resume_error TEXT");
     // Run on a chat's rebased branch before it lands on the project's branch.
     if (!columns("projects").includes("check_command"))
       this.db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
@@ -435,6 +442,7 @@ export class Store {
       .run(this.now(), id);
   }
   setArchived(id, archived) {
+    if (archived) this.clearUsageResume(id);
     this.db
       .prepare("UPDATE conversations SET archived_at=? WHERE id=?")
       .run(archived ? this.now() : null, id);
@@ -457,6 +465,7 @@ export class Store {
     this.db
       .prepare(
         `UPDATE conversations SET usage_stopped_at=?, usage_stopped_reason=?, usage_dismissed_run_id=NULL,
+         usage_resume_at=NULL, usage_resume_action=NULL, usage_resume_error=NULL,
          usage_stopped_run_id=COALESCE(?,(SELECT r.id FROM runs r WHERE r.conversation_id=? AND r.error=? ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1)) WHERE id=?`,
       )
       .run(this.now(), text, runId, id, text, id);
@@ -465,7 +474,8 @@ export class Store {
   clearUsageStop(id) {
     this.db
       .prepare(
-        "UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL, usage_stopped_run_id=NULL, usage_dismissed_run_id=NULL WHERE id=?",
+        `UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL, usage_stopped_run_id=NULL,
+          usage_dismissed_run_id=NULL, usage_resume_at=NULL, usage_resume_action=NULL, usage_resume_error=NULL WHERE id=?`,
       )
       .run(id);
     return this.conversation(id);
@@ -476,12 +486,67 @@ export class Store {
     this.db
       .prepare(
         `UPDATE conversations SET usage_stopped_at=NULL, usage_stopped_reason=NULL, usage_stopped_run_id=NULL,
+          usage_resume_at=NULL, usage_resume_action=NULL, usage_resume_error=NULL,
           usage_dismissed_run_id=COALESCE(usage_stopped_run_id,(SELECT id FROM runs WHERE conversation_id=?
             AND status='failed' AND error=conversations.usage_stopped_reason
             ORDER BY created_at DESC, rowid DESC LIMIT 1))
           WHERE id=? AND usage_stopped_at IS NOT NULL`,
       )
       .run(id, id);
+    return this.conversation(id);
+  }
+  // Chats waiting to continue the model that ran out, oldest request first.
+  usageResumes() {
+    return this.db
+      .prepare(
+        `SELECT id FROM conversations
+         WHERE usage_resume_at IS NOT NULL AND usage_stopped_at IS NOT NULL AND archived_at IS NULL
+         ORDER BY usage_resume_at, rowid`,
+      )
+      .all()
+      .map((row) => this.conversation(row.id))
+      .filter(Boolean);
+  }
+  // One arm per stop. A second request keeps the same action so a refresh
+  // cannot start a second turn. A new arm after an error gets a new action.
+  armUsageResume(id) {
+    const chat = this.conversation(id);
+    if (!chat) throw new Error("Conversation not found");
+    if (!chat.usage_stopped_at)
+      throw new Error("This chat is not stopped because usage ran out");
+    const run = chat.usage_stopped_run_id
+      ? this.run(chat.usage_stopped_run_id)
+      : null;
+    if (!run?.model) throw new Error("The stopped turn has no model to resume");
+    if (chat.usage_resume_at && chat.usage_resume_action && !chat.usage_resume_error)
+      return chat;
+    const actionId = `usage-resume-${run.id}-${randomUUID().slice(0, 8)}`;
+    if (!/^[-\w]{16,100}$/.test(actionId))
+      throw new Error("Could not prepare the usage resume");
+    this.db
+      .prepare(
+        `UPDATE conversations SET usage_resume_at=?, usage_resume_action=?, usage_resume_error=NULL WHERE id=?`,
+      )
+      .run(this.now(), actionId, id);
+    return this.conversation(id);
+  }
+  clearUsageResume(id) {
+    this.db
+      .prepare(
+        `UPDATE conversations SET usage_resume_at=NULL, usage_resume_action=NULL, usage_resume_error=NULL WHERE id=?`,
+      )
+      .run(id);
+    return this.conversation(id);
+  }
+  // The wait cannot succeed. Keep the usage stop so the chat can choose again.
+  failUsageResume(id, message) {
+    const text = String(message ?? "").trim().slice(0, 500);
+    if (!text) throw new Error("A usage resume failure needs a reason");
+    this.db
+      .prepare(
+        `UPDATE conversations SET usage_resume_at=NULL, usage_resume_action=NULL, usage_resume_error=? WHERE id=?`,
+      )
+      .run(text, id);
     return this.conversation(id);
   }
   createConversation({

@@ -757,6 +757,11 @@ export async function createHarness({
                 throw new Error("A usage flag can only be dismissed");
               store.dismissUsageStop(id);
             }
+            if (body.usageResume !== undefined) {
+              if (body.usageResume === true) controller.armUsageResume(id);
+              else if (body.usageResume === false) controller.cancelUsageResume(id);
+              else throw new Error("Usage resume must be true or false");
+            }
             if (Object.hasOwn(body, "permissions"))
               controller.setPermissions(id, body.permissions);
             if (Object.hasOwn(body, "mode")) controller.setMode(id, body.mode);

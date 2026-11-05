@@ -37,6 +37,14 @@ app.controller.runners.codex = async (ctx) => {
     text: "Finished the work.",
   });
   ctx.goalState("complete");
+  if (scenario === "resumed") {
+    ctx.emit("nativeTurn", { id: "usage-resumed" });
+    ctx.emit("text", {
+      nativeId: "usage-resumed-reply",
+      text: "Usage reset, continuing.",
+    });
+    return { status: "completed" };
+  }
   if (scenario === "exhausted") {
     ctx.emit("work", { kind: "billing-stop", reason });
     return { status: "interrupted" };
@@ -214,10 +222,50 @@ try {
       expect(app.store.conversation(goal.id).usage_stopped_at).toBeNull();
     } finally { app.controller.runners[to] = previous; }
   }
+  const waiting = app.store.createConversation({
+    projectId: project.id,
+    title: "Resume when usage resets",
+    provider: "codex",
+    model: "fixture",
+  });
+  const waitingRun = app.store.createRun({
+    conversationId: waiting.id,
+    actionId: crypto.randomUUID(),
+    provider: "codex",
+    model: "fixture",
+    text: "Finish the turn",
+  });
+  app.store.setRun(waitingRun.id, "failed", null, reason);
+  app.store.setUsageStop(waiting.id, reason, waitingRun.id);
+  const codex = app.controller.providers.find((item) => item.id === "codex");
+  codex.blockReason = reason;
+  await page.goto(`${app.runtime.origin}/?chat=${waiting.id}`);
+  const waitingNotice = page.locator(".notice.failed");
+  await waitingNotice.getByRole("button", { name: "Resume when usage resets", exact: true }).click();
+  await expect(waitingNotice).toContainText("It will resume on Codex · Fixture when usage resets.");
+  await expect(waitingNotice).toContainText("Checking until a reading shows usage is available.");
+  await expect.poll(() => app.store.conversation(waiting.id).usage_resume_at).toBeTruthy();
+  expect(app.store.db.prepare("SELECT count(*) AS n FROM runs WHERE conversation_id=?").get(waiting.id).n).toBe(1);
+  await waitingNotice.getByRole("button", { name: "Cancel resume", exact: true }).click();
+  await expect(waitingNotice.getByRole("button", { name: "Resume when usage resets", exact: true })).toBeVisible();
+  await expect.poll(() => app.store.conversation(waiting.id).usage_resume_at).toBeNull();
+  await waitingNotice.getByRole("button", { name: "Resume when usage resets", exact: true }).click();
+  await expect(waitingNotice).toContainText("when usage resets");
+  codex.blockReason = null;
+  scenario = "resumed";
+  app.controller.resumeUsageWaits();
+  await expect(page.getByText("Usage reset, continuing.", { exact: true })).toBeVisible();
+  await expect(waitingNotice).toHaveCount(0);
+  const resumed = app.store.conversation(waiting.id);
+  expect(resumed.provider).toBe("codex");
+  expect(resumed.model).toBe("fixture");
+  expect(resumed.usage_resume_at).toBeNull();
+  expect(resumed.usage_stopped_at).toBeNull();
+  expect(app.store.messages(waiting.id).some((message) => message.role === "user" && message.content.startsWith("Included usage has reset."))).toBe(true);
   await page.screenshot({ path: ".local/screenshots/usage-stop.png" });
   expect(errors).toEqual([]);
   console.log(
-    "Usage stop checks passed: resumed Goal completion, genuine quota stop, banner/sidebar dismissal, disconnected stream, persistence after reload, visibility of later failures, and continuing on another provider. Providers were simulated.",
+    "Usage stop checks passed: resumed Goal completion, genuine quota stop, banner/sidebar dismissal, disconnected stream, persistence after reload, visibility of later failures, continuing on another provider, and resuming the same model after usage resets. Providers were simulated.",
   );
 } finally {
   await browser?.close();

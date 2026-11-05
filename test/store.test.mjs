@@ -410,6 +410,57 @@ test("a chat summary follows its newest turn: running, needs approval, unread, f
   assert.equal(db.conversation(c.id).last_error, "Out of usage");
   db.close();
 });
+test("a usage resume stays armed until it is cancelled, dismissed, archived, or the stop is replaced", () => {
+  const db = new Store(":memory:"),
+    chat = db.createConversation({
+      projectId: db.addProject("P", "C:\\usage-resume").id,
+      provider: "codex",
+      model: "m",
+    });
+  const run = db.createRun({
+    conversationId: chat.id,
+    actionId: "usage-resume-source-run",
+    provider: "codex",
+    model: "m",
+    text: "Continue",
+  });
+  db.setRun(run.id, "failed", null, "Included Codex quota is exhausted.");
+  assert.throws(
+    () => db.armUsageResume(chat.id),
+    /not stopped because usage ran out/,
+  );
+  db.setUsageStop(chat.id, "Included Codex quota is exhausted.", run.id);
+  const before = db.conversation(chat.id).updated_at;
+  const armed = db.armUsageResume(chat.id);
+  assert.ok(armed.usage_resume_at);
+  assert.equal(armed.usage_resume_error, null);
+  assert.match(armed.usage_resume_action, new RegExp(`^usage-resume-${run.id}-`));
+  assert.equal(db.armUsageResume(chat.id).usage_resume_action, armed.usage_resume_action);
+  assert.equal(armed.updated_at, before);
+  const failed = db.failUsageResume(chat.id, "Select an available model");
+  assert.equal(failed.usage_resume_at, null);
+  assert.equal(failed.usage_stopped_at, armed.usage_stopped_at);
+  assert.equal(failed.usage_resume_error, "Select an available model");
+  const again = db.armUsageResume(chat.id);
+  assert.notEqual(again.usage_resume_action, armed.usage_resume_action);
+  assert.equal(again.usage_resume_error, null);
+  assert.equal(db.clearUsageResume(chat.id).usage_resume_at, null);
+  db.armUsageResume(chat.id);
+  assert.equal(db.dismissUsageStop(chat.id).usage_resume_at, null);
+  db.setUsageStop(chat.id, "Included Codex quota is exhausted.", run.id);
+  db.armUsageResume(chat.id);
+  assert.equal(db.clearUsageStop(chat.id).usage_resume_action, null);
+  db.setUsageStop(chat.id, "Included Codex quota is exhausted.", run.id);
+  const waiting = db.armUsageResume(chat.id).usage_resume_action;
+  db.setUsageStop(chat.id, "Included Codex quota is exhausted.", run.id);
+  assert.equal(db.conversation(chat.id).usage_resume_action, null);
+  db.armUsageResume(chat.id);
+  assert.notEqual(db.conversation(chat.id).usage_resume_action, waiting);
+  db.setArchived(chat.id, true);
+  assert.equal(db.conversation(chat.id).usage_resume_at, null);
+  assert.ok(db.conversation(chat.id).archived_at);
+  db.close();
+});
 test("a usage stop is remembered until it is dismissed, without reordering the chat", () => {
   const db = new Store(":memory:"),
     p = db.addProject("P", "C:\\usage-stop"),
