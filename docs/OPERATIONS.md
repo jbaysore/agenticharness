@@ -479,6 +479,20 @@ intact. Real test failures, missing files and search exit codes remain visible.
 
 ## Background CI watchers
 
+GitHub CI is the only work Harness can monitor after an agent turn ends. Local
+or remote processes, studies, scripts, logs and files have no completion
+watcher or automatic agent wakeup. A process can keep running, but a process
+ID, native background task or notification flag, open shell, sleep, or promise
+in a reply does not arrange follow-up. Agents must keep the turn active and
+explicitly wait or poll for required non-CI results, checking them before
+concluding. If they must stop first, they must say the job is unmonitored and
+further agent work needs an explicit resume. An active Goal does not provide
+a process watcher, and `pause_for_owner` is reserved for an owner action.
+
+These instructions reach new and resumed provider invocations. An already
+running invocation keeps its original prompt until the next invocation under
+the updated host; installing an instruction change does not interrupt it.
+
 Agents can register `watch_github_ci` for a full commit SHA or a pull-request
 snapshot on github.com, inspect it with `list_watches`, and stop it with
 `cancel_watch`. The Windows host uses the existing GitHub CLI sign-in. No model

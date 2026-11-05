@@ -11,6 +11,8 @@ import { AsyncQueue } from "../src/core/queue.mjs";
 import { runCodex } from "../src/providers/codex.mjs";
 import { runClaude } from "../src/providers/claude.mjs";
 import { claudeContent } from "../src/providers/attachments.mjs";
+import { GOAL_INSTRUCTIONS } from "../src/core/modes.mjs";
+import { WATCH_INSTRUCTIONS } from "../src/core/watch-tools.mjs";
 
 const deferred = () => Promise.withResolvers();
 const flush = async () => {
@@ -112,6 +114,33 @@ function codexFixture(extra = {}, savedGoal = "active") {
     },
   };
 }
+
+test("fresh and resumed Codex Goals deliver background limits in the native developer instructions", async () => {
+  for (const resumed of [false, true]) {
+    const f = codexFixture(
+      {
+        continuing: false,
+        resumeGoal: resumed,
+        session: resumed ? { id: "native-goal" } : undefined,
+        goalObjective: "Inspect study results",
+        instructions: `${WATCH_INSTRUCTIONS}\n\n${GOAL_INSTRUCTIONS}`,
+      },
+      resumed ? "paused" : null,
+    );
+    try {
+      await f.started;
+      const start = f.calls.find(
+        (call) => call.method === (resumed ? "thread/resume" : "thread/start"),
+      );
+      assert.ok(start.params.developerInstructions.includes(WATCH_INSTRUCTIONS));
+      assert.ok(start.params.developerInstructions.includes(GOAL_INSTRUCTIONS));
+    } finally {
+      f.abort.abort();
+      f.rpc.close();
+      await f.run.catch(() => {});
+    }
+  }
+});
 
 test("Codex confirms watcher suspension only after the native Goal pauses and the turn ends", async () => {
   for (const pauseWorks of [true, false]) {

@@ -5,6 +5,7 @@ import { Controller } from "../src/core/controller.mjs";
 import { runClaude } from "../src/providers/claude.mjs";
 import {
   ASK_DENY,
+  GOAL_INSTRUCTIONS,
   CLAUDE_ASK_TOOLS,
   askHostAllowed,
   modeSuggestionTool,
@@ -14,6 +15,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { askUserTool } from "../src/core/questions.mjs";
 import { planRevisionRequest } from "../src/core/plans.mjs";
 import { commandTool } from "../src/core/command-tool.mjs";
+import { WATCH_INSTRUCTIONS } from "../src/core/watch-tools.mjs";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import {
@@ -77,6 +79,24 @@ function fakeClaude(ctx, during = async () => {}) {
   return { run, seen };
 }
 
+test("fresh and resumed Claude Goals deliver background limits in the SDK system prompt", async () => {
+  for (const resumed of [false, true]) {
+    const { run, seen } = fakeClaude({
+      mode: "goal",
+      text: resumed ? "Resume the paused goal." : "Inspect study results",
+      goalObjective: "Inspect study results",
+      resumeGoal: resumed,
+      ...(resumed && { session: { id: "saved-study-goal" } }),
+      instructions: `${WATCH_INSTRUCTIONS}\n\n${GOAL_INSTRUCTIONS}`,
+    });
+    assert.equal((await run).status, "completed");
+    assert.ok(seen.options.systemPrompt.append.includes(WATCH_INSTRUCTIONS));
+    assert.ok(seen.options.systemPrompt.append.includes(GOAL_INSTRUCTIONS));
+    assert.equal(seen.options.resume, resumed ? "saved-study-goal" : undefined);
+    assert.match(seen.message, /\/goal Inspect study results/);
+  }
+});
+
 test("Claude exposes explicit command shells through its real MCP tool schema", async () => {
   const { run } = fakeClaude(
     {
@@ -98,6 +118,10 @@ test("Claude exposes explicit command shells through its real MCP tool schema", 
         await client.connect(clientTransport);
         const tools = (await client.listTools()).tools;
         assert.ok(tools.some((tool) => tool.name === "run_command"));
+        assert.match(
+          tools.find((tool) => tool.name === "run_command").description,
+          /Background process completion does not resume the agent after the turn ends/,
+        );
         const result = await client.callTool({
           name: "run_command",
           arguments: {

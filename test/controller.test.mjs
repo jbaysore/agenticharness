@@ -5,8 +5,92 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
-import { GOAL_QUESTION_TIMEOUT } from "../src/core/modes.mjs";
+import { GOAL_INSTRUCTIONS, GOAL_QUESTION_TIMEOUT } from "../src/core/modes.mjs";
 import { hostTools, hostToolsKey } from "../src/core/host-tools.mjs";
+import { WATCH_INSTRUCTIONS } from "../src/core/watch-tools.mjs";
+
+test("background instructions explain the non-CI failure and the supported follow-up", () => {
+  assert.match(WATCH_INSTRUCTIONS, /only for GitHub CI through watch_github_ci/);
+  assert.match(
+    WATCH_INSTRUCTIONS,
+    /local or remote processes, studies, scripts, logs, or files after your turn ends/,
+  );
+  assert.match(WATCH_INSTRUCTIONS, /completion will not wake you or start another agent turn/);
+  assert.match(WATCH_INSTRUCTIONS, /native background task or notification flag/);
+  assert.match(
+    WATCH_INSTRUCTIONS,
+    /keep the turn active and explicitly wait or poll with supported tools/,
+  );
+  assert.match(WATCH_INSTRUCTIONS, /Never end a turn promising to pick up non-CI results/);
+  assert.match(WATCH_INSTRUCTIONS, /job is unmonitored.*requires an explicit resume/);
+  assert.match(
+    WATCH_INSTRUCTIONS,
+    /Only promise automatic follow-up after.*successfully armed with yield_to_watch/,
+  );
+  assert.match(GOAL_INSTRUCTIONS, /active Goal is not a completion watcher/);
+  assert.match(GOAL_INSTRUCTIONS, /Do not use pause_for_owner for.*background process completion/);
+});
+
+for (const provider of ["codex", "claude", "cursor", "openrouter"])
+  for (const mode of [
+    "default", "ask", "plan",
+    ...(["codex", "claude"].includes(provider) ? ["goal"] : []),
+  ])
+    test(`${provider}/${mode}: fresh and resumed chats receive the background monitoring limits`, async () => {
+      const store = new Store(":memory:"),
+        controller = new Controller(store, {}),
+        contexts = [];
+      controller.providers = [
+        { id: provider, models: [{ id: "fixture", efforts: [] }] },
+      ];
+      const chat = store.createConversation({
+        projectId: store.addProject("Monitoring fixture", process.cwd(), {
+          scratch: true,
+        }).id,
+        provider,
+        mode,
+        title: "Monitoring limits",
+      });
+      controller.runners[provider] = async (ctx) => {
+        contexts.push(ctx);
+        ctx.saveSession({ id: "monitoring-native", tools: hostToolsKey });
+        ctx.promptAccepted();
+        if (mode === "goal") ctx.goalState("paused");
+        return { status: "completed" };
+      };
+      const send = async (resumed) => {
+        controller.send(chat.id, {
+          actionId: `monitoring-${provider}-${mode}-${resumed}`,
+          text: "Inspect the study results",
+          provider,
+          model: "fixture",
+          ...(resumed && mode === "goal" && { resumeGoal: true }),
+        });
+        await controller.active.get(chat.id).task;
+      };
+      try {
+        await send(false);
+        // Simulate upgrading an existing native session from the older policy.
+        const sessions = store.conversation(chat.id).sessions;
+        store.updateConversation(chat.id, {
+          sessions: {
+            ...sessions,
+            [provider]: { ...sessions[provider], promptHash: "older-background-policy" },
+          },
+        });
+        await send(true);
+        assert.equal(contexts.length, 2);
+        assert.equal(contexts[1].session.id, "monitoring-native");
+        for (const ctx of contexts) {
+          assert.ok(ctx.instructions.includes(WATCH_INSTRUCTIONS));
+          assert.equal(ctx.instructions.includes(GOAL_INSTRUCTIONS), mode === "goal");
+        }
+        if (mode === "goal") assert.equal(contexts[1].resumeGoal, true);
+      } finally {
+        await controller.close();
+        store.close();
+      }
+    });
 
 test("an approval can be answered synchronously and retries never answer twice", async () => {
   const store = new Store(":memory:"),

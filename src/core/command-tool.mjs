@@ -7,7 +7,7 @@ import { workspaceFingerprint } from "./repository.mjs";
 export const commandTool = {
   name: "run_command",
   description:
-    "Run a foreground command in this chat's worktree through Harness's permission review. Choose powershell, cmd or bash explicitly when syntax matters. Supports builds, tests, Git, linked dependencies and localhost tools without relying on the agent's sandbox runner. Direct npm/pnpm/yarn installation commands detach a shared node_modules link first; use isolateDependencies for installations inside compound scripts. Returns actual output and exit code; a nonzero result is never automatically retried. Use native execution tools for interactive/background sessions.",
+    "Run a foreground command in this chat's worktree through Harness's permission review. Choose powershell, cmd or bash explicitly when syntax matters. Supports builds, tests, Git, linked dependencies and localhost tools without relying on the agent's sandbox runner. Direct npm/pnpm/yarn installation commands detach a shared node_modules link first; use isolateDependencies for installations inside compound scripts. Returns actual output and exit code; a nonzero result is never automatically retried. Use native execution tools for interactive/background sessions, and explicitly wait or poll required results during the active turn. Background process completion does not resume the agent after the turn ends.",
   inputSchema: {
     type: "object",
     properties: {
