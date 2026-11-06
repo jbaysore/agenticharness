@@ -1,4 +1,10 @@
-import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { api } from "./api.mjs";
 import { Modal } from "./components.jsx";
 import {
@@ -137,26 +143,33 @@ export function SkillsModal({ skills, onSaved, onClose }) {
         {skills.length > 0 && (
           <ul className="skill-list">
             {skills.map((skill) => (
-              <li key={skill.id}>
+              <li
+                key={skill.id}
+                className={editing === skill.id ? "editing" : undefined}
+              >
                 <header>
-                  <strong>{skill.name}</strong>
-                  <span className="skill-command">/{skill.command}</span>
+                  <div className="skill-title">
+                    <strong>{skill.name}</strong>
+                    <span className="skill-command">/{skill.command}</span>
+                  </div>
                   <div className="skill-actions">
                     <button
                       type="button"
                       className="text-button"
                       disabled={saving}
+                      aria-label={`Edit ${skill.name}`}
                       onClick={() => edit(skill)}
                     >
-                      Edit {skill.name}
+                      Edit
                     </button>
                     <button
                       type="button"
                       className="text-button"
                       disabled={saving}
+                      aria-label={`Delete ${skill.name}`}
                       onClick={() => remove(skill)}
                     >
-                      Delete {skill.name}
+                      Delete
                     </button>
                   </div>
                 </header>
@@ -199,6 +212,7 @@ export function SkillSlash({
         ...commands.map((entry) => ({
           ...entry,
           id: "delivery:" + entry.command,
+          isDelivery: true,
         })),
         ...modes.map((entry) => ({
           ...entry,
@@ -212,10 +226,45 @@ export function SkillSlash({
     : [];
   const choose = (item) =>
     item.isMode ? onMode(item.mode) : onPick(item.command);
+  const detail = (item) =>
+    item.isDelivery && item.description ? item.description : item.name;
+  const skillMatches = matches.filter((item) => !item.isMode && !item.isDelivery);
   const [hidden, setHidden] = useState(""),
     [highlight, setHighlight] = useState(0);
+  const menuRef = useRef(null);
   useEffect(() => setHighlight(0), [key]);
   const open = !!token && hidden !== key;
+  useLayoutEffect(() => {
+    if (!open) return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    const pane = menu.closest(".chat-pane");
+    const fit = () => {
+      const ceiling = pane ? pane.getBoundingClientRect().top + 8 : 8;
+      const room = menu.getBoundingClientRect().bottom - ceiling;
+      menu.style.maxHeight = Math.max(48, Math.min(320, room)) + "px";
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    if (pane) observer.observe(pane);
+    window.addEventListener("resize", fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [open, key]);
+  useEffect(() => {
+    if (!open) return;
+    const menu = menuRef.current;
+    const option = menu?.querySelector('[aria-selected="true"]');
+    const scroller = menu?.querySelector('[role="listbox"]');
+    if (!option || !scroller) return;
+    const optionBox = option.getBoundingClientRect();
+    const box = scroller.getBoundingClientRect();
+    if (optionBox.top < box.top) scroller.scrollTop -= box.top - optionBox.top;
+    else if (optionBox.bottom > box.bottom)
+      scroller.scrollTop += optionBox.bottom - box.bottom;
+  }, [open, highlight, key]);
   useImperativeHandle(
     ref,
     () => ({
@@ -246,30 +295,32 @@ export function SkillSlash({
   );
   if (!open) return null;
   return (
-    <div className="slash-menu" role="listbox" aria-label="Skills and modes">
-      {matches.map((skill, index) => (
-        <button
-          type="button"
-          role="option"
-          aria-selected={index === highlight}
-          key={skill.id}
-          className={index === highlight ? "active" : ""}
-          title={skill.description ?? skill.instructions}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            choose(skill);
-          }}
-          onMouseEnter={() => setHighlight(index)}
-        >
-          <strong>/{skill.command}</strong>
-          <span>{skill.name}</span>
-        </button>
-      ))}
-      {!matches.some((item) => !item.isMode) && (
-        <p>
-          {skills.length ? `No skill for /${token.query}.` : "No skills yet."}
-        </p>
-      )}
+    <div className="slash-menu" ref={menuRef}>
+      <div role="listbox" aria-label="Skills and modes">
+        {matches.map((skill, index) => (
+          <button
+            type="button"
+            role="option"
+            aria-selected={index === highlight}
+            key={skill.id}
+            className={index === highlight ? "active" : ""}
+            title={skill.description ?? skill.instructions}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              choose(skill);
+            }}
+            onMouseEnter={() => setHighlight(index)}
+          >
+            <strong>/{skill.command}</strong>
+            <span>{detail(skill)}</span>
+          </button>
+        ))}
+        {skills.length === 0 ? (
+          <p>No skills yet.</p>
+        ) : (
+          skillMatches.length === 0 && <p>No skill for /{token.query}.</p>
+        )}
+      </div>
       <button
         type="button"
         className="text-button"

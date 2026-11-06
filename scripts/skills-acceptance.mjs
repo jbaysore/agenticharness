@@ -28,7 +28,12 @@ controller.providers = [
 controller.refreshProviders = async () => controller.providers;
 const seen = [];
 controller.runners.codex = async (ctx) => {
-  seen.push({ text: ctx.text, instructions: ctx.instructions, mode: ctx.mode });
+  seen.push({
+    text: ctx.text,
+    instructions: ctx.instructions,
+    addendum: ctx.addendum,
+    mode: ctx.mode,
+  });
   ctx.emit("text", { nativeId: "reply-" + seen.length, text: "Done: " + ctx.text });
   return { status: "completed" };
 };
@@ -79,18 +84,21 @@ try {
   await page.getByLabel("Send message").click();
   await expect(reply).toContainText("Done: /review-notes Look at the parser");
   assert.match(seen[0].text, /\/review-notes Look at the parser/);
-  assert.match(seen[0].instructions, /Skill: Review notes/);
-  assert.match(seen[0].instructions, /Name the file the decision came from\./);
+  assert.doesNotMatch(seen[0].instructions, /Skill: Review notes/);
+  assert.match(seen[0].addendum, /Skill: Review notes/);
+  assert.match(seen[0].addendum, /Name the file the decision came from\./);
   await page.getByRole("button", { name: "Work", exact: true }).click();
   await expect(page.locator(".work-item", { hasText: "Skill · Review notes" })).toBeVisible();
 
   await ask("Look again");
   assert.doesNotMatch(seen[1].instructions, /Skill: Review notes/);
+  assert.doesNotMatch(seen[1].addendum, /Skill: Review notes/);
 
   await box.fill("Read src/review-notes");
   await expect(menu).toHaveCount(0);
   await ask("Read src/review-notes");
   assert.doesNotMatch(seen[2].instructions, /Skill: Review notes/);
+  assert.doesNotMatch(seen[2].addendum, /Skill: Review notes/);
 
   await box.fill("/pl");
   await menu.getByRole("option", { name: "/plan Plan mode" }).click();

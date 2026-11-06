@@ -1257,6 +1257,7 @@ export function ChatPane({
         ))}
       </div>
       <div className="composer-area">
+        <div className="composer-stack">
         <SkillSlash
           ref={slash}
           skills={skills}
@@ -1560,6 +1561,7 @@ export function ChatPane({
                 onChange={changeDirectory}
               />
             )}
+        </div>
         </div>
       </div>
     </section>
