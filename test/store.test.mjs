@@ -638,6 +638,142 @@ test("reopening repairs proven replayed Goal usage failures and preserves genuin
   }
 });
 
+test("reopening flags a latest startup usage failure and leaves dismissed, cancelled, and older runs alone", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-startup-usage-")),
+    path = join(dir, "workspace.sqlite"),
+    reason =
+      "Included Codex usage is exhausted. Wait for the provider to restore it.";
+  let db = new Store(path);
+  try {
+    const project = db.addProject("Startup usage", dir);
+    const chatFor = (kind, mode = "goal") => {
+      const chat = db.createConversation({ projectId: project.id, mode });
+      const run = db.createRun({
+        conversationId: chat.id,
+        actionId: `startup-usage-${kind}`,
+        provider: "codex",
+        model: "m",
+        text: "Continue the task",
+      });
+      return { chat, run };
+    };
+    const open = (status, objective) => {
+      const { chat, run } = chatFor(status);
+      db.setRun(run.id, "failed", null, reason);
+      db.setGoalState(chat.id, "codex", run.id, status, objective);
+      return {
+        chatId: chat.id,
+        runId: run.id,
+        updatedAt: db.conversation(chat.id).updated_at,
+      };
+    };
+    const starting = open("starting", "Starting objective");
+    const unknown = open("unknown", "Unknown objective");
+    const active = open("active", "Active objective");
+    const paused = open("paused", "Paused objective");
+    const { chat: dismissedChat, run: dismissedRun } = chatFor("dismissed");
+    db.setRun(dismissedRun.id, "failed", null, reason);
+    db.setGoalState(
+      dismissedChat.id,
+      "codex",
+      dismissedRun.id,
+      "unknown",
+      "Dismissed objective",
+    );
+    db.setUsageStop(dismissedChat.id, reason, dismissedRun.id);
+    db.dismissUsageStop(dismissedChat.id);
+    const dismissed = {
+      chatId: dismissedChat.id,
+      runId: dismissedRun.id,
+      updatedAt: db.conversation(dismissedChat.id).updated_at,
+    };
+    const { chat: cancelledChat, run: cancelledRun } = chatFor("cancelled");
+    db.setGoalState(
+      cancelledChat.id,
+      "codex",
+      cancelledRun.id,
+      "starting",
+      "Cancelled objective",
+    );
+    db.setRun(cancelledRun.id, "cancelled", null, reason);
+    const cancelled = {
+      chatId: cancelledChat.id,
+      runId: cancelledRun.id,
+      updatedAt: db.conversation(cancelledChat.id).updated_at,
+    };
+    const { chat: olderChat, run: olderRun } = chatFor("older");
+    db.setRun(olderRun.id, "failed", null, reason);
+    db.setGoalState(
+      olderChat.id,
+      "codex",
+      olderRun.id,
+      "unknown",
+      "Older objective",
+    );
+    const later = db.createRun({
+      conversationId: olderChat.id,
+      actionId: "startup-usage-older-later",
+      provider: "codex",
+      model: "m",
+      text: "A later task",
+    });
+    db.setRun(later.id, "completed");
+    const older = {
+      chatId: olderChat.id,
+      runId: olderRun.id,
+      updatedAt: db.conversation(olderChat.id).updated_at,
+    };
+    db.close();
+    const check = () => {
+      for (const fixture of [starting, unknown, active]) {
+        const chat = db.conversation(fixture.chatId);
+        assert.equal(chat.usage_stopped_reason, reason, fixture.runId);
+        assert.equal(chat.usage_stopped_run_id, fixture.runId);
+        assert.equal(chat.sessions.codex.goal.status, "usageLimited");
+        assert.equal(chat.sessions.codex.goal.runId, fixture.runId);
+        assert.equal(chat.updated_at, fixture.updatedAt);
+      }
+      assert.equal(
+        db.conversation(starting.chatId).sessions.codex.goal.objective,
+        "Starting objective",
+      );
+      assert.equal(
+        db.conversation(unknown.chatId).sessions.codex.goal.objective,
+        "Unknown objective",
+      );
+      const pausedChat = db.conversation(paused.chatId);
+      assert.equal(pausedChat.usage_stopped_reason, reason);
+      assert.equal(pausedChat.sessions.codex.goal.status, "paused");
+      assert.equal(pausedChat.sessions.codex.goal.objective, "Paused objective");
+      assert.equal(pausedChat.updated_at, paused.updatedAt);
+      const dismissedChatNow = db.conversation(dismissed.chatId);
+      assert.equal(dismissedChatNow.usage_stopped_at, null);
+      assert.equal(dismissedChatNow.usage_dismissed_run_id, dismissed.runId);
+      assert.equal(dismissedChatNow.sessions.codex.goal.status, "unknown");
+      assert.equal(dismissedChatNow.updated_at, dismissed.updatedAt);
+      const cancelledChatNow = db.conversation(cancelled.chatId);
+      assert.equal(cancelledChatNow.usage_stopped_at, null);
+      assert.equal(db.run(cancelled.runId).status, "cancelled");
+      assert.equal(db.run(cancelled.runId).error, reason);
+      assert.equal(cancelledChatNow.sessions.codex.goal.status, "starting");
+      assert.equal(cancelledChatNow.updated_at, cancelled.updatedAt);
+      const olderChatNow = db.conversation(older.chatId);
+      assert.equal(olderChatNow.usage_stopped_at, null);
+      assert.equal(olderChatNow.sessions.codex.goal.status, "unknown");
+      assert.equal(olderChatNow.sessions.codex.goal.objective, "Older objective");
+      assert.equal(olderChatNow.updated_at, older.updatedAt);
+      assert.equal(db.run(later.id).status, "completed");
+    };
+    db = new Store(path);
+    check();
+    db.repairStartupUsageStops();
+    check();
+  } finally {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("marking read and archiving leave the conversation order alone", () => {
   const db = new Store(":memory:"),
     p = db.addProject("P", "C:\\p"),

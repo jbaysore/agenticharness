@@ -7,9 +7,11 @@ import { provisionalTitle } from "./history.mjs";
 import {
   blockingGoals,
   goalStatus,
+  goalStopped,
   hasOwnerPause,
   sessionGoals,
 } from "./goals.mjs";
+import { isUsageExhausted } from "../security/billing.mjs";
 import { WatchStore } from "./watch-store.mjs";
 
 const historyScopes = ["none", "project", "all"];
@@ -160,8 +162,8 @@ export class Store {
     // The chat's own Git worktree, created on its first turn.
     if (!conversation.includes("worktree"))
       this.db.exec("ALTER TABLE conversations ADD COLUMN worktree TEXT");
-    // Set when a turn that had already started stopped because included usage
-    // ran out. Cleared when a later turn starts working, or when dismissed.
+    // Set when included usage runs out, including a rejection before the turn
+    // does any work. Cleared when a later turn starts working, or when dismissed.
     if (!conversation.includes("usage_stopped_at"))
       this.db.exec(
         "ALTER TABLE conversations ADD COLUMN usage_stopped_at TEXT",
@@ -198,6 +200,7 @@ export class Store {
       this.setting("default-history-scope", "all");
     this.protectLegacyGoals();
     this.repairReplayedGoalUsageStops();
+    this.repairStartupUsageStops();
   }
 
   close() {
@@ -266,6 +269,33 @@ export class Store {
         this.db.exec("ROLLBACK");
         throw error;
       }
+    }
+  }
+  repairStartupUsageStops() {
+    // Older hosts saved a startup quota rejection as an ordinary failure.
+    // Only the latest failed run can become the usage notice. A dismissed
+    // stop, a cancelled run, and an older failure stay as they were.
+    const latest = this.db
+      .prepare(
+        `SELECT c.id AS conversation_id, c.updated_at, r.id AS run_id, r.provider, r.error
+         FROM conversations c
+         JOIN runs r ON r.rowid=(
+           SELECT rr.rowid FROM runs rr WHERE rr.conversation_id=c.id
+           ORDER BY rr.created_at DESC, rr.rowid DESC LIMIT 1)
+         WHERE c.usage_stopped_at IS NULL AND r.status='failed'
+           AND (c.usage_dismissed_run_id IS NULL OR c.usage_dismissed_run_id!=r.id)`,
+      )
+      .all();
+    for (const row of latest) {
+      if (!isUsageExhausted(row.error)) continue;
+      this.setUsageStop(row.conversation_id, row.error, row.run_id);
+      const chat = this.conversation(row.conversation_id);
+      const goal = chat?.sessions?.[row.provider]?.goal;
+      if (!goal || goal.runId !== row.run_id || goalStopped(goal.status)) continue;
+      this.setGoalState(row.conversation_id, row.provider, row.run_id, "usageLimited");
+      this.db
+        .prepare("UPDATE conversations SET updated_at=? WHERE id=?")
+        .run(row.updated_at, row.conversation_id);
     }
   }
   now() {

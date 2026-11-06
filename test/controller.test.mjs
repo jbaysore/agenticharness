@@ -1165,6 +1165,87 @@ test("a mid-turn usage stop flags the chat until a later turn is working", async
   }
 });
 
+test("a startup usage rejection flags the chat before any work", async () => {
+  const reason =
+    "Included Codex usage is exhausted. Wait for the provider to restore it.";
+  for (const mode of ["default", "goal"]) {
+    const store = new Store(":memory:"),
+      controller = new Controller(store, {}),
+      chat = store.createConversation({
+        projectId: store.addProject("fixture", `C:\\usage-startup-${mode}`).id,
+        provider: "codex",
+        mode,
+      });
+    controller.providers = [
+      { id: "codex", models: [{ id: "m", efforts: [] }] },
+    ];
+    controller.runners.codex = async () => {
+      throw new Error(reason);
+    };
+    try {
+      const run = controller.send(chat.id, {
+        actionId: `usage-startup-throw-${mode}`,
+        text: "Keep the saved objective",
+        provider: "codex",
+        model: "m",
+      });
+      await controller.active.get(chat.id).task;
+      assert.equal(store.run(run.id).status, "failed");
+      assert.equal(store.run(run.id).error, reason);
+      const stopped = store.conversation(chat.id);
+      assert.ok(stopped.usage_stopped_at);
+      assert.equal(stopped.usage_stopped_reason, reason);
+      assert.equal(stopped.usage_stopped_run_id, run.id);
+      if (mode === "goal") {
+        assert.equal(stopped.sessions.codex.goal.status, "usageLimited");
+        assert.equal(
+          stopped.sessions.codex.goal.objective,
+          "Keep the saved objective",
+        );
+        assert.equal(stopped.sessions.codex.goal.runId, run.id);
+      }
+    } finally {
+      await controller.close();
+      store.close();
+    }
+  }
+  const store = new Store(":memory:"),
+    controller = new Controller(store, {}),
+    chat = store.createConversation({
+      projectId: store.addProject("fixture", "C:\\usage-startup-result").id,
+      provider: "codex",
+      mode: "goal",
+    });
+  controller.providers = [{ id: "codex", models: [{ id: "m", efforts: [] }] }];
+  controller.runners.codex = async () => ({
+    status: "failed",
+    error: "Included Codex quota is exhausted.",
+  });
+  try {
+    const run = controller.send(chat.id, {
+      actionId: "usage-startup-result-goal",
+      text: "Keep the returned objective",
+      provider: "codex",
+      model: "m",
+    });
+    await controller.active.get(chat.id).task;
+    const stopped = store.conversation(chat.id);
+    assert.equal(store.run(run.id).status, "failed");
+    assert.equal(
+      stopped.usage_stopped_reason,
+      "Included Codex quota is exhausted.",
+    );
+    assert.equal(stopped.sessions.codex.goal.status, "usageLimited");
+    assert.equal(
+      stopped.sessions.codex.goal.objective,
+      "Keep the returned objective",
+    );
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
 test("a replayed Goal usage limit does not turn a completed run into a usage failure", async (t) => {
   for (const billingStop of [false, true])
     await t.test(`current billing stop=${billingStop}`, async () => {

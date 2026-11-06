@@ -1119,6 +1119,12 @@ export class Controller extends EventEmitter {
     const noteUsageStop = (reason) => {
       if (isUsageExhausted(reason)) usageStopReason ??= reason;
     };
+    // A quota check can reject the turn before it emits any work. That is
+    // still the usage notice, not an ordinary failure.
+    const noteUsageFailure = (reason) => {
+      if (!usageStopReason && !abort.signal.aborted && isUsageExhausted(reason))
+        usageStopReason = reason;
+    };
     const noteActivity = () => {
       sawWork = true;
       if (!usageFlag || usageStopReason || abort.signal.aborted) return;
@@ -1944,23 +1950,11 @@ export class Controller extends EventEmitter {
           : "failed";
       error =
         typeof result.error === "string" ? result.error : result.error?.message;
-      if (
-        !usageStopReason &&
-        sawWork &&
-        !abort.signal.aborted &&
-        isUsageExhausted(error)
-      )
-        usageStopReason = error;
+      noteUsageFailure(error);
     } catch (caught) {
       status = abort.signal.aborted ? "cancelled" : "failed";
       error = caught.message;
-      if (
-        !usageStopReason &&
-        sawWork &&
-        !abort.signal.aborted &&
-        isUsageExhausted(error)
-      )
-        usageStopReason = error;
+      noteUsageFailure(error);
     } finally {
       await reviewer?.close();
       const reading = this.store.contextByProvider(chat.id)[run.provider];
@@ -2034,8 +2028,8 @@ export class Controller extends EventEmitter {
       }
     }
     else {
-      const goal = this.store.conversation(chat.id)?.sessions[run.provider]
-        ?.goal;
+      const fresh = this.store.conversation(chat.id);
+      const goal = fresh?.sessions[run.provider]?.goal;
       // Resuming a native session can replay its previous usageLimited state
       // before reactivating the Goal. Only its final state belongs to this
       // turn; an explicit billing stop above still keeps its own reason.
@@ -2048,7 +2042,14 @@ export class Controller extends EventEmitter {
       )
         noteUsageStop("A provider usage limit has been reached.");
       if (goal?.runId === run.id && !goalStopped(goal.status))
-        this.store.setGoalState(chat.id, run.provider, run.id, "unknown");
+        this.store.setGoalState(
+          chat.id,
+          run.provider,
+          run.id,
+          fresh.mode === "goal" && usageStopReason && !abort.signal.aborted
+            ? "usageLimited"
+            : "unknown",
+        );
     }
     // A quota poll can interrupt the native turn. Keep that as a failed turn
     // with the usage reason, not as a host restart.
