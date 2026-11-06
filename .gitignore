@@ -10,3 +10,7 @@ release/
 coverage/
 playwright-report/
 test-results/
+
+# Personal writing samples stay local
+skills/*/samples/*
+!skills/*/samples/.gitkeep
