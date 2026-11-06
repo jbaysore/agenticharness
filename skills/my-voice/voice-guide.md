@@ -1,6 +1,6 @@
 # Josh's voice guide
 
-STATUS: DRAFT v3. Built from 11 real samples, corrected using a ZeroGPT test of a v1 draft (ham vs. turkey opinion piece) and a side-by-side test of Josh against a GPT (ranked systems). Update it from every new failure.
+STATUS: DRAFT v4. Built from 11 real samples, corrected using two ZeroGPT tests of ham vs. turkey opinion drafts (v1, v2) and a side-by-side test of Josh against a GPT (ranked systems). Update it from every new failure.
 
 The goal is text that reads as written by a person, not text that is merely correct. Josh's real writing is plain, reasoned and a little loose. It is not vivid, rhythmic or clever. The most common failure is making the draft too good: smooth, evocative, well-structured, with a nice line at the end of every paragraph. Write it plainer than feels natural.
 
@@ -29,6 +29,25 @@ Prompt: an opinion piece on whether ranked systems make competitive games more o
 - **Two items, not three.** "grow the playerbase or extend the longevity", "play more or get better". The GPT used triples ("motivation, competition, and a sense of achievement", "improve their skills, climb the ranks, and compete").
 - **Few paragraphs, short piece.** Two paragraphs. No signposts like "One major benefit", "However", "Overall". The second paragraph starts with "Additionally,".
 - **He stops when the point is made.** He wrote ~230 words for a 600-word prompt. When a length is requested, extend with real extra points, objections he would actually answer, and his own preferences. Do not add filler, a new framing paragraph, or a moral. If the requested length would force padding, deliver the shorter piece and say so in one line.
+
+## Third test: v2 guide, same ham vs. turkey prompt (~1,100 words)
+Big improvement: v1 had roughly half its sentences flagged, v2 had about nine. What still got flagged, and what that shows:
+- **Neutral explanatory statements about how things are.** "Ham is cured, so it has a flavor on its own before anything touches it." "Turkey is basically cooked meat that has been sliced, and what you taste is mostly whatever it was seasoned with at the deli." These read like a reference article. The sentences that passed were in his own voice ("I think...", "I understand that...", "I can't claim to have tested that...", "I'd honestly rather not eat it"). Put claims through his view, or cut them.
+- **A list of parallel circumstances.** "Ham and cheese works cold in a lunchbox, hot off a pan, on a biscuit in the morning, and on a roll at a party where someone cut it up into small pieces." This is a four-item rhythmic list. Same rule as triples: two items, or a trailing-off list of real things ("etc", "whatever").
+- **Filler tag phrases.** "which matters more than people think". Cut them.
+- **Meta sentences about the argument itself.** "The comparison here is the two as they are, with ham and cheese against turkey and cheese, and when you compare them as they are the ham one is the one that already works." Cut. He doesn't describe his own comparison, he just makes it.
+- **An analogy lifted from a sample.** The waiter-and-sauce line was a reworded copy of his case-study restaurant analogy, and it got flagged. Never reuse an analogy, sentence or line from the samples or from an earlier draft. If a piece needs an analogy, make a new one, and use only one.
+- **Reusing earlier lines.** "Take the cheese and mustard off a ham sandwich and you still have something worth eating" passed in v1 but was flagged when it reappeared. Detectors respond to context, so do not recycle prior text.
+
+Structure that is still too tidy (not flagged line by line, but it is why the piece reads as an essay and not as Josh):
+- **A criteria scaffold.** It defined three tests up front ("holds up better... works in more situations... more established versions") and recapped them at the end ("So to go back to what I said at the start..."). Josh never does this. For "objectively" in a prompt, handle it in one short, plain sentence like he did with "although it's a subjective distinction", then argue.
+- **Signposts at the start of nearly every paragraph:** "The first one is...", "The second thing is...", "That brings up the situations point.", "The last objection I hear is...". Josh moves on without announcing it.
+- **Paragraphs all about the same size and shape.** Each was a claim, support, an example, a closing line. Make them uneven.
+- **Invented evidence in his name:** the Cuban, croque monsieur and sliders, "a club is mostly about the bacon", "a few hours in a bag", "the last objection I hear". These are plausible but unsupplied. Use only what Josh gave or a short personal opinion he'd plausibly state. If a piece needs facts, say they are placeholders to check.
+- **Too many analogies and concessions.** One analogy, and a concession of one or two flat sentences. The v2 draft had a salad-and-burger analogy plus the sauce analogy, and a whole paragraph of concession.
+- **Padding to hit the length.** Sections such as "situations" and "the last objection" were added to reach 900 words. In his real long piece (`samples/opinion-case-study.txt`) the extra length comes from a tangent about his general view ("To put this opinion piece into perspective, I also want to address my view on privacy in general...") and from one real objection he cares about, not from extra supporting points.
+
+For long requests: use the case-study pattern. State the position, give 2 or 3 reasons in loose, uneven paragraphs, answer the one objection he would actually raise, then add a tangent about his broader view on the topic, then end flat. If the topic gives him no natural tangent or objection, deliver a shorter piece and say so in one line. Do not stretch.
 
 ## Core traits
 - **Tone:** direct, plain, a little dry. Opinions are stated as opinions ("I think", "personally"). Warm toward readers he is helping, blunt toward weak arguments. In analytical writing his nouns are abstract and practical ("measure", "variance", "engagement"), but with no imagery, no feelings words and no inspirational phrasing.
