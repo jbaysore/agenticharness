@@ -1,19 +1,21 @@
-Write in Josh's voice. This applies to anything you draft for him: messages, emails, posts, docs, replies.
+Write the requested text in Josh's voice. This skill applies to the draft the user requests; it does not turn unrelated explanations or technical work into personal writing.
 
-Before drafting:
-1. Read C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\voice-guide.md in full.
-2. Read C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\before-after.md.
-3. List C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\ and read the two or three pieces closest to the kind of writing requested. If none are close, say so and ask for a sample instead of guessing.
-If a file is missing or still says STATUS: TEMPLATE, tell Josh and stop; do not invent a voice.
+Load these references before drafting, using UTF-8:
+- C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\voice-guide.md
+- C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\before-after.md
+- Two or three complete, relevant originals from C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\, selected using the guide. Prefer the requested kind of writing, with some variety within that register. The originals are the primary style evidence; the guide describes tendencies, not a template.
 
-While drafting:
-- Match the guide's tone, sentence length, openers, closers, punctuation and formatting.
-- Use the samples to learn rhythm and word choice. Never copy their sentences or facts.
-- Avoid everything under "Never write" in the guide.
-- Do not add anything Josh did not ask for: no extra caveats, summaries, or offers of more help.
+If a reference is inaccessible, use the other available originals. If no authentic writing is accessible, report that limitation and ask for access rather than claim to have matched the voice. Do not stop merely because an exact topic or register is absent.
 
-Before delivering:
-- Check the draft against the guide once and fix any miss.
-- Return only the draft, unless Josh asked for notes. If you made a judgment call on tone or a fact you were unsure of, add one short line after the draft.
+Drafting:
+- Follow the user's current task, stance, audience, format and length. For a creative assignment with a supplied position, develop the argument without requiring Josh to answer a questionnaire first.
+- Learn sentence construction, vocabulary, qualifications and the movement of the argument from the originals. Transfer those habits without copying their sentences, analogies, biography or unrelated opinions.
+- In an existing draft, preserve Josh's wording and reasoning where they work. If he supplies an opening, continue naturally from it. An opening is optional.
+- Develop the requested content with specific reasoning. Do not manufacture memories, personal preferences or precise factual evidence to make a draft sound authentic. Ask a targeted question only when a missing personal fact or decision is necessary to complete the task.
+- Use the corrections in before-after.md for the relevant register. Avoid repeated punchlines, generic essay scaffolding and stock assistant language; allow ordinary transitions, factual explanations and lists when useful.
 
-When Josh corrects a draft, say what rule or before/after pair would capture the correction and offer to add it to the voice folder.
+Before returning the draft, compare it directly with the originals for register, clause construction, word choice and reasoning. Fix a concrete mismatch, rather than polishing everything into generic prose. Check the requested word count. Do not silently shorten a length-constrained assignment.
+
+Return the draft only unless the user asks for notes or a factual limitation prevents completion. Do not append a generic warning about AI detection.
+
+When asked to evaluate or improve this skill, also read C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\evaluation.md. Treat voice similarity and ZeroGPT results as separate observations. Never claim a detector score without a recorded test.

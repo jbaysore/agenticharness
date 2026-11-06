@@ -1,148 +1,76 @@
 # Josh's voice guide
 
-STATUS: DRAFT v5. Built from 11 real samples, corrected using three ZeroGPT tests of ham vs. turkey opinion drafts (v1, v2, v4) and a side-by-side test of Josh against a GPT (ranked systems). Update it from every new failure.
+STATUS: DRAFT v6. Rebuilt from the existing originals and Josh's corrections. The revised instructions have not established a ZeroGPT score.
 
-The goal is text that reads as written by a person, not text that is merely correct. Josh's real writing is plain, reasoned and a little loose. It is not vivid, rhythmic or clever. The most common failure is making the draft too good: smooth, evocative, well-structured, with a nice line at the end of every paragraph. Write it plainer than feels natural.
+The target is Josh's writing in the requested situation. Read authentic samples before drafting. They take precedence over a generalized description here; the user's current instructions take precedence over both. This guide is a set of tendencies, not a paragraph plan or a list of ingredients to insert.
 
-## What the detector flagged (v1 draft)
-Josh ran a v1 draft through ZeroGPT. The flagged sentences were all the polished, descriptive ones:
-- "It's salty, a little sweet, a little smoky depending on the cure, and all of that is there before you add anything else." (rhythmic repeated "a little X", sensory description)
-- "Turkey tastes like a mild suggestion of meat." (metaphor)
-- "Deli turkey especially is a pale, wet slice that needs the other ingredients to do all the work." (stacked adjectives)
-- "Salty cured pork next to something creamy and sharp is one of the oldest combinations there is..." (sweeping claim plus a list of examples)
-- "...the turkey stays out of the way, which sounds polite until you realize the cheese is now carrying the sandwich by itself." (clever twist)
-- "Hot sandwiches are where it stops being a contest." (stock dramatic idiom)
-- "Grill a ham and cheese and the edges of the ham crisp up, the fat works into the bread, and the cheese melts into every fold." (three parallel sensory clauses)
+## Reference selection
 
-The sentences that were NOT flagged were plain claims and reasoning, asides, and short flat statements: "I think ham and cheese is the better sandwich and I don't think it's close.", "Take the cheese and mustard off a ham sandwich and you still have something worth eating.", "Swiss and ham is a no-brainer.", "Ham is already cured and cooked, so heat just makes it better."
+All originals live in C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\. Read them as UTF-8. Read two or three complete pieces suited to the task. Match the kind of writing first, and include variation within it rather than selecting only for topic similarity.
 
-Lesson: detectors catch evocative, fluent, balanced prose. Plain reasoning in his own words passes. When in doubt, say the thing flatter and shorter.
+- Short opinion: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\opinion-ranked-systems.txt
+- Extended argument: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\opinion-case-study.txt
+- Explanatory class paper: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\paper-economics.txt
+- Practical comments: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\reddit-messages.txt
+- Direct disagreement: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\disagreement-theism-reply.txt
+- Community updates: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\discord-announcements.txt
+- Spoken tutorial: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\video-script-tutorial-overwatch.txt
+- Spoken review: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\video-script-coaching-review.txt
+- Personal essay: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\essay-college-application.txt
+- Class reflections: C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\class-reflection-short-answers.txt and C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\class-predictions-and-reflection.txt
 
-## Second test: Josh vs. a GPT on the same prompt
-Prompt: an opinion piece on whether ranked systems make competitive games more or less fun. Josh wrote ~230 words (`samples/opinion-ranked-systems.txt`). A GPT wrote the generic version (see `before-after.md`, pair 4). What separated them:
-- **Josh takes one side and does not argue the other.** He answers in the first sentence ("make the game more fun"), says in the same sentence it's subjective, then argues it is only beneficial. He does not list downsides. The GPT gave both sides ("However, ranked systems can also create unnecessary stress") and a balanced verdict. Never add a "however / on the other hand" paragraph unless Josh holds that view.
-- **He separates his own view from other people's.** "Speaking for myself...", "For others, I can understand why that may not matter... but even for those people I don't think there is a downside", "None of those parts are important for me, but again are only beneficial." Then he argues the point holds for them too. This move (my view, their view, why it still holds) is his habit.
-- **No conclusion paragraph and no moral.** He ends on a flat restatement of the claim ("only beneficial"). The GPT ended with "Overall, I believe..." and a lesson ("games are meant to be enjoyed").
-- **Abstract analytic wording, not folksy.** "measurable checkpoints", "an objective measure", "subject to high variance", "engagement", "longevity", "playerbase", "the improvement process". Plain, practical nouns from analysis or business, with no imagery or feeling words. The GPT used emotional and inspirational phrasing ("sense of accomplishment", "unnecessary stress", "chase a higher rank").
-- **First person singular and specific mechanics.** "allows me to see over time that I am able to win more due to my efforts", "imagining the next rank badge next to your name". The GPT wrote about "players" in general.
-- **Loose, slightly redundant sentences.** Long sentences with chained clauses and near-synonyms ("provide motivation to play more or get better, and provides more engagement in the game and can help to grow the playerbase or extend the longevity"), mixed agreement ("provides... can help"), and a dropped subject ("but again are only beneficial"). The GPT's sentences were grammatically clean and evenly built. Keep some looseness, but do not fake errors.
-- **Two items, not three.** "grow the playerbase or extend the longevity", "play more or get better". The GPT used triples ("motivation, competition, and a sense of achievement", "improve their skills, climb the ranks, and compete").
-- **Few paragraphs, short piece.** Two paragraphs. No signposts like "One major benefit", "However", "Overall". The second paragraph starts with "Additionally,".
-- **He stops when the point is made.** He wrote ~230 words for a 600-word prompt. When a length is requested, extend with real extra points, objections he would actually answer, and his own preferences. Do not add filler, a new framing paragraph, or a moral. If the requested length would force padding, deliver the shorter piece and say so in one line.
+The filenames identify examples, not reusable facts about Josh's current life. For an uncovered register, adapt from the closest available originals without pretending there is an exact match.
 
-## Third test: v2 guide, same ham vs. turkey prompt (~1,100 words)
-Big improvement: v1 had roughly half its sentences flagged, v2 had about nine. What still got flagged, and what that shows:
-- **Neutral explanatory statements about how things are.** "Ham is cured, so it has a flavor on its own before anything touches it." "Turkey is basically cooked meat that has been sliced, and what you taste is mostly whatever it was seasoned with at the deli." These read like a reference article. The sentences that passed were in his own voice ("I think...", "I understand that...", "I can't claim to have tested that...", "I'd honestly rather not eat it"). Put claims through his view, or cut them.
-- **A list of parallel circumstances.** "Ham and cheese works cold in a lunchbox, hot off a pan, on a biscuit in the morning, and on a roll at a party where someone cut it up into small pieces." This is a four-item rhythmic list. Same rule as triples: two items, or a trailing-off list of real things ("etc", "whatever").
-- **Filler tag phrases.** "which matters more than people think". Cut them.
-- **Meta sentences about the argument itself.** "The comparison here is the two as they are, with ham and cheese against turkey and cheese, and when you compare them as they are the ham one is the one that already works." Cut. He doesn't describe his own comparison, he just makes it.
-- **An analogy lifted from a sample.** The waiter-and-sauce line was a reworded copy of his case-study restaurant analogy, and it got flagged. Never reuse an analogy, sentence or line from the samples or from an earlier draft. If a piece needs an analogy, make a new one, and use only one.
-- **Reusing earlier lines.** "Take the cheese and mustard off a ham sandwich and you still have something worth eating" passed in v1 but was flagged when it reappeared. Detectors respond to context, so do not recycle prior text.
+## What to reproduce
 
-Structure that is still too tidy (not flagged line by line, but it is why the piece reads as an essay and not as Josh):
-- **A criteria scaffold.** It defined three tests up front ("holds up better... works in more situations... more established versions") and recapped them at the end ("So to go back to what I said at the start..."). Josh never does this. For "objectively" in a prompt, handle it in one short, plain sentence like he did with "although it's a subjective distinction", then argue.
-- **Signposts at the start of nearly every paragraph:** "The first one is...", "The second thing is...", "That brings up the situations point.", "The last objection I hear is...". Josh moves on without announcing it.
-- **Paragraphs all about the same size and shape.** Each was a claim, support, an example, a closing line. Make them uneven.
-- **Invented evidence in his name:** the Cuban, croque monsieur and sliders, "a club is mostly about the bacon", "a few hours in a bag", "the last objection I hear". These are plausible but unsupplied. Use only what Josh gave or a short personal opinion he'd plausibly state. If a piece needs facts, say they are placeholders to check.
-- **Too many analogies and concessions.** One analogy, and a concession of one or two flat sentences. The v2 draft had a salad-and-burger analogy plus the sauce analogy, and a whole paragraph of concession.
-- **Padding to hit the length.** Sections such as "situations" and "the last objection" were added to reach 900 words. In his real long piece (`samples/opinion-case-study.txt`) the extra length comes from a tangent about his general view ("To put this opinion piece into perspective, I also want to address my view on privacy in general...") and from one real objection he cares about, not from extra supporting points.
+Josh usually puts his position or practical point near the beginning. He develops it by explaining why he thinks it follows, describing a mechanism, distinguishing cases or answering a question that arises from the previous point. His arguments can be abstract and analytical. Replacing those with folksy language or emotional descriptions changes the voice.
 
-For long requests: use the case-study pattern. State the position, give 2 or 3 reasons in loose, uneven paragraphs, answer the one objection he would actually raise, then add a tangent about his broader view on the topic, then end flat. If the topic gives him no natural tangent or objection, deliver a shorter piece and say so in one line. Do not stretch.
+His sentences often continue a thought through linked clauses, using ordinary causal and contrast words. A qualification may appear within a long sentence rather than in a separate disclaimer. He sometimes repeats a noun or uses overlapping terms instead of choosing the most elegant compressed version. Preserve natural looseness in supplied text; do not inject grammatical errors into new writing.
 
-## Fourth test: v4 guide, ~500 words (confirmed the agent read v4 and two samples)
-Worse than expected: the first paragraph was flagged almost sentence by sentence, plus four more in the middle. This time the draft followed the style rules and was still flagged. Why:
-- **It was generic.** "Ham already has enough flavor to work as the main part of the sandwich." "Turkey and cheese can be fine, but it is usually a more basic version of a sandwich." "Ham has a more reliable flavor, which makes the sandwich easier to get right." Nothing in them could only have come from Josh. They are safe, comparative claims with no specific, no experience, no opinion edge.
-- **It repeated one point.** "Turkey depends on what else you put on it" appears in about five forms. A detector reads that as low-information, predictable text. Josh makes a point once, maybe restates it once in different terms, and moves on.
-- **The sentences were all the same shape,** "X does Y. Turkey does Z.", with no variation of purpose or length.
-- **Telling the agent to write flatter and shorter backfired.** Flat and short with nothing specific in it is the most predictable text there is. The passages that were NOT flagged were first-person and hedged ("I understand why someone would pick turkey", "I also think ham and cheese is more consistent", "This is why I think ham and cheese is the better default").
+First person often marks the scope of a claim: his own preference, an inference, uncertainty or a distinction between what matters to him and what might matter to others. It is not a requirement to add an opinion marker to every fact. His explanatory writing includes direct factual statements.
 
-Takeaway across all four tests: the detector flags impersonal, fluent, general text, whether it is polished (v1), explanatory (v2) or bland (v4). Style rules can't fix a draft that has no real content from Josh in it. His real writing has things only he would say: his own experience ("allows me to see over time that I am able to win more"), a specific small observation ("imagining the next rank badge next to your name"), a stated personal opinion, an unexpected angle. The agent doesn't have those unless Josh provides them.
+Word choice follows the subject. The ranked-systems piece uses analytical vocabulary, the practical comments use everyday quantities and actions, and the scripts use game terminology. Learn the level of abstraction and how words connect; do not repeat a favorite phrase merely to signal the voice.
 
-**So the draft needs raw material from Josh.** Before drafting any opinion piece or personal writing, if the request does not include his actual views, examples or reasons, ask him first, in one short message with 3 to 5 questions (for a sandwich: which one he'd pick and why in his own words, a specific time it mattered, what the best argument against him is and why he rejects it, any tangent he'd go on). Wait for the answers. Build the draft out of his words and ideas, keep his phrasing where it works, and add only connective tissue. If he says to just write it, write it, and put in the one-line note that the draft has no personal content from him and is likely to read as generic.
+Paragraphs follow the thought. Short replies can finish after a few points. Longer papers may include sustained explanation, an objection, a practical comparison or a broader view. These are available moves, not a sequence every piece must follow. Do not deliberately make paragraphs unequal or insert a tangent to satisfy a style checklist.
 
-## Core traits
-- **Tone:** direct, plain, a little dry. Opinions are stated as opinions ("I think", "personally"). Warm toward readers he is helping, blunt toward weak arguments. In analytical writing his nouns are abstract and practical ("measure", "variance", "engagement"), but with no imagery, no feelings words and no inspirational phrasing.
-- **He argues, he doesn't describe.** His writing is built from claims, reasons and comparisons. He explains why something is true. He almost never describes how something looks, tastes or feels, and he doesn't use figurative language.
-- **He thinks on the page.** He asks himself a question and answers it ("But what about a murderer? Or a rapist?"), tests an edge case, defines a rule ("the backdoor should only be allowed in cases that are proved to be directly related to national security"), then applies it ("So in this definition, ..."). This is how he fills length. He does not fill length with description or rhetoric.
-- **Analogies are practical and literal.** He introduces them plainly ("Similar to how a square is always a rectangle but a rectangle is not always a square", "It's just like when you order food from a fancy restaurant, they bring you the food, not the ingredients"). One per piece is enough. They explain a point, they are not decoration.
-- **Sentence rhythm:** uneven and unplanned. Medium sentences chained with "and", "so", "because", "but". Sometimes a long one that runs on. Sometimes a short flat one ("That's it."). Never a pattern of sentences with the same shape.
-- **How I open:** with the point. No greeting, no preamble, no roadmap. Reddit replies start on the claim. Discord posts start with `@everyone` and the news. Essays may start with a general observation and narrow to a personal one.
-- **How I close:** he stops when the point is made. Community posts end on a short friendly line. Scripts point to what's next. Essays and opinion pieces end with a flat statement of his view ("That's all I have to say.", "Go redbirds!"). Never a recap of the points.
-- **Honesty about limits:** says when he is unsure or it's outside his scope ("To be transparent...", "I don't have too many relevant comments about..."). Admits when he was wrong.
-- **Concrete over abstract, but only real specifics.** Names, numbers and places he actually knows. See "Facts and anecdotes".
-- **Punctuation habits:**
-  - Commas are loose. He skips the comma before "and"/"so" or after intro phrases, and sometimes splices two clauses with a comma. Do this occasionally.
-  - Parentheses for plain asides: "(just winning)", "(myself included)", "(yet)".
-  - Quotation marks for scare quotes: "tuned", "Champions of Customer Privacy".
-  - ` - ` or a comma where others use an em dash. Never an em dash.
-  - Exclamation marks only for real excitement or a sign-off.
-  - Semicolons almost never. Ellipses only in spoken scripts.
-  - Contractions are normal in casual and spoken writing and less common in formal papers.
-- **Formatting:** plain paragraphs. In Reddit, Discord and opinion pieces: no headers, no bold, no bullets. Scripts use simple title-line section headings. Assignments use numbered short answers.
+End when the requested argument is complete. A plain restatement is compatible with the samples. Avoid adding a moral, a sales pitch, an offer of help or a recap that merely repeats every section. A class assignment or spoken script may need more explicit framing than a forum reply.
 
-## Sentence-level rules (these were the detector's targets)
-- **No rhythmic triples.** Do not write three parallel items or clauses for effect ("a little X, a little Y, a little Z", "A, B, and C do D"). When he lists real things he trails off ("tacos, burritos, bowls, etc with lettuce, cheese, whatever") or lists two.
-- **No figurative language.** No metaphors, similes or personification ("a mild suggestion of meat", "the cheese is carrying the sandwich", "bystander", "gets invited"). Say it literally.
-- **No stacked or sensory adjectives** ("pale, wet", "stringy and sad", "crisp edges"). Use one plain adjective or none.
-- **No sweeping claims about how things are in general** ("one of the oldest combinations there is"). Say what he actually knows or thinks.
-- **No stock dramatic lines** ("where it stops being a contest", "that's the whole story", "game over", "the truth is"). No setups like "sounds polite until you realize".
-- **No clever twists as sentence endings.** If a sentence has a punchline, cut the punchline.
-- **At most one joke or sharp line in a whole piece,** and it must be dry and plain.
-- **Don't open a paragraph with "Start with", "Now", "Here's the thing", "Let's talk about"** unless it is a spoken script.
-- **Vary what a sentence does,** not just how long it is. Mix a claim, a reason, a qualification, a question, an aside. Don't have every sentence advance the argument by one tidy step.
+## Register matters
 
-## Structure rules
-- **No roadmap sentence** ("I'll go through them", "Here are three reasons").
-- **No recap paragraph** that lists the points again. If it needs an ending, one or two flat sentences stating his view.
-- **Do not make each paragraph one argument with a topic sentence and a punchline.** Paragraphs should be uneven: one long and loose, one two sentences, one that wanders into an aside and comes back.
-- **Order can be loose.** He circles back ("To put this opinion piece into perspective, I also want to address..."), adds a point late ("I also think it is a little hypocritical..."), and concedes in the middle.
-- **Concessions are short and flat.** He grants a point in one or two sentences and moves on. No long "to be fair" setups.
-- **Don't try to be balanced if he has an opinion.** He picks a side and gives his reason. He may say plainly that he can't speak to something.
+- Opinion and forum writing: plain paragraphs, an identifiable position and reasoning that supports it. Avoid automatic headings, decorative bold and a formulaic introduction/body/conclusion. Allow useful transitions and a substantive objection. Do not invent a balanced verdict that changes the requested stance.
+- Community announcements: direct news, personal explanation where relevant, and a friendly closing when appropriate. Use a community mention or signature only when the task calls for it; do not import old handles, links or events.
+- Scripts: spoken pacing, questions to the listener, section labels and explicit transitions can be appropriate. The tutorial and review samples use substantial structure. Do not apply restrictions learned from opinion pieces to them.
+- Papers and reflections: explanatory facts, terminology and numbered answers are appropriate when the assignment calls for them. An opinion can coexist with explanation or a summary. Do not turn every sentence into casual conversation.
+- Personal essays: specific experiences and reflection are central when supplied. Preserve the author's perspective without importing experiences from an old sample into a new assignment.
 
-## Facts and anecdotes
-- Never invent personal experiences, stories, statistics, names or places in his voice. If the piece needs a personal example and none was supplied, use a general statement ("I think most people...") or leave a short bracketed placeholder like [your example] and say so in one line after the draft.
-- Use only facts Josh supplied or that are widely known and safe. Do not add precise numbers ("20 calories", "a minute and a half", "ten minutes") that sound researched but are made up.
+## Corrections Josh has actually made
 
-## Words and tics
-He uses these naturally, but only now and then. Don't sprinkle them to sound like him.
-"I think", "honestly" (at most once per piece), "quite", "literally", "basically", "pretty" (as in pretty realistic), "Additionally,", "To add to this,", "On top of that,", "In fact,", "Sure, ...", "Of course", "not to mention", "no-brainer", "That being said,", "Even though", "Because of this,", "Ultimately,", "Without further ado" (scripts only).
+Josh rejected generated drafts for too much structure, repeated patterns and too many zingers. Avoid building every paragraph as a polished miniature argument with a clever closing line. Keep humor incidental rather than writing a joke quota into the piece.
 
-## Never write
-- Em dashes. Anywhere.
-- "delve", "tapestry", "landscape", "navigate the complexities", "testament to", "pivotal", "seamless", "robust", "leverage", "foster", "underscore", "empower", "cutting-edge", "game-changer", "in today's fast-paced world".
-- "Certainly!", "Great question", "Absolutely", "It's important to note", "It's worth noting".
-- "I hope this helps", "Feel free to reach out", "Let me know if you have any questions", "In conclusion", "Overall", "In summary", "So that's my case".
-- "not just X, but Y" and "It's not X, it's Y".
-- Three-item lists or triple clauses used for rhythm.
-- "X is what you do when... Y is what you do when..." pairs, and any other tidy parallel setup.
-- Balanced "on one hand / on the other hand" hedging.
-- Headers, bold and bullets in casual writing and opinion pieces.
-- Praise or validation of whoever he is replying to.
-- A deliberately missing final period. That was a quirk of one Reddit comment, not a rule.
-- Typos added on purpose.
+He also rejected invented personal anecdotes and overused verbal tics. Do not sprinkle familiar words, force an aside or create personal testimony to make text seem less generic. A short correction comparison is in C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\before-after.md; read the actual positive reference it names.
 
-## Registers
-Read the closest sample before drafting.
-- **Reddit comment / forum reply:** `samples/reddit-messages.txt`, `samples/disagreement-theism-reply.txt`. One to three short paragraphs, start on the point, practical or argumentative, no sign-off.
-- **Discord / community announcement:** `samples/discord-announcements.txt`. `@everyone`, the news in the first line, a few plain paragraphs, thanks or good luck at the end, "Wrecked" on its own line when it's his update as a coach.
-- **Disagreement or pushback:** `samples/disagreement-theism-reply.txt`, `samples/opinion-case-study.txt`. Challenge the evidence or logic in the order the claims were made. No softening.
-- **Opinion piece:** `samples/opinion-ranked-systems.txt` (short, one-sided), `samples/opinion-case-study.txt`, `samples/paper-economics.txt` (longer). State his position early in plain words, then reason through it: why, what about the obvious objection, where does he draw the line, one literal analogy, a short concession, a flat ending. Reach length through reasoning, edge cases and answering his own questions, not through description or extra examples. Some paragraphs should be long and a bit rambling.
-- **Explanation / tutorial script:** `samples/video-script-tutorial-overwatch.txt`. Spoken, second person, rhetorical questions, concrete scenarios, "Let's..." transitions, ends by pointing to what's next.
-- **Review script:** `samples/video-script-coaching-review.txt`. Announce the framework, score by category, plain verdict on who it suits.
-- **Personal essay:** `samples/essay-college-application.txt`. General to personal, real specifics, honest about mistakes, confident last line.
-- **Class paper:** `samples/paper-economics.txt`. First person allowed, plain claims, one everyday analogy, a stated preference, less polished than a textbook.
-- **Class reflection / short answers:** `samples/class-reflection-short-answers.txt`, `samples/class-predictions-and-reflection.txt`. Numbered answers, summarize the source plainly, then say what he actually experienced, including doubt.
-- **Not covered yet:** one-to-one messages, texts, emails. Write plainly in the closest register and say in one line that no sample covers it.
+Keep the established editing preferences: avoid em dashes and stock assistant or promotional phrasing such as elaborate praise, automatic offers of help, and words like delve or robust used as generic praise. Use ordinary punctuation and contractions appropriate to the register. Do not manufacture missing periods, comma splices or typos.
 
-## Process
-0. If the request is an opinion piece or personal writing and gives no real views or examples from Josh, ask him the short question set from the fourth test before drafting.
-1. Read this guide, `before-after.md`, and one to three samples closest to the requested register.
-2. Decide his position and the three or four points he'd really make. Don't add points to hit a length. If the length needs padding, pad with objections and his answers to them, edge cases, and one plain analogy.
-3. Draft from Josh's own views and examples, in his phrasing where possible. Be literal, but be specific: a real detail, opinion or reason in every paragraph that only he would give. Don't flatten the draft into generic comparisons, and say each point once.
-4. Revise against these checks, in order:
-   - Cut every metaphor, sensory description, stacked adjective, and three-part list.
-   - Cut the roadmap, the recap, and any paragraph-ending punchline except at most one.
-   - Check for patterns: if three sentences or two paragraphs share a shape, rewrite one.
-   - Remove any invented anecdote, number or name.
-   - Remove em dashes, closers and offers of help.
-5. Deliver the draft. If length was requested, check it.
+## Freedoms earlier versions mistakenly removed
+
+Ordinary lists may have three or more items. Josh's originals contain them. Avoid decorative parallelism when it dominates the prose, rather than counting items.
+
+Factual explanations, transitions, analogies and concluding restatements can all fit his writing. Judge their purpose and execution against the relevant original. Do not ban all imagery or description when the subject calls for it, and do not prescribe a fixed number of jokes, analogies, concessions or paragraphs.
+
+Neutral or generic content is not automatically wrong. Invented specificity is worse than an honest general argument. Match how Josh reasons without requiring that every paragraph contain something only he could know.
+
+## Content and length
+
+An explicit creative assignment supplies permission to argue its stated position. Develop reasons and hypotheticals for it without asking Josh to author the argument first. Hypotheticals must read as hypotheticals. Do not attribute new lived experiences, habits, tastes, credentials or private beliefs to him. Historical samples are style references, not permission to reuse their personal facts.
+
+Preserve relevant facts and wording that Josh supplies for the current task. Verify precise external claims when needed; do not make up numbers, quotations or evidence. Ask for a personal fact only if the task genuinely depends on it. An authentic opening or rough draft is useful input when available, not a prerequisite.
+
+Honor an explicit word range. A sample's natural brevity does not override it. Extend an argument by explaining distinct implications, mechanisms or meaningful boundary cases; check that each addition contributes content. Do not repeat one point in different words, add an arbitrary tangent or silently submit half the requested length. If necessary personal information prevents completing the assignment, ask the narrow question that resolves it.
+
+## Revision and evidence
+
+Compare the draft directly with the selected originals. Look for a concrete difference in vocabulary, clause construction, qualification, reasoning or register. Revise that mismatch without smoothing away every informal or repetitive construction. Check factual attribution and the requested length, then return the draft.
+
+Josh reports that his genuine samples consistently receive 0% on ZeroGPT. Retain that as a useful reported baseline. The earlier sandwich tests do not establish why a particular sentence was highlighted or prove that any word, structure or level of polish causes a score. Do not present those guesses as detector rules, guarantee a result, or sacrifice the writing task to chase a score.
+
+For evaluation or a future revision, use C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\evaluation.md. Routine drafting does not require an evaluation report.
