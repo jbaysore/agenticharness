@@ -1,6 +1,6 @@
 # Evaluating my-voice
 
-STATUS: Evaluation procedure and prepared prompts. No new ZeroGPT measurements are recorded here. Read this file when testing or improving the skill, not during ordinary drafting.
+STATUS: Evaluation procedure, prepared prompts and a returned test with visible highlights. No overall ZeroGPT score is recorded here. Read this file when testing or improving the skill, not during ordinary drafting.
 
 ## What a result means
 
@@ -31,6 +31,22 @@ Use fresh conversations to avoid earlier failed drafts shaping the new ones. Ens
    Check: it uses the announcement register, accurately preserves the supplied facts and permits an ordinary list. It adds no invented commitments, dates, links, giveaways or personal backstory. It need not force the terse ending of an opinion piece onto an announcement.
 
 For each check, save the exact prompt and output, model/provider, guide version, reference filenames and word count. Ask Josh to identify particular phrases or passages that differ from his voice. Do not record an impression from the drafting model as independent validation. Keep generated drafts, detector reports and personal corrections in the local gitignored samples folder when saving them; never copy them into tracked documentation.
+
+## Returned sandwich test, 2026-11-06
+
+- Prompt: /myvoice write a 500 word opinion piece on why ham and cheese is objectively superior to turkey and cheese
+- Model/provider: grok-4.7 through Cursor, from source-conversation metadata.
+- Output: exactly 500 words using whitespace-separated word counting; six paragraphs.
+- Instructions: Josh installed the revised skill text before this test. The drafting transcript reports loading the guide and originals, but its readable messages do not identify their exact versions or filenames.
+- Detector evidence: Josh supplied a crop showing six highlighted sentences in two body paragraphs. The crop does not show the overall percentage or the results for the rest of the piece. Do not infer a total score or treat the unshown text as passed.
+- Voice evidence: no separate judgment from Josh accompanied this result. The editorial observations in the correction comparisons are the reviewing assistant's assessment.
+- Task compliance observed in the returned text: requested length met and no autobiographical anecdotes introduced. These facts do not establish voice fidelity.
+
+Draft source: harness://conversation/f76ced8a-6501-42b8-855d-546350172f2b#d96b2098-a76e-4e7e-803c-e8b1cf34c32a
+
+Returned full draft and screenshot: harness://conversation/10b25770-80b4-45b2-8051-494f77eca3c8#730ec226-3521-4425-b951-c06d06fd86a6
+
+The earlier roughly 500-word test used gpt-6-luna through Codex (harness://conversation/cdb08ce6-b610-4dd5-8f6a-5e475d15e4db). A prior 900-1100-word test used claude-sonnet-5-5 through Claude Code (harness://conversation/eb72b925-990f-4404-85bb-d11c5ef4dc26). Model and length differences prevent attributing cross-run score differences to the guide alone. Keep Grok 4.7 and the 500-word task fixed for the next comparison with this run.
 
 ## Comparing approaches with existing originals
 

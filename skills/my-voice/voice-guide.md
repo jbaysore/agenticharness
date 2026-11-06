@@ -1,6 +1,6 @@
 # Josh's voice guide
 
-STATUS: DRAFT v6. Rebuilt from the existing originals and Josh's corrections. The revised instructions have not established a ZeroGPT score.
+STATUS: DRAFT v6.1. Focused correction after the returned 500-word sandwich test. Its screenshot shows highlighted sentences but does not show an overall ZeroGPT score.
 
 The target is Josh's writing in the requested situation. Read authentic samples before drafting. They take precedence over a generalized description here; the user's current instructions take precedence over both. This guide is a set of tendencies, not a paragraph plan or a list of ingredients to insert.
 
@@ -26,6 +26,8 @@ The filenames identify examples, not reusable facts about Josh's current life. F
 Josh usually puts his position or practical point near the beginning. He develops it by explaining why he thinks it follows, describing a mechanism, distinguishing cases or answering a question that arises from the previous point. His arguments can be abstract and analytical. Replacing those with folksy language or emotional descriptions changes the voice.
 
 His sentences often continue a thought through linked clauses, using ordinary causal and contrast words. A qualification may appear within a long sentence rather than in a separate disclaimer. He sometimes repeats a noun or uses overlapping terms instead of choosing the most elegant compressed version. Preserve natural looseness in supplied text; do not inject grammatical errors into new writing.
+
+Match the reasoning carried by those clauses as well as their syntax. A chain of causal connectives can sound superficially similar while asserting an invented mechanism or failing to support its conclusion. Check what each link establishes. Do not replace a weak explanation with more first-person markers or a longer sentence. The returned sandwich example in the correction comparisons illustrates this distinction; it does not establish a detector rule.
 
 First person often marks the scope of a claim: his own preference, an inference, uncertainty or a distinction between what matters to him and what might matter to others. It is not a requirement to add an opinion marker to every fact. His explanatory writing includes direct factual statements.
 
@@ -64,6 +66,8 @@ Neutral or generic content is not automatically wrong. Invented specificity is w
 An explicit creative assignment supplies permission to argue its stated position. Develop reasons and hypotheticals for it without asking Josh to author the argument first. Hypotheticals must read as hypotheticals. Do not attribute new lived experiences, habits, tastes, credentials or private beliefs to him. Historical samples are style references, not permission to reuse their personal facts.
 
 Preserve relevant facts and wording that Josh supplies for the current task. Verify precise external claims when needed; do not make up numbers, quotations or evidence. Ask for a personal fact only if the task genuinely depends on it. An authentic opening or rough draft is useful input when available, not a prerequisite.
+
+Informal generalizations also need support. A claim about which option people most often defend is evidence about other people even if it contains no number. Do not invent that consensus. In a comparison, apply the same standard to both alternatives and identify the particular variant if the argument depends on it. This improves the argument without banning factual explanation or making every claim subjective.
 
 Honor an explicit word range. A sample's natural brevity does not override it. Extend an argument by explaining distinct implications, mechanisms or meaningful boundary cases; check that each addition contributes content. Do not repeat one point in different words, add an arbitrary tangent or silently submit half the requested length. If necessary personal information prevents completing the assignment, ask the narrow question that resolves it.
 
