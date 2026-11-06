@@ -31,6 +31,10 @@ export function StepSummary({ steps, active, onOpenWork, chatId }) {
         <span className="steps-count">
           {label || (steps.length === 1 ? "1 step" : `${steps.length} steps`)}
         </span>
+        <Delta
+          added={steps.reduce((sum, s) => sum + (s.added ?? 0), 0)}
+          removed={steps.reduce((sum, s) => sum + (s.removed ?? 0), 0)}
+        />
         <svg className="steps-chevron" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
