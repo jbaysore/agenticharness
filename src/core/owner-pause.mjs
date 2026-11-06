@@ -1,16 +1,16 @@
 export const ownerPauseTool = {
   name: "pause_for_owner",
   description:
-    "Pause this Goal until the owner finishes something only they can do, such as merging a pull request or running a command on a machine you cannot reach. State what they need to do. The turn ends without further model calls. When they confirm it is done, or deny or choose Other with a reason, the Goal resumes automatically with that answer. Use only in Goal mode, and only when you cannot proceed without them. Do not use this for a choice you can make, a timed question, CI, or background process completion.",
+    "Pause this Goal until the owner finishes something only they can do, such as merging a pull request or running a command on a machine you cannot reach. Keep the statement short: the first line is the action itself, then only what they need to do it. The turn ends without further model calls. When they confirm it is done, or deny or choose Other with a reason, the Goal resumes automatically with that answer. Use only in Goal mode, and only when you cannot proceed without them. Do not use this for a choice you can make, a timed question, CI, or background process completion.",
   inputSchema: {
     type: "object",
     properties: {
       statement: {
         type: "string",
         minLength: 1,
-        maxLength: 2000,
+        maxLength: 600,
         description:
-          "What the owner needs to do before the Goal can continue.",
+          "Line 1: the action, one imperative sentence under 100 characters, such as \"Merge PR #42 in agentic-harness.\" Optionally a blank line, then at most three short lines with only what they need to do it: a link, the exact command and where to run it, or what you will do once it is done. Do not recap progress, reasoning or what you tried, and do not restate the Goal.",
       },
     },
     required: ["statement"],
@@ -24,8 +24,10 @@ export const OWNER_PAUSE_STOP =
 export function checkOwnerPause(input) {
   const statement =
     typeof input?.statement === "string" ? input.statement.trim() : "";
-  if (!statement || statement.length > 2000)
-    throw new Error("Describe the owner action in 1–2,000 characters.");
+  if (!statement || statement.length > 600)
+    throw new Error(
+      "Describe the owner action in 1–600 characters: one action line, then only the details they need.",
+    );
   return { statement };
 }
 

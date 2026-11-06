@@ -2122,16 +2122,44 @@ small {
   background: var(--surface);
   font-size: 13px;
 }
+.approval.owner-pause {
+  margin: 12px 0;
+}
+.owner-pause h3 {
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
 .owner-pause .owner-pause-statement {
-  margin: 8px 0 0;
+  margin: 0 0 6px;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.55;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.owner-pause .goal-objective {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.owner-pause-actions .notice-action {
+  padding: 6px 12px;
+}
+.owner-pause-hint {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: 12px;
 }
 .owner-pause-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 .owner-pause .notice-action.primary {
   background: var(--text);
@@ -2141,8 +2169,7 @@ small {
 .owner-pause .notice-action[aria-pressed="true"] {
   border-color: var(--text);
 }
-.notice.goal-paused .goal-objective,
-.owner-pause .goal-objective {
+.notice.goal-paused .goal-objective {
   display: -webkit-box;
   margin: 4px 0;
   color: var(--text);

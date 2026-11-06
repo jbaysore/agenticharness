@@ -1,10 +1,22 @@
 import React, { useState } from "react";
 
+// The first line is the action; anything after it is supporting detail.
+function splitStatement(statement) {
+  const text = statement.trim(),
+    lines = text.split("\n"),
+    index = lines.findIndex((line) => line.trim());
+  return {
+    headline: lines[index]?.trim() ?? text,
+    detail: lines.slice(index + 1).join("\n").trim(),
+  };
+}
+
 export function OwnerPauseCard({ goal, disabled, onAnswer }) {
   const [choice, setChoice] = useState(null),
     [reason, setReason] = useState(""),
     [problem, setProblem] = useState(""),
     [submitting, setSubmitting] = useState(false);
+  const { headline, detail } = splitStatement(goal.ownerPause.statement);
   const submit = async (answer) => {
     if (submitting || disabled) return;
     setProblem("");
@@ -29,16 +41,15 @@ export function OwnerPauseCard({ goal, disabled, onAnswer }) {
     submit({ choice, reason: text });
   };
   return (
-    <section className="notice owner-pause" aria-label="Waiting on you">
-      <strong>Waiting on you.</strong>{" "}
-      The goal resumes when you confirm this is done, or when you deny it or
-      choose Other and give a reason.
+    <section className="approval owner-pause" aria-label="Waiting on you">
+      <div className="eyebrow">Waiting on you</div>
+      <h3>{headline}</h3>
+      {detail && <p className="owner-pause-statement">{detail}</p>}
       {goal.objective && (
         <span className="goal-objective" title={goal.objective}>
-          {goal.objective}
+          Goal: {goal.objective}
         </span>
       )}
-      <p className="owner-pause-statement">{goal.ownerPause.statement}</p>
       {choice && (
         <label className="question-custom">
           {choice === "deny" ? "Why not?" : "What should happen instead?"}
@@ -101,6 +112,9 @@ export function OwnerPauseCard({ goal, disabled, onAnswer }) {
           </button>
         )}
       </div>
+      <p className="owner-pause-hint">
+        The goal resumes when you answer. Deny and Other need a reason.
+      </p>
     </section>
   );
 }

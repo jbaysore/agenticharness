@@ -99,7 +99,8 @@ When a Goal is blocked on something only you can do, such as merging a pull
 request or running a command on a machine the agent cannot reach, it calls
 `pause_for_owner` and the turn ends. The native Goal is confirmed paused, then
 saved as **waiting on you**, with its objective kept and no further model
-calls. The card states what you need to do. **I've done this** resumes the Goal.
+calls. The card leads with the action you need to take as a headline, with
+any details it needs underneath. **I've done this** resumes the Goal.
 **Deny** and **Other** each need a reason, and that reason resumes it too. A
 message you send while the card is up also resumes the Goal and is passed
 along as your answer. **Stop work** leaves it paused for a later manual resume.

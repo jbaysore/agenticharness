@@ -94,6 +94,7 @@ const send = async (controller, chat, actionId, text, extra = {}) => {
 test("an owner pause needs a statement, and deny or other needs a reason", () => {
   assert.equal(checkOwnerPause({ statement: "  Merge it.  " }).statement, "Merge it.");
   assert.throws(() => checkOwnerPause({ statement: "   " }));
+  assert.throws(() => checkOwnerPause({ statement: "x".repeat(601) }));
   assert.equal(checkOwnerAnswer("done", "").choice, "done");
   assert.throws(() => checkOwnerAnswer("deny", "  "));
   assert.throws(() => checkOwnerAnswer("other", ""));
