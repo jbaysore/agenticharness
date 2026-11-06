@@ -1256,7 +1256,6 @@ export function ChatPane({
         ))}
       </div>
       <div className="composer-area">
-        <GoalProgress chat={chat} />
         <SkillSlash
           ref={slash}
           skills={skills}
@@ -1510,6 +1509,7 @@ export function ChatPane({
               ))}
             </select>
           </label>
+          <GoalProgress chat={chat} compact={compact || mobile} />
           {(compact || mobile) && peers.length > 0 && (
             <details
               className="composer-details"

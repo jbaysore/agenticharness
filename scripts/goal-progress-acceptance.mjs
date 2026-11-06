@@ -78,6 +78,10 @@ try {
   record([...plan, { step: "Check the discovered compatibility case", status: "pending" }], "Discovery added a compatibility check.");
   await expect(summary).toContainText("1 of 4 phases complete");
   await expect(strip).toContainText("Discovery added a compatibility check.");
+  await page.screenshot({ path: ".local/screenshots/goal-progress-popover.png" });
+  await page.keyboard.press("Escape");
+  await expect(strip.getByRole("list", { name: "Goal phases" })).toBeHidden();
+  await expect(summary).toBeFocused();
 
   // A long transcript scrolls independently of the progress strip and composer.
   for (let n = 0; n < 16; n++) context.emit("text", { nativeId: `history-${n}`, text: `Investigation note ${n}.\n\n${"Detailed findings. ".repeat(30)}` });

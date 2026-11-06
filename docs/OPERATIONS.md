@@ -70,13 +70,13 @@ agent chooses the path that best completes the objective and continues. The
 same question does not wait again after it times out, and after three timeouts
 further questions are answered by the agent at once.
 
-Goal chats show **Goal progress** above the composer, where it stays visible as
-you scroll. The collapsed strip shows the current phase and completed-phase
-count; expand it for the checklist, status, explanation when supplied, and last
+Goal chats show **Goal progress** as a small chip beside the Mode selector under
+the composer. The chip shows the completed-phase count and the current phase (or
+status); click it for the checklist, status, explanation when supplied, and last
 update time. Agents record phases for the whole objective, including verification
 and delivery, with their native plan or todo tool. Phase counts measure completed
 milestones; they do not estimate time or percentage of effort. Until the agent
-records phases, the strip says it is waiting. No extra model calls are made to
+records phases, the chip says it is waiting. No extra model calls are made to
 collect progress. The checklist survives pauses, CI waits, restarts, chat moves,
 and provider handoffs. A replacement Goal starts a new checklist. Confirmed Goal
 completion completes its phases; other stops retain the last reported work.
