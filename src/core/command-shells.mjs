@@ -90,7 +90,7 @@ export function dependencyInstructions(path) {
 export function commandInstructions(project) {
   if (process.platform !== "win32")
     return (
-      "Use run_command for foreground shell commands. It applies this chat's permission review and returns the actual exit code. Use native execution tools for interactive/background sessions, and explicitly wait or poll required results during the active turn. Background process completion does not resume the agent after the turn ends. Never replay a command merely because the native runner lost its connection.\n" +
+      "Use run_command for foreground shell commands. It applies this chat's permission review and returns the actual exit code. Use watch_command when a command should keep running after the turn; the host watches that process. Use native execution tools for interactive sessions, and explicitly wait or poll required results that are not registered watches during the active turn. Background process completion does not resume the agent after the turn ends. Never replay a command merely because the native runner lost its connection.\n" +
       dependencyInstructions(project?.path)
     );
   const power = commandShell("powershell"),
@@ -101,7 +101,7 @@ export function commandInstructions(project) {
         return null;
       }
     })();
-  return `Windows command support: Prefer Harness run_command for foreground commands, builds, tests and Git operations. It runs in this chat's worktree with the current permission review and does not depend on the native sandbox's command runner. Native interactive/background tools remain available; explicitly wait or poll required results during the active turn. Background process completion does not resume the agent after the turn ends.
+  return `Windows command support: Prefer Harness run_command for foreground commands, builds, tests and Git operations. It runs in this chat's worktree with the current permission review and does not depend on the native sandbox's command runner. Use watch_command when a command should keep running after the turn; the host watches that process. Native interactive tools remain available; explicitly wait or poll required results that are not registered watches during the active turn. Background process completion does not resume the agent after the turn ends.
 The powershell shell is ${power.name}. ${power.name === "Windows PowerShell 5.1" ? "It does not support && or ||. Use shell: cmd for Windows command chains, shell: bash for Bash syntax, or explicit PowerShell conditionals." : "It supports && and ||."}
 ${bash ? `The bash shell is ${bash}; use it explicitly for Bash heredocs and Unix syntax.` : "Bash is not installed; use PowerShell here-strings or cmd instead of Bash heredocs."} Do not mix cmd switches, Bash expansion and PowerShell syntax in one shell. Use npm.cmd/npx.cmd on Windows when invoking Node package tools directly.
 Use rg -g '*.mjs' scripts rather than passing scripts/*.mjs as a literal Windows path. A search exit code of 1 with no diagnostic means no matches; retain that exit code instead of disguising errors as success.

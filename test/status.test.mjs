@@ -139,6 +139,8 @@ test("a chat is marked by what it needs, and a seen result is no longer marked",
   for (const marker of ["approval", "running", "watching", "usage", "failed", "unread"])
     assert.ok(chatMarkerLabel(marker));
   assert.equal(chatMarkerLabel("watching"), "Watching CI");
+  assert.equal(chatMarkerLabel("watching", { watch_kinds: "command" }), "Watching command");
+  assert.equal(chatMarkerLabel("watching", { watch_kinds: "ci,file" }), "Watching");
   assert.equal(chatMarkerLabel(null), "");
   assert.equal(chatMarkerLabel("usage"), "Stopped because usage ran out");
   assert.equal(

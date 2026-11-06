@@ -1,6 +1,6 @@
 // Real browser and HTTP, simulated CI and providers: no inference or GitHub writes.
 import { chromium, expect } from "@playwright/test";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createHarness } from "../src/server.mjs";
@@ -40,6 +40,24 @@ const app = await createHarness({
           ],
         };
       },
+      readPull: async () => ({
+        status: "pending",
+        reason: null,
+        cursor: { commentId: 1, reviewCommentId: 0, reviews: {}, head: sha },
+        items: [],
+        sha,
+        url: "https://github.com/owner/repo/pull/4",
+      }),
+    },
+    commands: {
+      start: async () => ({
+        pid: 7,
+        createdAt: "2020-01-01T00:00:00.000Z",
+        statusDir: join(dataDir, "command"),
+      }),
+      read: async () => ({ done: true, exitCode: 0, output: "watched" }),
+      identity: async () => ({ pid: 7, createdAt: "2020-01-01T00:00:00.000Z" }),
+      killIfMatched: async () => ({ killed: false }),
     },
   },
 });
@@ -89,6 +107,15 @@ app.controller.runners.codex = async (ctx) => {
       ctx.watchParked();
       return { status: "cancelled" };
     }
+  } else if (ctx.text === "Register local watches") {
+    await ctx.history("watch_command", { command: "echo watched", shell: "cmd" });
+    await ctx.history("watch_pull_request", { repository: "owner/repo", pr: 4 });
+    await writeFile(join(projectPath, "ready.txt"), "hello");
+    await ctx.history("watch_file", { path: "ready.txt", until: "appears" });
+    ctx.emit("text", {
+      nativeId: randomUUID(),
+      text: "Local watches registered.",
+    });
   } else {
     ctx.emit("text", {
       nativeId: randomUUID(),
@@ -140,7 +167,7 @@ try {
   await page.goto(
     `${app.runtime.origin}/?chat=${chat.id}#pair=${app.auth.pairing()}`,
   );
-  const cards = page.getByRole("region", { name: "Background CI watchers" });
+  const cards = page.getByRole("region", { name: "Background watchers" });
   await expect(cards).toContainText("Connecting to GitHub");
   await app.controller.watchers.tick();
   await expect(cards).toContainText("Waiting for CI");
@@ -237,6 +264,29 @@ try {
     path: ".local/screenshots/watchers-mobile.png",
     fullPage: true,
   });
+  const local = app.store.createConversation({
+    projectId: project.id,
+    title: "Local watches",
+    provider: "codex",
+    model: "fixture",
+    permissions: "override",
+  });
+  app.controller.send(local.id, {
+    actionId: randomUUID(),
+    text: "Register local watches",
+    provider: "codex",
+    model: "fixture",
+  });
+  await app.controller.active.get(local.id).task;
+  await page.setViewportSize({ width: 1512, height: 982 });
+  await page.goto(`${app.runtime.origin}/?chat=${local.id}`);
+  await app.controller.watchers.tick();
+  now += 5_000;
+  await app.controller.watchers.tick();
+  await expect(cards).toContainText("Command finished");
+  await expect(cards).toContainText("Waiting for pull request");
+  await expect(cards).toContainText("File condition met");
+  await expect(cards.getByRole("img", { name: "Watching pull request" })).toBeVisible();
   expect(errors).toEqual([]);
   console.log(
     `Watcher acceptance passed: ${reads} host polls, notification-only completion, unread results, reload, manual continuation, cancellation, Goal suspension/resumption and mobile layout. Providers and CI were simulated.`,

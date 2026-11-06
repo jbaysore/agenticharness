@@ -1972,7 +1972,8 @@ small {
 .watch-card.skipped,
 .watch-card.expired,
 .watch-card.stopped,
-.watch-card.superseded { border-color: var(--text-3); }
+.watch-card.superseded,
+.watch-card.updated { border-color: var(--text-3); }
 .watch-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .watch-pulse {
   width: 8px;

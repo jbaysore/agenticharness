@@ -505,29 +505,54 @@ inside compound scripts, the agent sets `isolateDependencies: true` to detach a
 shared `node_modules` link before execution. A declined request leaves the link
 intact. Real test failures, missing files and search exit codes remain visible.
 
-## Background CI watchers
+## Background watchers
 
-GitHub CI is the only work Harness can monitor after an agent turn ends. Local
-or remote processes, studies, scripts, logs and files have no completion
-watcher or automatic agent wakeup. A process can keep running, but a process
-ID, native background task or notification flag, open shell, sleep, or promise
-in a reply does not arrange follow-up. Agents must keep the turn active and
-explicitly wait or poll for required non-CI results, checking them before
-concluding. If they must stop first, they must say the job is unmonitored and
-further agent work needs an explicit resume. An active Goal does not provide
-a process watcher, and `pause_for_owner` is reserved for an owner action.
+Harness can keep watching after an agent turn ends: GitHub CI, one pull request's
+review and merge state, a command the host started, and a file or log inside
+the worktree. The host polls without a model call. A native background task,
+notification flag, open shell, sleep, promise, arbitrary process id, remote
+process, URL, or browser page does not arrange follow-up. For anything that is
+not a registered watch, agents must keep the turn active and explicitly wait or
+poll, checking the result before concluding. If they must stop first, they must
+say the job is unmonitored and further agent work needs an explicit resume. An
+active Goal is not a watcher for those unregistered processes, and
+`pause_for_owner` is reserved for an owner action.
 
 These instructions reach new and resumed provider invocations. An already
 running invocation keeps its original prompt until the next invocation under
 the updated host; installing an instruction change does not interrupt it.
 
-Agents can register `watch_github_ci` for a full commit SHA or a pull-request
-snapshot on github.com, inspect it with `list_watches`, and stop it with
-`cancel_watch`. The Windows host uses the existing GitHub CLI sign-in. No model
-is called to poll, compare results or post notifications. Monitoring requires
-the Harness host to be running; closing a browser pane or ending an agent turn
-does not stop it. Saved watchers resume after a host restart or sleep without
-replaying missed polls. Initial lookup or access failures are visible in chat.
+Agents register `watch_github_ci` for a full commit SHA or a pull-request
+snapshot, `watch_pull_request` for review and merge state, `watch_command` for
+a host-started command, and `watch_file` for a worktree path. They inspect
+watches with `list_watches` and stop them with `cancel_watch`. Ask mode may
+register the read-only watches, not a command. Plan mode can register any of
+them, but only as a notification. The Windows host uses the existing GitHub CLI
+sign-in for GitHub watches. No model is called to poll, compare results or post
+notifications. Monitoring requires the Harness host to be running; closing a
+browser pane or ending an agent turn does not stop it. Saved watchers resume
+after a host restart or sleep without replaying missed polls. Initial lookup or
+access failures are visible in chat.
+
+`watch_command` uses the same permission review as `run_command`. The host
+records the runner's process id and operating-system start time. Cancel,
+archive, and expiry kill the process tree only when both still match. A reused
+process id is left alone. Expiry is the command's runtime bound, default six
+hours and at most 24. The card says whether the command was stopped or left
+running without further monitoring. A command that ends while the host is not
+running, with no saved exit code, is an error rather than a success. A detached
+runner keeps going across a host restart.
+
+`watch_pull_request` remembers the comments, reviews, and head commit present
+at the first read. Later it reports a merge, a close, a new approval, a request
+for changes, a new comment, or a new commit. Comments already on the pull
+request do not fire. Terminal observations settle for 60 seconds, like CI.
+
+`watch_file` waits until a relative path appears, stays the same size and
+modification time for 60 seconds, or its last 8KB contains a literal pattern.
+The target does not need to exist yet. Each poll resolves the nearest existing
+parent and requires that path, and every new component, to stay inside the
+worktree. A symlink that escapes is an error and is not followed.
 
 Notification only is the default. When the existing task authorizes follow-up,
 the agent sets `resumeOn` (`success`, `failure`, or `complete`) and a short

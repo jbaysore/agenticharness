@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { Icon } from "./components.jsx";
+import { waitingPhrase } from "./status.mjs";
 
 const statusLabels = {
   starting: "Starting",
@@ -29,7 +30,11 @@ export function GoalProgress({ chat, compact = false }) {
     phases = progress?.phases ?? [],
     completed = phases.filter((phase) => phase.status === "completed").length,
     live = chat.activeRun?.id === progress?.runId && ["starting", "active"].includes(progress?.status),
-    status = progress?.status === "active" && !live ? "Progress last reported" : statusLabels[progress?.status],
+    status = progress?.status === "waiting"
+      ? waitingPhrase(chat)
+      : progress?.status === "active" && !live
+        ? "Progress last reported"
+        : statusLabels[progress?.status],
     current = phases.find((phase) => phase.status === "in_progress") ?? phases.find((phase) => phase.status === "pending"),
     count = phases.length ? `${completed} of ${phases.length} phases complete` : "No phases recorded yet",
     phaseLabel = !phases.length ? "Waiting for the agent to record phases" : current?.label ?? "Finishing the Goal",

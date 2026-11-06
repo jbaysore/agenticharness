@@ -544,6 +544,24 @@ export async function runClaude(
           list_watches: { id: z.string().optional() },
           cancel_watch: { id: z.string() },
           yield_to_watch: { ids: z.array(z.string()).min(1).max(10), checkpoint: z.string().min(1).max(2000) },
+          watch_pull_request: {
+            repository: z.string(), pr: z.number().int().positive(),
+            resumeOn: z.array(z.enum(["success", "failure", "complete"])).max(3).optional(),
+            continuation: z.string().max(2000).optional(), expiryHours: z.number().min(0.25).max(24).optional(),
+          },
+          watch_command: {
+            command: z.string().min(1).max(8000),
+            shell: z.enum(["powershell", "cmd", "bash"]).optional(),
+            cwd: z.string().optional(), isolateDependencies: z.boolean().optional(),
+            resumeOn: z.array(z.enum(["success", "failure", "complete"])).max(3).optional(),
+            continuation: z.string().max(2000).optional(), expiryHours: z.number().min(0.25).max(24).optional(),
+          },
+          watch_file: {
+            path: z.string().min(1).max(1000), until: z.enum(["appears", "stable", "matches"]),
+            pattern: z.string().min(1).max(200).optional(),
+            resumeOn: z.array(z.enum(["success", "failure", "complete"])).max(3).optional(),
+            continuation: z.string().max(2000).optional(), expiryHours: z.number().min(0.25).max(24).optional(),
+          },
         }[t.name], async (args) => ({ content: [{ type: "text", text: JSON.stringify(await ctx.history(t.name, args)) }] }))),
       ...(ctx.tools ?? [])
         .filter((t) => t.name === ownerPauseTool.name)

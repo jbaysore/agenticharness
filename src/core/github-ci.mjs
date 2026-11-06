@@ -50,9 +50,25 @@ function compact(endpoint, body) {
         pick(s, ["id", "context", "state", "target_url"]),
       ),
     };
+  if (/\/pulls\/\d+\/reviews(?:\?|$)/.test(endpoint) && Array.isArray(body))
+    return body.map((review) => ({
+      ...pick(review, ["id", "state", "submitted_at"]),
+      user: pick(review.user, ["login"]),
+      body: label(review.body),
+    }));
+  if (
+    /\/(?:pulls|issues)\/\d+\/comments(?:\?|$)/.test(endpoint) &&
+    Array.isArray(body)
+  )
+    return body.map((comment) => ({
+      ...pick(comment, ["id", "created_at"]),
+      user: pick(comment.user, ["login"]),
+      body: label(comment.body),
+    }));
   if (/\/pulls\/\d+$/.test(endpoint) && body?.head)
     return {
-      ...pick(body, ["merge_commit_sha", "state", "html_url"]),
+      ...pick(body, ["merge_commit_sha", "state", "html_url", "merged_at", "title"]),
+      user: pick(body.user, ["login"]),
       head: pick(body.head, ["sha"]),
     };
   return body;
@@ -247,6 +263,119 @@ export function ciResult({ checks = [], statuses = [], workflows = [] }) {
   return { status, items };
 }
 
+const maxId = (items) => items.reduce((max, item) => Math.max(max, item.id || 0), 0);
+const latestReviews = (reviews) => [
+  ...reviews
+    .reduce((map, review) => {
+      const previous = map.get(review.user);
+      if (!previous || review.id > previous.id) map.set(review.user, review);
+      return map;
+    }, new Map())
+    .values(),
+];
+const reviewSnapshot = (reviews) =>
+  Object.fromEntries(latestReviews(reviews).map((review) => [review.user, review.state]));
+const pullCursor = (view) => ({
+  state: view.state,
+  merged: view.merged,
+  head: view.head,
+  reviews: reviewSnapshot(view.reviews),
+  commentId: maxId(view.comments),
+  reviewCommentId: maxId(view.reviewComments),
+});
+const pullItem = (id, name, state, excerpt) => ({
+  id,
+  name: label(name),
+  state,
+  excerpt: excerpt ? label(excerpt) : null,
+});
+
+// The first observation records what is already there. Later observations
+// report only a merge, a close, a new review decision, a new comment, or a new commit.
+export function pullOutcome(cursor, view) {
+  const next = pullCursor(view);
+  const title = view.title || "Pull request";
+  if (view.merged)
+    return {
+      status: "success",
+      reason: "Pull request merged.",
+      cursor: next,
+      items: [pullItem("pr", title, "merged")],
+    };
+  if (view.state === "closed")
+    return {
+      status: "failure",
+      reason: "Pull request closed without merging.",
+      cursor: next,
+      items: [pullItem("pr", title, "closed")],
+    };
+  if (!cursor)
+    return { status: "pending", reason: null, cursor: next, items: [] };
+  const reviews = latestReviews(view.reviews);
+  const changes = reviews.find(
+    (review) =>
+      review.state === "CHANGES_REQUESTED" &&
+      cursor.reviews?.[review.user] !== "CHANGES_REQUESTED",
+  );
+  if (changes)
+    return {
+      status: "failure",
+      reason: `${changes.user || "A reviewer"} requested changes.`,
+      cursor: next,
+      items: [
+        pullItem(
+          `review:${changes.id}`,
+          changes.user || "Review",
+          "changes requested",
+          changes.excerpt,
+        ),
+      ],
+    };
+  const approved = reviews.find(
+    (review) =>
+      review.state === "APPROVED" && cursor.reviews?.[review.user] !== "APPROVED",
+  );
+  if (approved)
+    return {
+      status: "success",
+      reason: `${approved.user || "A reviewer"} approved the pull request.`,
+      cursor: next,
+      items: [
+        pullItem(
+          `review:${approved.id}`,
+          approved.user || "Review",
+          "approved",
+          approved.excerpt,
+        ),
+      ],
+    };
+  const comments = [
+    ...view.comments.filter((comment) => comment.id > (cursor.commentId ?? 0)),
+    ...view.reviewComments.filter(
+      (comment) => comment.id > (cursor.reviewCommentId ?? 0),
+    ),
+  ];
+  if (comments.length || view.head !== cursor.head) {
+    const items = comments.map((comment) =>
+      pullItem(
+        `comment:${comment.id}`,
+        comment.user || "Comment",
+        "comment",
+        comment.excerpt,
+      ),
+    );
+    if (view.head !== cursor.head)
+      items.push(pullItem(`head:${view.head}`, "New commit", view.head.slice(0, 8)));
+    return {
+      status: "updated",
+      reason: "Pull request activity changed.",
+      cursor: next,
+      items,
+    };
+  }
+  return { status: "pending", reason: null, cursor: next, items: [] };
+}
+
 export class GitHubCI {
   constructor({ request = ghRequest, now = Date.now } = {}) {
     this.request = request;
@@ -408,6 +537,95 @@ export class GitHubCI {
       identity,
       sha: shas[0],
       url,
+      pollInterval: Math.max(
+        0,
+        ...Object.values(target.cache).map((entry) => entry.pollInterval ?? 0),
+      ),
+    };
+  }
+  async collection(endpoint, cache, signal) {
+    const items = [];
+    for (let page = 0; endpoint && page < 10; page++) {
+      const result = await this.get(endpoint, cache, signal);
+      const pageItems = Array.isArray(result.body) ? result.body : null;
+      if (!pageItems)
+        throw new GitHubError("GitHub returned incomplete pull request data.", {
+          retryable: true,
+        });
+      items.push(...pageItems);
+      const next = /<([^>]+)>;\s*rel="next"/.exec(result.link ?? "")?.[1];
+      endpoint = null;
+      if (next) {
+        const url = new URL(next);
+        if (url.origin !== apiRoot || !url.pathname.startsWith("/repos/"))
+          throw new GitHubError(
+            "GitHub returned an unexpected pagination link.",
+          );
+        endpoint = url.pathname.slice(1) + url.search;
+      }
+    }
+    if (endpoint)
+      throw new GitHubError("Pull request activity has too many pages to compare.");
+    return items;
+  }
+  async readPull(watch, target, signal) {
+    const base = `repos/${watch.repository}`;
+    const since = encodeURIComponent(new Date(watch.createdAt).toISOString());
+    const { body: pr } = await this.get(
+      `${base}/pulls/${watch.pr}`,
+      target.cache,
+      signal,
+    );
+    if (!/^[a-f0-9]{40}$/i.test(pr?.head?.sha ?? ""))
+      throw new GitHubError("GitHub returned a PR without a head revision.", {
+        retryable: true,
+      });
+    const [reviews, comments, reviewComments] = await Promise.all([
+      this.collection(
+        `${base}/pulls/${watch.pr}/reviews?per_page=100`,
+        target.cache,
+        signal,
+      ),
+      this.collection(
+        `${base}/issues/${watch.pr}/comments?per_page=100&since=${since}`,
+        target.cache,
+        signal,
+      ),
+      this.collection(
+        `${base}/pulls/${watch.pr}/comments?per_page=100&since=${since}`,
+        target.cache,
+        signal,
+      ),
+    ]);
+    const view = {
+      state: pr.state,
+      merged: Boolean(pr.merged_at),
+      head: pr.head.sha,
+      title: pr.title,
+      url:
+        link(pr.html_url) ??
+        `https://github.com/${watch.repository}/pull/${watch.pr}`,
+      reviews: reviews.map((review) => ({
+        id: review.id,
+        user: review.user?.login ?? "",
+        state: review.state,
+        excerpt: review.body,
+      })),
+      comments: comments.map((comment) => ({
+        id: comment.id,
+        user: comment.user?.login ?? "",
+        excerpt: comment.body,
+      })),
+      reviewComments: reviewComments.map((comment) => ({
+        id: comment.id,
+        user: comment.user?.login ?? "",
+        excerpt: comment.body,
+      })),
+    };
+    return {
+      ...pullOutcome(watch.cursor ?? null, view),
+      url: view.url,
+      sha: view.head,
       pollInterval: Math.max(
         0,
         ...Object.values(target.cache).map((entry) => entry.pollInterval ?? 0),

@@ -4,10 +4,101 @@ import { resolve, relative, isAbsolute, sep, join, dirname } from "node:path";
 import { commandShell } from "./command-shells.mjs";
 import { workspaceFingerprint } from "./repository.mjs";
 
+const installCommand =
+  /^\s*(?:&\s+)?(?:npm|pnpm|yarn)(?:\.cmd)?\s+(?:ci|install|add|remove|uninstall|update|upgrade)\b/i;
+
+export async function detachInstallLinks(cwd, root) {
+  for (let directory = cwd; ; directory = dirname(directory)) {
+    const modules = join(directory, "node_modules");
+    if (
+      await lstat(modules).then(
+        (s) => s.isSymbolicLink(),
+        () => false,
+      )
+    )
+      await unlink(modules);
+    if (relative(root, directory) === "") break;
+  }
+}
+
+function commandFields(input) {
+  if (
+    !input ||
+    typeof input.command !== "string" ||
+    !input.command.trim() ||
+    input.command.length > 8000 ||
+    input.command.includes("\0")
+  )
+    throw new Error("Give a command between 1 and 8000 characters.");
+  if (input.cwd !== undefined && typeof input.cwd !== "string")
+    throw new Error("Give a worktree subdirectory.");
+  if (
+    input.isolateDependencies !== undefined &&
+    typeof input.isolateDependencies !== "boolean"
+  )
+    throw new Error("isolateDependencies must be a boolean.");
+  const shell =
+    input.shell ?? (process.platform === "win32" ? "powershell" : "bash");
+  return {
+    command: input.command,
+    shell,
+    selected: commandShell(shell),
+    isolate:
+      input.isolateDependencies === true || installCommand.test(input.command),
+  };
+}
+
+async function commandDirectory(project, cwd) {
+  const root = await realpath(project.path),
+    directory = await realpath(resolve(root, cwd ?? ".")),
+    subdirectory = relative(root, directory);
+  if (
+    isAbsolute(subdirectory) ||
+    subdirectory === ".." ||
+    subdirectory.startsWith(".." + sep)
+  )
+    throw new Error("Run commands inside this chat's worktree.");
+  return { root, cwd: directory };
+}
+
+export async function prepareWatchedCommand(
+  input,
+  { project, approve, signal },
+) {
+  const fields = commandFields(input);
+  const { root, cwd } = await commandDirectory(project, input.cwd);
+  if (signal.aborted) return { cancelled: true };
+  const answer = await approve({
+    kind: "permission",
+    title: input.command,
+    details: {
+      command: input.command,
+      cwd,
+      shell: fields.selected.name,
+      requestedThrough: "watch_command",
+      execution: "Harness host process",
+      isolateDependencies: fields.isolate,
+    },
+  });
+  if (!answer.allow)
+    return {
+      declined: true,
+      reason: answer.reason ?? "The command was declined. Do not retry it.",
+    };
+  if (signal.aborted) return { cancelled: true };
+  if (fields.isolate) await detachInstallLinks(cwd, root);
+  return {
+    command: fields.command,
+    shell: fields.shell,
+    shellName: fields.selected.name,
+    cwd,
+  };
+}
+
 export const commandTool = {
   name: "run_command",
   description:
-    "Run a foreground command in this chat's worktree through Harness's permission review. Choose powershell, cmd or bash explicitly when syntax matters. Supports builds, tests, Git, linked dependencies and localhost tools without relying on the agent's sandbox runner. Direct npm/pnpm/yarn installation commands detach a shared node_modules link first; use isolateDependencies for installations inside compound scripts. Returns actual output and exit code; a nonzero result is never automatically retried. Use native execution tools for interactive/background sessions, and explicitly wait or poll required results during the active turn. Background process completion does not resume the agent after the turn ends.",
+    "Run a foreground command in this chat's worktree through Harness's permission review. Choose powershell, cmd or bash explicitly when syntax matters. Supports builds, tests, Git, linked dependencies and localhost tools without relying on the agent's sandbox runner. Direct npm/pnpm/yarn installation commands detach a shared node_modules link first; use isolateDependencies for installations inside compound scripts. Returns actual output and exit code; a nonzero result is never automatically retried. Use native execution tools for interactive/background sessions, and explicitly wait or poll required results during the active turn. Background process completion does not resume the agent after the turn ends. Use watch_command when the command should keep running after the turn.",
   inputSchema: {
     type: "object",
     properties: {
@@ -33,52 +124,22 @@ export async function executeCommand(
   input,
   { project, approve, run, signal, emit },
 ) {
-  if (
-    !input ||
-    typeof input.command !== "string" ||
-    !input.command.trim() ||
-    input.command.length > 8000 ||
-    input.command.includes("\0")
-  )
-    throw new Error("Give a command between 1 and 8000 characters.");
-  if (input.cwd !== undefined && typeof input.cwd !== "string")
-    throw new Error("Give a worktree subdirectory.");
-  if (
-    input.isolateDependencies !== undefined &&
-    typeof input.isolateDependencies !== "boolean"
-  )
-    throw new Error("isolateDependencies must be a boolean.");
-  const shell =
-      input.shell ?? (process.platform === "win32" ? "powershell" : "bash"),
-    selected = commandShell(shell),
+  const fields = commandFields(input),
     seconds = input.timeoutSeconds ?? 600;
   if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600)
     throw new Error("Command timeout must be between 1 and 600 seconds.");
-  const root = await realpath(project.path),
-    cwd = await realpath(resolve(root, input.cwd ?? ".")),
-    subdirectory = relative(root, cwd);
-  if (
-    isAbsolute(subdirectory) ||
-    subdirectory === ".." ||
-    subdirectory.startsWith(".." + sep)
-  )
-    throw new Error("Run commands inside this chat's worktree.");
+  const { root, cwd } = await commandDirectory(project, input.cwd);
   if (signal.aborted) return { cancelled: true };
-  const isolate =
-    input.isolateDependencies === true ||
-    /^\s*(?:&\s+)?(?:npm|pnpm|yarn)(?:\.cmd)?\s+(?:ci|install|add|remove|uninstall|update|upgrade)\b/i.test(
-      input.command,
-    );
   const answer = await approve({
     kind: "permission",
     title: input.command,
     details: {
       command: input.command,
       cwd,
-      shell: selected.name,
+      shell: fields.selected.name,
       requestedThrough: "run_command",
       execution: "Harness host process",
-      isolateDependencies: isolate,
+      isolateDependencies: fields.isolate,
     },
   });
   if (!answer.allow)
@@ -87,21 +148,7 @@ export async function executeCommand(
       reason: answer.reason ?? "The command was declined. Do not retry it.",
     };
   if (signal.aborted) return { cancelled: true };
-  if (isolate) {
-    // npm/workspace installers can use a parent package. Detach links only
-    // within this worktree, including ancestors of the chosen subdirectory.
-    for (let directory = cwd; ; directory = dirname(directory)) {
-      const modules = join(directory, "node_modules");
-      if (
-        await lstat(modules).then(
-          (s) => s.isSymbolicLink(),
-          () => false,
-        )
-      )
-        await unlink(modules);
-      if (relative(root, directory) === "") break;
-    }
-  }
+  if (fields.isolate) await detachInstallLinks(cwd, root);
   const id = randomUUID(),
     started = Date.now();
   const trackedCheck =
@@ -112,7 +159,7 @@ export async function executeCommand(
       kind: "host-command",
       id,
       command: input.command,
-      shell: selected.name,
+      shell: fields.selected.name,
       cwd,
       startedAt: new Date(started).toISOString(),
       trackedCheck,
@@ -125,7 +172,7 @@ export async function executeCommand(
     const result = await run({
       command: input.command,
       cwd,
-      shell,
+      shell: fields.shell,
       signal,
       timeoutMs: seconds * 1000,
       limit: 200000,

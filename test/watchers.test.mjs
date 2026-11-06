@@ -1,16 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { blockingGoals } from "../src/core/goals.mjs";
 import { claudeContent } from "../src/providers/attachments.mjs";
+import { killIfMatched } from "../src/core/process-identity.mjs";
 
 const sha = "a".repeat(40);
-function fixture({ path = ":memory:", mode = "default", provider = "codex" } = {}) {
+function fixture({ path = ":memory:", mode = "default", provider = "codex", projectPath = process.cwd(), commands } = {}) {
   let now = Date.now() + 1000,
     reads = 0;
   let result = {
@@ -19,6 +20,14 @@ function fixture({ path = ":memory:", mode = "default", provider = "codex" } = {
     sha,
     items: [],
     url: "https://github.com/owner/repo/commit/" + sha,
+  };
+  let pull = {
+    status: "pending",
+    reason: null,
+    cursor: { commentId: 1, reviewCommentId: 0, reviews: {}, head: sha, state: "open", merged: false },
+    items: [],
+    sha,
+    url: "https://github.com/owner/repo/pull/4",
   };
   const store = new Store(path),
     controller = new Controller(store, {
@@ -30,10 +39,16 @@ function fixture({ path = ":memory:", mode = "default", provider = "codex" } = {
             if (result instanceof Error) throw result;
             return structuredClone(result);
           },
+          readPull: async () => {
+            reads++;
+            if (pull instanceof Error) throw pull;
+            return structuredClone(pull);
+          },
         },
+        ...(commands ? { commands } : {}),
       },
     });
-  const project = store.addProject("Watch fixture", process.cwd(), {
+  const project = store.addProject("Watch fixture", projectPath, {
     scratch: true,
   });
   const chat = store.createConversation({
@@ -93,6 +108,12 @@ function fixture({ path = ":memory:", mode = "default", provider = "codex" } = {
     },
     get result() {
       return result;
+    },
+    set pull(value) {
+      pull = value;
+    },
+    get pull() {
+      return pull;
     },
     get reads() {
       return reads;
@@ -608,6 +629,178 @@ test("Ask and Plan watches only notify, ownership is enforced, and current resul
       false,
     );
     assert.equal(f.store.watchStore.get(active.id).armed, false);
+  } finally {
+    await f.close();
+  }
+});
+
+const recorded = {
+  pid: 42,
+  createdAt: "2020-01-01T00:00:00.000Z",
+  statusDir: "unused",
+};
+function commandDouble(identity, read, kills) {
+  return {
+    start: async () => ({ ...recorded }),
+    read,
+    identity,
+    killIfMatched: (runner) =>
+      killIfMatched(runner, {
+        identity,
+        kill: async (pid) => kills.push(pid),
+      }),
+  };
+}
+
+test("command expiry stops a matching process and leaves a reused process id alone", async () => {
+  const kills = [];
+  let live = { ...recorded };
+  const f = fixture({
+    commands: commandDouble(async () => live, async () => ({ done: false }), kills),
+  });
+  try {
+    f.register();
+    const matched = await f.controller.watchers.startCommand(
+      f.chat.id,
+      { expiryHours: 0.25 },
+      { command: "echo watched", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() },
+    );
+    f.advance(15 * 60_000);
+    await f.controller.watchers.tick();
+    assert.deepEqual(kills, [42]);
+    assert.match(f.store.watchStore.get(matched.id).reason, /command was stopped/);
+    kills.length = 0;
+    live = { pid: 42, createdAt: "2020-01-01T00:00:05.000Z" };
+    const reused = await f.controller.watchers.startCommand(
+      f.chat.id,
+      { expiryHours: 0.25 },
+      { command: "echo again", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() },
+    );
+    f.controller.watchers.cancel(f.chat.id, reused.id);
+    await Promise.all([...f.controller.watchers.pendingStops]);
+    assert.deepEqual(kills, []);
+    assert.match(f.store.watchStore.get(reused.id).reason, /not killed/);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a command with no exit code is unknown and does not count as success", async () => {
+  const f = fixture({
+    commands: commandDouble(
+      async () => null,
+      async () => ({ done: false }),
+      [],
+    ),
+  });
+  try {
+    f.register();
+    const watch = await f.controller.watchers.startCommand(
+      f.chat.id,
+      {},
+      { command: "echo missing", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() },
+    );
+    f.end();
+    await f.controller.watchers.tick();
+    const saved = f.store.watchStore.get(watch.id);
+    assert.equal(saved.status, "error");
+    assert.match(saved.reason, /exit code is unknown/);
+    assert.equal(saved.delivery, "none");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a file that does not exist yet can appear, and an escaping ancestor is rejected", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-file-")),
+    outside = await mkdtemp(join(tmpdir(), "harness-outside-"));
+  const f = fixture({ projectPath: root });
+  try {
+    f.register();
+    const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
+      path: "nested/leaf.txt",
+      until: "appears",
+    });
+    f.end();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "pending");
+    await mkdir(join(root, "nested"));
+    await writeFile(join(root, "nested", "leaf.txt"), "ready");
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "pending");
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "success");
+    await symlink(outside, join(root, "link"), "junction");
+    f.register();
+    await assert.rejects(
+      () =>
+        f.controller.watchers.handle(f.chat.id, "watch_file", {
+          path: "link/secret.txt",
+          until: "appears",
+        }),
+      /escapes the worktree/,
+    );
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("an already-merged pull request settles, and a new comment does not fire from the baseline", async () => {
+  const f = fixture();
+  try {
+    f.register();
+    const merged = await f.controller.watchers.handle(f.chat.id, "watch_pull_request", {
+      repository: "owner/repo",
+      pr: 4,
+    });
+    f.pull = {
+      status: "success",
+      reason: "Pull request merged.",
+      cursor: { commentId: 1, reviewCommentId: 0, reviews: {}, head: sha },
+      items: [],
+      sha,
+      url: "https://github.com/owner/repo/pull/4",
+    };
+    f.end();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(merged.id).status, "settling");
+    f.advance();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(merged.id).status, "success");
+    f.register();
+    f.pull = {
+      status: "pending",
+      reason: null,
+      cursor: { commentId: 9, reviewCommentId: 0, reviews: {}, head: sha, state: "open", merged: false },
+      items: [],
+      sha,
+      url: "https://github.com/owner/repo/pull/4",
+    };
+    const quiet = await f.controller.watchers.handle(f.chat.id, "watch_pull_request", {
+      repository: "owner/repo",
+      pr: 8,
+    });
+    f.end();
+    await f.controller.watchers.tick();
+    f.advance();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(quiet.id).status, "pending");
+    f.pull = {
+      ...f.pull,
+      status: "updated",
+      reason: "Pull request activity changed.",
+      items: [{ id: "comment:10", name: "Ada", state: "comment" }],
+    };
+    f.advance();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(quiet.id).status, "settling");
+    f.advance();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(quiet.id).status, "updated");
   } finally {
     await f.close();
   }

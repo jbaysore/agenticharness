@@ -21,6 +21,7 @@ const summary = `SELECT c.*, (SELECT scratch FROM projects WHERE id=c.project_id
     (SELECT r.provider FROM runs r WHERE r.conversation_id=c.id AND c.usage_stopped_at IS NOT NULL AND r.error=c.usage_stopped_reason ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1)) AS usage_stopped_provider,
   (SELECT count(*) FROM approvals a WHERE a.conversation_id=c.id AND a.status='pending') AS pending_approvals,
   (SELECT count(*) FROM background_watches w WHERE w.conversation_id=c.id AND w.status IN ('registering','pending','settling','retrying')) AS active_watches,
+  (SELECT group_concat(DISTINCT COALESCE(json_extract(w.payload,'$.kind'), 'ci')) FROM background_watches w WHERE w.conversation_id=c.id AND w.status IN ('registering','pending','settling','retrying')) AS watch_kinds,
   (SELECT MAX(result_at) FROM background_watches w WHERE w.conversation_id=c.id) AS last_watch_at
   FROM conversations c LEFT JOIN runs l ON l.rowid=(SELECT r.rowid FROM runs r WHERE r.conversation_id=c.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)`;
 
@@ -1373,7 +1374,7 @@ export class Store {
       openPlan: this.openPlan(id),
       activeRun,
       queue: this.queuedInputs(id),
-      watches: this.watchStore.list(id).map(({ checkpoint, rootId, originRunId, ...watch }) => watch),
+      watches: this.watchStore.list(id).map(({ checkpoint, rootId, originRunId, runner, ...watch }) => watch),
       approvals: this.pendingApprovals(id),
       comments: this.comments(id),
       artifacts: this.db

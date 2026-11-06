@@ -9,14 +9,12 @@ import { GOAL_INSTRUCTIONS, GOAL_QUESTION_TIMEOUT } from "../src/core/modes.mjs"
 import { hostTools, hostToolsKey } from "../src/core/host-tools.mjs";
 import { WATCH_INSTRUCTIONS } from "../src/core/watch-tools.mjs";
 
-test("background instructions explain the non-CI failure and the supported follow-up", () => {
-  assert.match(WATCH_INSTRUCTIONS, /only for GitHub CI through watch_github_ci/);
-  assert.match(
-    WATCH_INSTRUCTIONS,
-    /local or remote processes, studies, scripts, logs, or files after your turn ends/,
-  );
-  assert.match(WATCH_INSTRUCTIONS, /completion will not wake you or start another agent turn/);
-  assert.match(WATCH_INSTRUCTIONS, /native background task or notification flag/);
+test("background instructions explain the supported watches and the unregistered-work limit", () => {
+  assert.match(WATCH_INSTRUCTIONS, /watch_github_ci/);
+  assert.match(WATCH_INSTRUCTIONS, /watch_pull_request/);
+  assert.match(WATCH_INSTRUCTIONS, /watch_command/);
+  assert.match(WATCH_INSTRUCTIONS, /watch_file/);
+  assert.match(WATCH_INSTRUCTIONS, /native background task, notification flag/);
   assert.match(
     WATCH_INSTRUCTIONS,
     /keep the turn active and explicitly wait or poll with supported tools/,
@@ -27,6 +25,7 @@ test("background instructions explain the non-CI failure and the supported follo
     WATCH_INSTRUCTIONS,
     /Only promise automatic follow-up after.*successfully armed with yield_to_watch/,
   );
+  assert.match(WATCH_INSTRUCTIONS, /process id and operating-system start time still match/);
   assert.match(GOAL_INSTRUCTIONS, /active Goal is not a completion watcher/);
   assert.match(GOAL_INSTRUCTIONS, /Do not use pause_for_owner for.*background process completion/);
 });

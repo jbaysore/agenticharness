@@ -31,6 +31,7 @@ import {
   providerStatusLabel,
   resetLabel,
   usageResetAt,
+  waitingPhrase,
   workspacePeersLabel,
 } from "./status.mjs";
 import {
@@ -1176,7 +1177,7 @@ export function ChatPane({
               <strong>
                 {goal.status === "usageLimited"
                   ? "Goal stopped at a usage limit."
-                  : goal.status === "waiting" ? "Goal waiting for CI." : "Goal paused."}
+                  : goal.status === "waiting" ? `Goal ${waitingPhrase(chat).charAt(0).toLowerCase()}${waitingPhrase(chat).slice(1)}.` : "Goal paused."}
               </strong>{" "}
               {goal.objective && (
                 <span className="goal-objective" title={goal.objective}>

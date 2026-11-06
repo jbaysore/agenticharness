@@ -63,7 +63,7 @@ import { isDelegationTool } from "./delegation.mjs";
 import { Delegator } from "./delegator.mjs";
 import { COMMAND_SHELL, runCommand } from "./commands.mjs";
 import { commandInstructions } from "./command-shells.mjs";
-import { executeCommand } from "./command-tool.mjs";
+import { executeCommand, prepareWatchedCommand } from "./command-tool.mjs";
 import { Reliability } from "./reliability-service.mjs";
 import { browserGateway, browserTitle } from "./browser.mjs";
 import { checkQuestions, QUESTION_INSTRUCTIONS } from "./questions.mjs";
@@ -153,6 +153,7 @@ export class Controller extends EventEmitter {
     this.bridgeModes = new Map();
     this.bridgeQuestions = new Map();
     this.bridgeCommands = new Map();
+    this.bridgeWatchedCommands = new Map();
     // Where every new chat gets its own worktree.
     this.worktreeRoot = worktreeRoot;
     // Worktree removals in progress, by chat, so a new turn waits for them.
@@ -1656,7 +1657,17 @@ export class Controller extends EventEmitter {
         emit,
         run: (options) => this.runCommand(options),
       });
+    const watchedCommand = async (input) => {
+      const prepared = await prepareWatchedCommand(input, {
+        project,
+        approve,
+        signal: abort.signal,
+      });
+      if (prepared.declined || prepared.cancelled) return prepared;
+      return this.watchers.startCommand(chat.id, input, prepared);
+    };
     this.bridgeCommands.set(token, command);
+    this.bridgeWatchedCommands.set(token, watchedCommand);
     const skills = invokedSkills(listSkills(this.store), text);
     if (skills.length)
       this.event(chat.id, run.id, "work", {
@@ -1869,6 +1880,7 @@ export class Controller extends EventEmitter {
         if (name === "ask_user") return askUser(input);
         if (name === "pause_for_owner") return this.pauseForOwner(chat.id, input);
         if (name === "run_command") return command(input);
+        if (name === "watch_command") return watchedCommand(input);
         if (isWatchTool(name)) return this.watchers.handle(chat.id, name, input);
         if (name === "restart_harness")
           return this.requestSelfRestart(chat.id).catch((failure) => ({
@@ -1967,6 +1979,7 @@ export class Controller extends EventEmitter {
       this.bridgeModes.delete(token);
       this.bridgeQuestions.delete(token);
       this.bridgeCommands.delete(token);
+      this.bridgeWatchedCommands.delete(token);
       for (const [id, waiter] of this.approvalWaiters)
         if (waiter.runId === run.id) {
           waiter.resolve({ allow: false });

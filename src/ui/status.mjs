@@ -32,6 +32,32 @@ export function usageVerificationLabel(provider, now = Date.now()) {
 // What a chat is asking of you right now, most pressing first. A turn that
 // failed or finished stops being marked once the chat has been looked at.
 // A usage stop stays until the chat is continued or the flag is dismissed.
+export function watchKinds(chat) {
+  if (chat?.watch_kinds)
+    return new Set(
+      String(chat.watch_kinds)
+        .split(",")
+        .map((kind) => kind.trim())
+        .filter(Boolean),
+    );
+  return new Set(["ci"]);
+}
+export function watchingPhrase(chat) {
+  const kinds = watchKinds(chat);
+  if (kinds.size === 1 && kinds.has("ci")) return "Watching CI";
+  if (kinds.size === 1 && kinds.has("command")) return "Watching command";
+  if (kinds.size === 1 && kinds.has("pr")) return "Watching pull request";
+  if (kinds.size === 1 && kinds.has("file")) return "Watching file";
+  return "Watching";
+}
+export function waitingPhrase(chat) {
+  const kinds = watchKinds(chat);
+  if (kinds.size === 1 && kinds.has("ci")) return "Waiting for CI";
+  if (kinds.size === 1 && kinds.has("command")) return "Waiting for command";
+  if (kinds.size === 1 && kinds.has("pr")) return "Waiting for pull request";
+  if (kinds.size === 1 && kinds.has("file")) return "Waiting for file";
+  return "Waiting";
+}
 export function chatMarker(chat) {
   if (chat?.status === "needs-approval") return "approval";
   if (chat?.status === "running") return "running";
@@ -53,7 +79,7 @@ export function chatMarkerLabel(marker, chat) {
       approval: "Waiting for your approval",
       owner: "Waiting on you",
       running: "Working",
-      watching: "Watching CI",
+      watching: watchingPhrase(chat),
       usage: "Stopped because usage ran out",
       failed: "Stopped before finishing",
       unread: "Finished since you last looked",

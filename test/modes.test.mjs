@@ -525,6 +525,9 @@ test("ask mode allows read tools and refuses anything that can change the projec
     "run_command",
     "restart_harness",
   ];
+  assert.equal(askHostAllowed("watch_pull_request"), true);
+  assert.equal(askHostAllowed("watch_file"), true);
+  assert.equal(askHostAllowed("watch_command"), false);
   assert.deepEqual(names.filter(askHostAllowed), [
     "history_search",
     "rename_chat",

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GitHubCI, ciResult } from "../src/core/github-ci.mjs";
+import { GitHubCI, ciResult, pullOutcome } from "../src/core/github-ci.mjs";
 
 const sha = "a".repeat(40),
   merge = "b".repeat(40);
@@ -305,4 +305,81 @@ test("GitHub Retry-After dates postpone requests until the advertised time", asy
     github.get("rate", {}),
     (error) => error.retryAt === expected,
   );
+});
+
+const view = (extra = {}) => ({
+  state: "open",
+  merged: false,
+  head: sha,
+  title: "Add watches",
+  reviews: [],
+  comments: [{ id: 4, user: "ada", excerpt: "already here" }],
+  reviewComments: [],
+  ...extra,
+});
+
+test("pull request comments already present do not fire, and a later one does", () => {
+  const first = pullOutcome(null, view());
+  assert.equal(first.status, "pending");
+  assert.equal(first.cursor.commentId, 4);
+  const same = pullOutcome(first.cursor, view());
+  assert.equal(same.status, "pending");
+  const commented = pullOutcome(
+    first.cursor,
+    view({ comments: [...view().comments, { id: 5, user: "bea", excerpt: "new" }] }),
+  );
+  assert.equal(commented.status, "updated");
+  assert.equal(commented.items[0].excerpt, "new");
+});
+
+test("an already merged pull request is terminal on the first read", () => {
+  const merged = pullOutcome(null, view({ state: "closed", merged: true }));
+  assert.equal(merged.status, "success");
+  assert.match(merged.reason, /merged/);
+});
+
+test("readPull keeps the registration cursor and ignores the old comment", async () => {
+  const github = new GitHubCI({
+    request: async (endpoint) => {
+      if (/\/pulls\/4$/.test(endpoint))
+        return {
+          status: 200,
+          headers: {},
+          body: {
+            state: "open",
+            title: "Add watches",
+            html_url: "https://github.com/owner/repo/pull/4",
+            head: { sha },
+            user: { login: "ada" },
+          },
+        };
+      if (endpoint.includes("/reviews"))
+        return { status: 200, headers: {}, body: [] };
+      if (endpoint.includes("/comments"))
+        return {
+          status: 200,
+          headers: {},
+          body: [{ id: 4, body: "already here", user: { login: "ada" } }],
+        };
+      throw new Error(endpoint);
+    },
+  });
+  const target = { cache: {} };
+  const first = await github.readPull(
+    { repository: "owner/repo", pr: 4, createdAt: Date.now(), cursor: null },
+    target,
+    new AbortController().signal,
+  );
+  assert.equal(first.status, "pending");
+  const second = await github.readPull(
+    {
+      repository: "owner/repo",
+      pr: 4,
+      createdAt: Date.now(),
+      cursor: first.cursor,
+    },
+    target,
+    new AbortController().signal,
+  );
+  assert.equal(second.status, "pending");
 });

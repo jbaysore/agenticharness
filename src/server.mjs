@@ -300,6 +300,15 @@ export async function createHarness({
           chat = store.conversation(chatId);
         if (chat?.mode === "ask" && !askHostAllowed(body.name))
           return json(res, 403, { error: ASK_DENY });
+        if (
+          body.name === "watch_command" &&
+          controller.bridgeWatchedCommands.has(token)
+        )
+          return json(
+            res,
+            200,
+            await controller.bridgeWatchedCommands.get(token)(body.arguments ?? {}),
+          );
         if (isWatchTool(body.name))
           return json(res, 200, controller.watchers.handle(chatId, body.name, body.arguments ?? {}));
         if (body.name === "move_chat")

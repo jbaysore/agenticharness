@@ -3,7 +3,7 @@ import { api } from "./api.mjs";
 
 const pending = (w) =>
   ["registering", "pending", "settling", "retrying"].includes(w.status);
-const labels = {
+const ciLabels = {
   registering: "Connecting to GitHub",
   pending: "Waiting for CI",
   settling: "Confirming CI result",
@@ -16,6 +16,53 @@ const labels = {
   error: "Watch needs attention",
   superseded: "Revision changed",
   stopped: "Watch cancelled",
+};
+const kindLabels = {
+  command: {
+    registering: "Starting command",
+    pending: "Waiting for command",
+    success: "Command finished",
+    failure: "Command failed",
+    expired: "Command watch expired",
+    error: "Command needs attention",
+    stopped: "Watch cancelled",
+  },
+  pr: {
+    registering: "Connecting to GitHub",
+    pending: "Waiting for pull request",
+    settling: "Confirming pull request",
+    retrying: "Waiting to retry",
+    success: "Pull request ready",
+    failure: "Pull request needs changes",
+    updated: "Pull request updated",
+    expired: "Watch expired",
+    error: "Watch needs attention",
+    stopped: "Watch cancelled",
+  },
+  file: {
+    registering: "Checking file",
+    pending: "Waiting for file",
+    success: "File condition met",
+    expired: "Watch expired",
+    error: "File watch needs attention",
+    stopped: "Watch cancelled",
+  },
+};
+const labelFor = (watch) =>
+  (kindLabels[watch.kind] ?? ciLabels)[watch.status] ??
+  ciLabels[watch.status] ??
+  watch.status;
+const ringFor = (watch) =>
+  ({
+    command: "Watching command",
+    pr: "Watching pull request",
+    file: "Watching file",
+  })[watch.kind] ?? "Watching CI";
+const titleFor = (watch) => {
+  if (watch.kind === "command")
+    return (watch.command ?? "").split("\n")[0].slice(0, 160);
+  if (watch.kind === "file") return watch.path;
+  return `${watch.repository ?? ""}${watch.pr ? ` #${watch.pr}` : ""}`;
 };
 const time = (at) =>
   at
@@ -56,7 +103,7 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
     }
   };
   return (
-    <section className="watch-cards" aria-label="Background CI watchers">
+    <section className="watch-cards" aria-label="Background watchers">
       {watches.map((watch) => {
         const live = pending(watch) && !chat.activeRun;
         return (
@@ -76,14 +123,17 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
                 <span
                   className="watch-pulse"
                   role="img"
-                  aria-label="Watching CI"
+                  aria-label={ringFor(watch)}
                 />
               )}
-              <strong>{labels[watch.status] ?? watch.status}</strong>
-              <a href={watch.url} target="_blank" rel="noreferrer">
-                {watch.repository}
-                {watch.pr ? ` #${watch.pr}` : ""}
-              </a>
+              <strong>{labelFor(watch)}</strong>
+              {watch.url ? (
+                <a href={watch.url} target="_blank" rel="noreferrer">
+                  {titleFor(watch)}
+                </a>
+              ) : (
+                <span>{titleFor(watch)}</span>
+              )}
               {(watch.sha || watch.commit) && (
                 <code title={watch.sha ?? watch.commit}>
                   {(watch.sha ?? watch.commit).slice(0, 8)}
@@ -92,7 +142,7 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
             </div>
             {pending(watch) ? (
               <p className="watch-times">
-                CI monitoring uses no model calls.
+                Monitoring uses no model calls.
                 {watch.armed
                   ? " Authorized follow-up is armed."
                   : " Notification only."}{" "}
@@ -112,7 +162,7 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
               <p>Follow-up sent to the agent.</p>
             )}
             {watch.items?.length > 0 && (
-              <ul aria-label="CI results">
+              <ul aria-label="Watch results">
                 {watch.items.map((item) => (
                   <li key={item.id}>
                     {item.url ? (
