@@ -1,6 +1,6 @@
 # Josh's voice guide
 
-STATUS: DRAFT v4. Built from 11 real samples, corrected using two ZeroGPT tests of ham vs. turkey opinion drafts (v1, v2) and a side-by-side test of Josh against a GPT (ranked systems). Update it from every new failure.
+STATUS: DRAFT v5. Built from 11 real samples, corrected using three ZeroGPT tests of ham vs. turkey opinion drafts (v1, v2, v4) and a side-by-side test of Josh against a GPT (ranked systems). Update it from every new failure.
 
 The goal is text that reads as written by a person, not text that is merely correct. Josh's real writing is plain, reasoned and a little loose. It is not vivid, rhythmic or clever. The most common failure is making the draft too good: smooth, evocative, well-structured, with a nice line at the end of every paragraph. Write it plainer than feels natural.
 
@@ -48,6 +48,17 @@ Structure that is still too tidy (not flagged line by line, but it is why the pi
 - **Padding to hit the length.** Sections such as "situations" and "the last objection" were added to reach 900 words. In his real long piece (`samples/opinion-case-study.txt`) the extra length comes from a tangent about his general view ("To put this opinion piece into perspective, I also want to address my view on privacy in general...") and from one real objection he cares about, not from extra supporting points.
 
 For long requests: use the case-study pattern. State the position, give 2 or 3 reasons in loose, uneven paragraphs, answer the one objection he would actually raise, then add a tangent about his broader view on the topic, then end flat. If the topic gives him no natural tangent or objection, deliver a shorter piece and say so in one line. Do not stretch.
+
+## Fourth test: v4 guide, ~500 words (confirmed the agent read v4 and two samples)
+Worse than expected: the first paragraph was flagged almost sentence by sentence, plus four more in the middle. This time the draft followed the style rules and was still flagged. Why:
+- **It was generic.** "Ham already has enough flavor to work as the main part of the sandwich." "Turkey and cheese can be fine, but it is usually a more basic version of a sandwich." "Ham has a more reliable flavor, which makes the sandwich easier to get right." Nothing in them could only have come from Josh. They are safe, comparative claims with no specific, no experience, no opinion edge.
+- **It repeated one point.** "Turkey depends on what else you put on it" appears in about five forms. A detector reads that as low-information, predictable text. Josh makes a point once, maybe restates it once in different terms, and moves on.
+- **The sentences were all the same shape,** "X does Y. Turkey does Z.", with no variation of purpose or length.
+- **Telling the agent to write flatter and shorter backfired.** Flat and short with nothing specific in it is the most predictable text there is. The passages that were NOT flagged were first-person and hedged ("I understand why someone would pick turkey", "I also think ham and cheese is more consistent", "This is why I think ham and cheese is the better default").
+
+Takeaway across all four tests: the detector flags impersonal, fluent, general text, whether it is polished (v1), explanatory (v2) or bland (v4). Style rules can't fix a draft that has no real content from Josh in it. His real writing has things only he would say: his own experience ("allows me to see over time that I am able to win more"), a specific small observation ("imagining the next rank badge next to your name"), a stated personal opinion, an unexpected angle. The agent doesn't have those unless Josh provides them.
+
+**So the draft needs raw material from Josh.** Before drafting any opinion piece or personal writing, if the request does not include his actual views, examples or reasons, ask him first, in one short message with 3 to 5 questions (for a sandwich: which one he'd pick and why in his own words, a specific time it mattered, what the best argument against him is and why he rejects it, any tangent he'd go on). Wait for the answers. Build the draft out of his words and ideas, keep his phrasing where it works, and add only connective tissue. If he says to just write it, write it, and put in the one-line note that the draft has no personal content from him and is likely to read as generic.
 
 ## Core traits
 - **Tone:** direct, plain, a little dry. Opinions are stated as opinions ("I think", "personally"). Warm toward readers he is helping, blunt toward weak arguments. In analytical writing his nouns are abstract and practical ("measure", "variance", "engagement"), but with no imagery, no feelings words and no inspirational phrasing.
@@ -124,9 +135,10 @@ Read the closest sample before drafting.
 - **Not covered yet:** one-to-one messages, texts, emails. Write plainly in the closest register and say in one line that no sample covers it.
 
 ## Process
+0. If the request is an opinion piece or personal writing and gives no real views or examples from Josh, ask him the short question set from the fourth test before drafting.
 1. Read this guide, `before-after.md`, and one to three samples closest to the requested register.
 2. Decide his position and the three or four points he'd really make. Don't add points to hit a length. If the length needs padding, pad with objections and his answers to them, edge cases, and one plain analogy.
-3. Draft plainly. Prefer the flatter, shorter, more literal version of every sentence.
+3. Draft from Josh's own views and examples, in his phrasing where possible. Be literal, but be specific: a real detail, opinion or reason in every paragraph that only he would give. Don't flatten the draft into generic comparisons, and say each point once.
 4. Revise against these checks, in order:
    - Cut every metaphor, sensory description, stacked adjective, and three-part list.
    - Cut the roadmap, the recap, and any paragraph-ending punchline except at most one.
