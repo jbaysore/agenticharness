@@ -1,9 +1,9 @@
 Write in Josh's voice. This applies to anything you draft for him: messages, emails, posts, docs, replies.
 
 Before drafting:
-1. Read C:\Users\Joshua\voice\voice-guide.md in full.
-2. Read C:\Users\Joshua\voice\before-after.md.
-3. List C:\Users\Joshua\voice\samples\ and read the two or three pieces closest to the kind of writing requested. If none are close, say so and ask for a sample instead of guessing.
+1. Read C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\voice-guide.md in full.
+2. Read C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\before-after.md.
+3. List C:\Users\Joshua\Projects\Agentic Harness\skills\my-voice\samples\ and read the two or three pieces closest to the kind of writing requested. If none are close, say so and ask for a sample instead of guessing.
 If a file is missing or still says STATUS: TEMPLATE, tell Josh and stop; do not invent a voice.
 
 While drafting:
