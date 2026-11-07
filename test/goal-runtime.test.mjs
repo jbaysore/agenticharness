@@ -99,7 +99,8 @@ test("Claude's real MCP progress and completion tools work without TodoWrite or 
         yield { type: "result", is_error: false, result: "Checkpoint" };
         prompts.push((await prompt.next()).value.message.content);
         assert.match(prompts[1], /Continue the full Harness Goal/);
-        const complete = await client.callTool({ name: "complete_goal", arguments: { evidence: "Verified the full release using the acceptance fixture." } });
+        await client.callTool({ name: "update_goal_progress", arguments: { phases: phases.map((p) => ({ ...p, status: "completed" })) } });
+        const complete = await client.callTool({ name: "complete_goal", arguments: { goalId: f.store.conversation(f.chat.id).goalProgress.goalId, evidence: "Verified the full release using the acceptance fixture." } });
         assert.equal(JSON.parse(complete.content[0].text).complete, true);
         yield { type: "assistant", message: { id: "final", content: [{ type: "text", text: "Release verified." }] } };
         yield { type: "result", is_error: false, result: "Release verified." };
@@ -112,6 +113,30 @@ test("Claude's real MCP progress and completion tools work without TodoWrite or 
   assert.equal(prompts.length, 2);
   assert.equal(f.store.conversation(f.chat.id).goalProgress.status, "complete");
   assert.ok(f.store.conversation(f.chat.id).goalProgress.phases.every((p) => p.status === "completed"));
+});
+
+test("Claude cannot complete an earlier question without the current Goal identity and completed full phases", async (t) => {
+  const f = fixture(t);
+  f.controller.runners.claude = async (ctx) => {
+    const goalId = ctx.goalProgress().goalId;
+    const evidence = "The goal asked how I will know when it is done. That was answered. The broader production goal stays open and is not claimed complete.";
+    for (const input of [{ evidence }, { goalId, evidence }]) {
+      const result = await ctx.history("complete_goal", input);
+      assert.match(result.error, /saved full Goal/);
+      assert.equal(result.objective, "Deliver and verify the entire production release");
+      assert.equal(result.goalId, goalId);
+      assert.notEqual(ctx.goalProgress().status, "complete");
+    }
+    await ctx.history("update_goal_progress", { phases });
+    assert.match((await ctx.history("complete_goal", { goalId, evidence })).error, /verify every phase/);
+    await ctx.history("update_goal_progress", { phases: phases.map((p) => ({ ...p, status: "completed" })) });
+    assert.ok((await ctx.history("complete_goal", { goalId: "stale-goal", evidence: "Verified" })).error);
+    assert.equal((await ctx.history("complete_goal", { goalId, evidence: "Verified all acceptance conditions against release evidence." })).complete, true);
+    return { status: "completed" };
+  };
+  f.send("Deliver and verify the entire production release");
+  await f.controller.active.get(f.chat.id).task;
+  assert.equal(f.store.conversation(f.chat.id).goalProgress.status, "complete");
 });
 
 test("Goal reporting rejects non-Goal modes, malformed reports, and missing completion evidence", async (t) => {

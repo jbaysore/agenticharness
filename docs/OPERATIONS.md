@@ -60,7 +60,10 @@ it and returns the chat to Default so the plan can be built. **Goal** keeps Code
 message's condition is met. Codex uses its native Goal lifecycle. Harness continues
 Claude turns directly; Claude calls `complete_goal` with verification evidence
 when the entire objective is achieved. A finished reply alone does not complete
-a Claude Goal. Cursor has no goal mode. `/ask`, `/plan`, `/goal`,
+a Claude Goal. Completion requires its saved Goal ID and a recorded checklist
+whose phases are all completed. Resumed Claude prompts repeat the canonical
+objective so an earlier native Goal or status question cannot replace it.
+Cursor has no goal mode. `/ask`, `/plan`, `/goal`,
 and `/default` anywhere in a message switch modes the same way. Ordinary Goal
 follow-ups retain the saved objective and phases. An explicit `/goal <objective>`
 replaces them; a message after completion starts a new Goal. `/queue` and

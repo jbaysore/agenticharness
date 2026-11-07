@@ -38,10 +38,11 @@ export const goalProgressTool = {
 
 export const completeGoalTool = {
   name: "complete_goal",
-  description: "Claude Code only: finish the current Harness Goal once the full objective and every acceptance condition are met. Give concrete verification evidence. Never use for a finished subtask, an owner dependency, a wait, or exhausted usage. Codex must use its native update_goal instead.",
+  description: "Claude Code only: finish the current Harness Goal once the full objective and every acceptance condition are met. First record phases covering the entire objective and verify all phases are completed. Supply the saved goalId and concrete verification evidence. Never use for a finished question or subtask, an owner dependency, a wait, or exhausted usage. Codex must use its native update_goal instead.",
   inputSchema: { type: "object", properties: {
+    goalId: { type: "string", minLength: 1 },
     evidence: { type: "string", minLength: 1, maxLength: 4000 },
-  }, required: ["evidence"], additionalProperties: false },
+  }, required: ["goalId", "evidence"], additionalProperties: false },
 };
 
 export function checkGoalProgress(input) {

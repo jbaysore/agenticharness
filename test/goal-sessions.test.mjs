@@ -947,7 +947,7 @@ test("Codex sets a resumed Goal again when its native copy is gone", async () =>
 });
 
 test("Claude resumes a paused Goal with feedback and the saved objective separately", async () => {
-  assert.equal(
+  assert.match(
     await claudeContent({
       mode: "goal",
       resumeGoal: true,
@@ -955,7 +955,7 @@ test("Claude resumes a paused Goal with feedback and the saved objective separat
       goalObjective: "Saved objective",
       text: "Resume the paused goal.",
     }),
-    "Resume the paused goal.",
+    /Latest message for this Goal:\nResume the paused goal\./,
   );
   assert.match(claudeGoalContext({mode: "goal", goalObjective: "Saved objective", text: "Resume the paused goal."}), /Full Harness Goal \(binding objective\):\nSaved objective/);
 });

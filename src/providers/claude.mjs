@@ -426,7 +426,7 @@ export async function runClaude(
     name: "harness",
     version: "0.1.0",
     tools: [
-      tool("complete_goal", completeGoalTool.description, { evidence: z.string().min(1).max(4000) }, async (args) => {
+      tool("complete_goal", completeGoalTool.description, { goalId: z.string().min(1), evidence: z.string().min(1).max(4000) }, async (args) => {
         const result = await ctx.history("complete_goal", args);
         if (result?.complete && !ctx.signal.aborted) {
           goalStatus = "complete";

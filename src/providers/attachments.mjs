@@ -23,7 +23,9 @@ export const claudeGoalObjective = (ctx) => ctx.goalObjective ?? ctx.session?.go
 export function claudeGoalContext(ctx) {
   if (ctx.mode !== "goal") return "";
   const objective = claudeGoalObjective(ctx);
+  const goalId = ctx.goalProgress?.()?.goalId;
   return [
+    goalId && `Current Harness Goal ID: ${goalId}`,
     `Full Harness Goal (binding objective):\n${objective}`,
     ctx.addendum, ctx.handoff,
     ctx.text && ctx.text !== objective ? `Latest message for this Goal:\n${ctx.text}` : "",
@@ -32,7 +34,8 @@ export function claudeGoalContext(ctx) {
 
 export async function claudeContent(ctx) {
   const text = ctx.mode === "goal"
-    ? (ctx.text || "Continue the full saved Harness Goal from the system instructions.")
+    ? [claudeGoalContext(ctx),
+      "Continue this full saved Harness Goal from its checkpoint. Any earlier native Goal condition or status question is superseded by the binding objective above. Record phases for the whole objective with update_goal_progress before further work. Completing a reply or subtask does not complete this Goal."].join("\n\n")
     : prefaceText(ctx);
   const files = images(ctx);
   if (!files.length) return text;

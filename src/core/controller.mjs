@@ -1183,6 +1183,10 @@ export class Controller extends EventEmitter {
       const progress = this.store.conversation(chat.id)?.goalProgress;
       if (progress?.runId !== run.id || !["starting", "active", "unknown"].includes(progress.status))
         return { error: "This Goal is no longer active." };
+      if (input.goalId !== progress.goalId || !progress.phases.length ||
+          progress.phases.some((phase) => phase.status !== "completed"))
+        return { error: "Complete the saved full Goal, not an earlier question or subtask. First record phases covering its entire objective and verify every phase is completed; then supply this Goal's goalId.",
+          goalId: progress.goalId, objective: progress.objective, phases: progress.phases };
       this.store.setGoalState(chat.id, run.provider, run.id, "complete");
       this.event(chat.id, run.id, "work", { kind: "goal-complete", item: { title: "Goal complete", description: input.evidence.trim() } });
       this.event(chat.id, run.id, "chat", this.store.conversation(chat.id));

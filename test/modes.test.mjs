@@ -397,7 +397,8 @@ test("a Claude Goal carries its full objective and handoff without relying on sl
     approve: async () => ({ allow: true }),
   });
   await run;
-  assert.equal(seen.message, "All tests in test/auth pass");
+  assert.match(seen.message, /Full Harness Goal \(binding objective\):\nAll tests in test\/auth pass/);
+  assert.match(seen.message, /Earlier work from Codex/);
   assert.match(
     seen.options.systemPrompt.append,
     /Earlier work from Codex/,
@@ -416,9 +417,9 @@ test("an approved Claude switch to Goal starts the concrete objective while resu
     approve: async () => ({ allow: true }),
   });
   await run;
-  assert.equal(
+  assert.match(
     seen.message,
-    "Continue the current task without repeating completed actions",
+    /Latest message for this Goal:\nContinue the current task without repeating completed actions/,
   );
   assert.match(seen.options.systemPrompt.append, /Full Harness Goal \(binding objective\):\nThe parser tests pass/);
   assert.equal(seen.options.resume, "saved-session");
