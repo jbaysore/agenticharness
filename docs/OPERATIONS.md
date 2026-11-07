@@ -98,6 +98,11 @@ Three consecutive turns without tool work or explicit completion also fail
 visibly. These checks do not interrupt an active tool or an owner/host watch wait.
 An incomplete chat worktree is preserved in a sibling `.recovery-*` directory
 and restored on its assigned branch before another provider turn starts.
+An empty residual directory is restored in place, even if a local service still
+uses it as its working directory. Idle cleanup moves a checkout aside before
+deleting files; a Windows directory lock leaves the checkout intact for the next
+turn. Files that cannot be deleted after a successful move remain in a
+`.cleanup-*` sibling without blocking restoration at the chat's assigned path.
 
 **Stop work** requests a Goal pause and waits for the provider to acknowledge it.
 The composer shows **Pausing…** while confirmation is pending. A disconnected

@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -61,6 +64,73 @@ function fixture() {
   };
 }
 const passing = async () => ({ exitCode: 0, output: "ok" });
+
+async function holdDirectory(path) {
+  const child = spawn(process.execPath, ["-e", "process.stdin.resume()"], {
+    cwd: path, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
+  });
+  await once(child, "spawn");
+  return async () => {
+    const exited = once(child, "exit");
+    child.stdin.end();
+    await exited;
+  };
+}
+
+test("Windows cleanup leaves a checkout intact while a process holds its directory", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const f = fixture();
+  let release;
+  try {
+    const worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: "busy-checkout" });
+    release = await holdDirectory(worktree.path);
+    assert.equal(await tidyWorktree(f.project, worktree), false);
+    assert.equal(git(worktree.path, "branch", "--show-current"), worktree.branch);
+    assert.equal(readFileSync(join(worktree.path, "a.txt"), "utf8"), "one\n");
+    assert.equal(readFileSync(join(worktree.path, "node_modules", "dep", "index.js"), "utf8"), "1");
+    assert.deepEqual(readdirSync(f.root), [worktree.path.split(/[\\/]/).at(-1)]);
+    await release(); release = null;
+    assert.equal(await tidyWorktree(f.project, worktree), true);
+    assert.deepEqual(readdirSync(f.root), []);
+    assert.equal(readFileSync(join(f.project, "node_modules", "dep", "index.js"), "utf8"), "1");
+  } finally { await release?.(); f.done(); }
+});
+
+test("cleanup rolls back intact when Git refuses an explicitly locked checkout", async () => {
+  const f = fixture();
+  try {
+    const worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: "locked-checkout" });
+    git(f.project, "worktree", "lock", worktree.path);
+    assert.equal(await tidyWorktree(f.project, worktree), false);
+    assert.equal(git(worktree.path, "branch", "--show-current"), worktree.branch);
+    assert.equal(readFileSync(join(worktree.path, "a.txt"), "utf8"), "one\n");
+    assert.equal(readFileSync(join(worktree.path, "node_modules", "dep", "index.js"), "utf8"), "1");
+    assert.equal(await restoreWorktree(f.project, worktree), undefined);
+    git(f.project, "worktree", "unlock", worktree.path);
+    assert.equal(await tidyWorktree(f.project, worktree), true);
+    assert.deepEqual(readdirSync(f.root), []);
+  } finally { f.done(); }
+});
+
+test("an empty partial checkout is restored while a process holds its directory", async () => {
+  const f = fixture();
+  let release;
+  try {
+    const worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: "empty-checkout" });
+    commit(worktree.path, "saved.txt", "committed work", "Unlanded work");
+    const head = git(worktree.path, "rev-parse", "HEAD");
+    release = await holdDirectory(worktree.path);
+    unlinkSync(join(worktree.path, "node_modules"));
+    for (const file of readdirSync(worktree.path)) rmSync(join(worktree.path, file));
+    assert.equal(await restoreWorktree(f.project, worktree), undefined);
+    assert.equal(git(worktree.path, "branch", "--show-current"), worktree.branch);
+    assert.equal(git(worktree.path, "rev-parse", "HEAD"), head);
+    assert.equal(readFileSync(join(worktree.path, "a.txt"), "utf8"), "one\n");
+    assert.equal(readFileSync(join(worktree.path, "saved.txt"), "utf8"), "committed work");
+    assert.equal(readFileSync(join(worktree.path, "node_modules", "dep", "index.js"), "utf8"), "1");
+  } finally { await release?.(); f.done(); }
+});
 
 test("local command and file watches hold their checkout against idle cleanup", async () => {
   const f = fixture(), store = new Store(":memory:"), controller = new Controller(store, {});

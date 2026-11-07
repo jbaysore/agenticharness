@@ -7,6 +7,8 @@ import {
   lstat,
   unlink,
   rename,
+  readdir,
+  rm,
 } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
@@ -103,10 +105,13 @@ export async function restoreWorktree(projectPath, worktree) {
         throw new Error(`The assigned checkout is on a different branch or belongs to another repository: ${path}`);
       return;
     }
-    // A failed Git removal can leave ignored files and no .git file. Keep the
-    // entire residual directory; it may also contain work worth recovering.
-    recoveryPath = `${path}.recovery-${Date.now()}-${process.pid}`;
-    await rename(path, recoveryPath);
+    // A failed Git removal can leave ignored files and no .git file. Keep any
+    // residual files, but restore an empty directory in place: a detached
+    // service may still hold its working directory open on Windows.
+    if ((await readdir(path)).length) {
+      recoveryPath = `${path}.recovery-${Date.now()}-${process.pid}`;
+      await rename(path, recoveryPath);
+    }
   }
   await git(projectPath, ["worktree", "prune"]);
   const kept = await git(projectPath, [
@@ -145,20 +150,35 @@ export async function tidyWorktree(projectPath, worktree) {
   } catch {
     return false;
   }
-  // Unlink the shared node_modules first so removal cannot reach into it.
-  const modules = join(path, "node_modules");
-  const linked = await lstat(modules).then(
-    (s) => s.isSymbolicLink(),
-    () => false,
-  );
-  if (linked) await unlink(modules);
+  // Acquire the directory before deleting anything. Git's recursive removal
+  // can delete the checkout and only then discover that Windows will not
+  // release its root because a detached process still uses it as its cwd.
+  const removalPath = `${path}.cleanup-${Date.now()}-${process.pid}`;
   try {
+    await rename(path, removalPath);
+  } catch (error) {
+    if (["EBUSY", "EPERM", "EACCES"].includes(error.code)) return false;
+    throw error;
+  }
+  try {
+    // The registered path is now absent. Git unregisters it without touching
+    // the files we moved aside; an explicitly locked worktree still refuses.
     await git(projectPath, ["worktree", "remove", path], { timeout: 120000 });
   } catch {
-    // Usually a file held open, such as a terminal in the folder.
-    if (linked) await linkDependencies(projectPath, path).catch(() => {});
+    await rename(removalPath, path);
     return false;
   }
+  try {
+    // Never traverse the shared dependencies. A failed deletion may leave a
+    // cleanup sibling, but cannot damage the chat's assigned checkout path.
+    const modules = join(removalPath, "node_modules");
+    const linked = await lstat(modules).then(
+      (s) => s.isSymbolicLink(),
+      () => false,
+    );
+    if (linked) await unlink(modules);
+    await rm(removalPath, { recursive: true, force: true, maxRetries: 3 });
+  } catch { /* Keep undeletable residual files in the cleanup sibling. */ }
   await git(projectPath, ["branch", "-d", branch]).catch(() => {});
   return true;
 }
