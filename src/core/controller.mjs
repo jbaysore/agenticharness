@@ -92,7 +92,7 @@ import {
   ownerAnswerPrompt,
 } from "./owner-pause.mjs";
 import { Watchers } from "./watchers.mjs";
-import { GOAL_PROGRESS_INSTRUCTIONS, goalPlanTracker, goalProgressContext } from "./goal-progress.mjs";
+import { GOAL_PROGRESS_INSTRUCTIONS, goalPlanTracker, goalProgressContext, checkGoalProgress } from "./goal-progress.mjs";
 
 function clearOwnerPauseAttempt(active) {
   if (!active?.ownerPause) return;
@@ -154,6 +154,8 @@ export class Controller extends EventEmitter {
     this.bridgeQuestions = new Map();
     this.bridgeCommands = new Map();
     this.bridgeWatchedCommands = new Map();
+    this.bridgeGoalProgress = new Map();
+    this.bridgeGoalComplete = new Map();
     // Where every new chat gets its own worktree.
     this.worktreeRoot = worktreeRoot;
     // Worktree removals in progress, by chat, so a new turn waits for them.
@@ -323,7 +325,7 @@ export class Controller extends EventEmitter {
     // A running turn keeps the message until it finishes, unless /steer
     // redirects that turn. A stopped turn still drains its queue afterward.
     if (active && !releasing) {
-      if (prepared.delivery === "steer" && !active.cancelled)
+      if (prepared.delivery === "steer" && !active.cancelled && !prepared.replaceGoal)
         return this.steer(prepared);
       return this.enqueue(prepared);
     }
@@ -346,6 +348,7 @@ export class Controller extends EventEmitter {
       permissions,
       mode,
       parsed = false,
+      replaceGoal = false,
       resumeGoal = false,
       continueAfterUsage = false,
       resumeAfterUsageReset = false,
@@ -499,6 +502,7 @@ export class Controller extends EventEmitter {
       effort: effort || null,
       permissions,
       mode,
+      replaceGoal: replaceGoal || opened.mode === "goal",
       resumeGoal: Boolean(resumeGoal),
       continueAfterUsage: Boolean(continueAfterUsage),
       resumeAfterUsageReset: Boolean(resumeAfterUsageReset),
@@ -533,6 +537,7 @@ export class Controller extends EventEmitter {
       abort,
       pendingSteers: [],
       resumeGoal: prepared.resumeGoal,
+      replaceGoal: prepared.replaceGoal,
       continueAfterUsage: prepared.continueAfterUsage,
       resumeAfterUsageReset: prepared.resumeAfterUsageReset,
       continuedGoalObjective: prepared.continuedGoalObjective,
@@ -574,6 +579,7 @@ export class Controller extends EventEmitter {
       effort: prepared.effort,
       permissions: prepared.permissions,
       mode: prepared.mode,
+      replaceGoal: prepared.replaceGoal,
     });
     this.event(prepared.chatId, null, "queue", { id: row.id });
     return { ...row, queued: true };
@@ -682,6 +688,7 @@ export class Controller extends EventEmitter {
           permissions: next.permissions,
           mode: next.mode,
           parsed: true,
+          replaceGoal: Boolean(next.goal_replacement),
         },
         true,
       );
@@ -870,7 +877,14 @@ export class Controller extends EventEmitter {
         return home;
       }
     if (!worktree) return home;
-    await restoreWorktree(home.path, worktree);
+    const restored = await restoreWorktree(home.path, worktree);
+    if (restored?.recoveryPath)
+      this.event(chat.id, run.id, "work", {
+        kind: "worktree-recovered", item: {
+          title: "Restored the chat's partial checkout",
+          description: `The previous directory had no valid checkout. Its residual files are preserved at ${restored.recoveryPath}. Inspect them for uncommitted work before proceeding.`,
+        },
+      });
     const sync = await syncWorktree(worktree).catch(() => null);
     if (sync?.updated)
       this.event(chat.id, run.id, "work", {
@@ -880,7 +894,7 @@ export class Controller extends EventEmitter {
           description: `${sync.behind} new ${sync.behind === 1 ? "commit" : "commits"} from other chats.`,
         },
       });
-    return { ...home, path: worktree.path, home: home.path, worktree };
+    return { ...home, path: worktree.path, home: home.path, worktree, recoveryPath: restored?.recoveryPath };
   }
   async requestChatMove(chatId, directory) {
     const chat = this.store.conversation(chatId);
@@ -1017,12 +1031,18 @@ export class Controller extends EventEmitter {
   }
   // Between turns, a worktree whose work has all landed is removed, so a
   // project left idle is back to its one folder.
+  worktreeHeld(chatId) {
+    return this.active.has(chatId) || this.reviewingPlans(chatId) ||
+      this.store.watchStore.list(chatId).some((watch) =>
+        ["command", "file"].includes(watch.kind) &&
+        ["registering", "pending", "settling", "retrying"].includes(watch.status));
+  }
   tidy(chatId) {
     const chat = this.store.conversation(chatId),
       home = chat && this.store.project(chat.project_id);
-    if (!chat?.worktree || !home || this.active.has(chatId) || this.reviewingPlans(chatId)) return;
+    if (!chat?.worktree || !home || this.worktreeHeld(chatId)) return;
     const done = (this.tidying.get(chatId) ?? Promise.resolve())
-      .then(() => this.active.has(chatId) || this.reviewingPlans(chatId)
+      .then(() => this.worktreeHeld(chatId)
         ? false : tidyWorktree(home.path, chat.worktree))
       .catch(() => false)
       .finally(() => {
@@ -1070,10 +1090,22 @@ export class Controller extends EventEmitter {
     const continueAfterUsage = Boolean(activeEntry?.continueAfterUsage);
     const resumeAfterUsageReset = Boolean(activeEntry?.resumeAfterUsageReset);
     const savedGoal = chat.sessions[run.provider]?.goal;
+    const previousProgress = chat.goalProgress;
+    const previousObjective = previousProgress?.objective ??
+      chat.sessions[previousProgress?.provider]?.goal?.objective ?? savedGoal?.objective;
+    const replacementGoal = chat.mode === "goal" && (
+      modeChange?.mode === "goal" || (!continuing && activeEntry?.replaceGoal) ||
+      (!continuing && !resumeGoal && !continueAfterUsage && !resumeAfterUsageReset &&
+        !activeEntry?.moveOrigin && (!previousObjective ||
+          ["complete", "cleared"].includes(previousProgress?.status ?? savedGoal?.status)))
+    );
+    const goalObjective = chat.mode === "goal" ? (
+      modeChange?.objective ?? activeEntry?.moveOrigin?.goalObjective ??
+      (continueAfterUsage ? activeEntry.continuedGoalObjective : undefined) ??
+      (replacementGoal ? text : previousObjective ?? text)
+    ) : undefined;
     if (chat.mode === "goal") {
-      const replacement = modeChange?.mode === "goal" ||
-        (!continuing && !resumeGoal && !continueAfterUsage && !resumeAfterUsageReset && !activeEntry?.moveOrigin);
-      const progress = this.store.beginGoalProgress(chat.id, run.provider, run.id, replacement);
+      const progress = this.store.beginGoalProgress(chat.id, run.provider, run.id, replacementGoal, goalObjective);
       this.event(chat.id, run.id, "goal-progress", progress);
     }
     if (
@@ -1085,15 +1117,7 @@ export class Controller extends EventEmitter {
         run.provider,
         run.id,
         "starting",
-        // A new Goal message replaces the objective; resuming or continuing
-        // keeps the saved one until the provider reports its own. A usage
-        // handoff keeps the stopped Goal's objective instead of the prompt.
-        modeChange?.mode === "goal" && chat.mode === "goal"
-          ? modeChange.objective
-          : chat.mode === "goal" && !resumeGoal && !continuing && !resumeAfterUsageReset
-            ? activeEntry?.moveOrigin?.goalObjective ??
-              (continueAfterUsage ? activeEntry.continuedGoalObjective : text)
-            : undefined,
+        goalObjective,
       );
     let actualModel =
       this.providers
@@ -1134,6 +1158,37 @@ export class Controller extends EventEmitter {
       this.event(chat.id, null, "chat", this.store.conversation(chat.id));
     };
     const trackGoalPlan = goalPlanTracker(run.provider);
+    const reportGoalProgress = (input) => {
+      if (chat.mode !== "goal" || abort.signal.aborted ||
+          this.active.get(chat.id)?.abort !== abort)
+        return { error: "Report progress during the current active Goal turn." };
+      try {
+        const report = checkGoalProgress(input);
+        const progress = this.store.updateGoalProgress(chat.id, run.provider, run.id, report);
+        if (progress) this.event(chat.id, run.id, "goal-progress", progress);
+        const saved = this.store.conversation(chat.id)?.goalProgress;
+        if (!progress && !["starting", "active", "unknown"].includes(saved?.status))
+          return { error: "This Goal is no longer accepting progress." };
+        return { progress: saved };
+      } catch (error) { return { error: error.message }; }
+    };
+    this.bridgeGoalProgress.set(token, reportGoalProgress);
+    const completeGoal = (input) => {
+      const active = this.active.get(chat.id);
+      if (run.provider !== "claude" || chat.mode !== "goal" || abort.signal.aborted ||
+          active?.abort !== abort || active.supersededByUser || this.store.queuedInputs(chat.id).length)
+        return { error: "Complete only the current Claude Goal after handling all newer user instructions." };
+      if (typeof input?.evidence !== "string" || !input.evidence.trim() || input.evidence.length > 4000)
+        return { error: "Supply concrete verification evidence for the full Goal (1–4000 characters)." };
+      const progress = this.store.conversation(chat.id)?.goalProgress;
+      if (progress?.runId !== run.id || !["starting", "active", "unknown"].includes(progress.status))
+        return { error: "This Goal is no longer active." };
+      this.store.setGoalState(chat.id, run.provider, run.id, "complete");
+      this.event(chat.id, run.id, "work", { kind: "goal-complete", item: { title: "Goal complete", description: input.evidence.trim() } });
+      this.event(chat.id, run.id, "chat", this.store.conversation(chat.id));
+      return { complete: true, instruction: "The full Goal is recorded complete. Finish your reply with the result and verification." };
+    };
+    this.bridgeGoalComplete.set(token, completeGoal);
     const emit = (type, payload) => {
       if (type === "work" && chat.mode === "goal" && !abort.signal.aborted &&
           this.active.get(chat.id)?.abort === abort) {
@@ -1706,7 +1761,7 @@ export class Controller extends EventEmitter {
       { key: "skills", text: skillInstructions(skills), repeat: skills.length > 0 && !continuing },
       { key: "memory-web", text: memory },
       { key: "goal-progress", text: chat.mode === "goal" ? goalProgressContext(this.store.conversation(chat.id)?.goalProgress) : "" },
-      { key: "workspace", text: notice, clear: "Workspace update: no other Harness chats are currently working in this directory. Other chats can start later; continue to check workspace_activity before committing." },
+      { key: "workspace", text: [notice, project.recoveryPath && `Workspace recovered: the incomplete checkout's residual files are preserved at ${project.recoveryPath}. Inspect them for uncommitted work before proceeding.`].filter(Boolean).join("\n\n"), clear: "Workspace update: no other Harness chats are currently working in this directory. Other chats can start later; continue to check workspace_activity before committing." },
     ];
     const addendumBody = blocks.map((b) => b.text)
       .filter(Boolean)
@@ -1755,14 +1810,12 @@ export class Controller extends EventEmitter {
       mode: chat.mode,
       continuing,
       startGoal,
-      resumeGoal,
-      goalObjective: startGoal
-        ? modeChange?.objective ?? activeEntry?.moveOrigin?.goalObjective ?? text
-        : resumeGoal || (resumeAfterUsageReset && chat.mode === "goal")
-          ? savedGoal?.objective
-          : continueAfterUsage && chat.mode === "goal" && !continuing
-            ? activeEntry?.continuedGoalPrompt
-            : undefined,
+      resumeGoal: resumeGoal || (chat.mode === "goal" && !replacementGoal && !startGoal),
+      goalObjective,
+      goalProgress: () => this.store.conversation(chat.id)?.goalProgress,
+      shouldYieldForInput: () => this.active.get(chat.id)?.supersededByUser || this.store.queuedInputs(chat.id).length > 0,
+      goalSuspending: () => Boolean(this.active.get(chat.id)?.ownerPause || this.active.get(chat.id)?.watchYield),
+      chatMoving: () => Boolean(this.active.get(chat.id)?.pendingMove),
       // An approved plan ends plan mode, so the chat goes on to build it.
       planApproved: () => {
         effectiveMode = "default";
@@ -1849,9 +1902,9 @@ export class Controller extends EventEmitter {
           run.provider,
           run.id,
           status,
-          typeof objective === "string" && objective.trim()
+          goalObjective ?? (typeof objective === "string" && objective.trim()
             ? objective
-            : undefined,
+            : undefined),
         );
         this.event(chat.id, run.id, "chat", updated);
       },
@@ -1878,6 +1931,8 @@ export class Controller extends EventEmitter {
           return { error: ASK_DENY };
         if (name === "suggest_mode") return suggestMode(input);
         if (name === "ask_user") return askUser(input);
+        if (name === "update_goal_progress") return reportGoalProgress(input);
+        if (name === "complete_goal") return completeGoal(input);
         if (name === "pause_for_owner") return this.pauseForOwner(chat.id, input);
         if (name === "run_command") return command(input);
         if (name === "watch_command") return watchedCommand(input);
@@ -1980,6 +2035,8 @@ export class Controller extends EventEmitter {
       this.bridgeQuestions.delete(token);
       this.bridgeCommands.delete(token);
       this.bridgeWatchedCommands.delete(token);
+      this.bridgeGoalProgress.delete(token);
+      this.bridgeGoalComplete.delete(token);
       for (const [id, waiter] of this.approvalWaiters)
         if (waiter.runId === run.id) {
           waiter.resolve({ allow: false });

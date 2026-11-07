@@ -139,6 +139,8 @@ export class Store {
     if (!columns("plan_reviews").includes("plan"))
       this.db.exec("ALTER TABLE plan_reviews ADD COLUMN plan TEXT");
     const conversation = columns("conversations");
+    if (!columns("queued_inputs").includes("goal_replacement"))
+      this.db.exec("ALTER TABLE queued_inputs ADD COLUMN goal_replacement INTEGER NOT NULL DEFAULT 0");
     if (!conversation.includes("goal_progress"))
       this.db.exec("ALTER TABLE conversations ADD COLUMN goal_progress TEXT");
     if (!conversation.includes("permissions"))
@@ -477,11 +479,12 @@ export class Store {
       .run(JSON.stringify(progress), id);
     return progress;
   }
-  beginGoalProgress(id, provider, runId, replace = false) {
+  beginGoalProgress(id, provider, runId, replace = false, objective) {
     const previous = this.conversation(id)?.goalProgress;
     return this.saveGoalProgress(id, {
       ...(replace ? null : previous),
       goalId: !replace && previous ? previous.goalId : runId,
+      objective: objective ?? (!replace ? previous?.objective : null) ?? null,
       provider,
       runId,
       status: "starting",
@@ -871,6 +874,7 @@ export class Store {
     permissions = null,
     mode = null,
     status = "queued",
+    replaceGoal = false,
     position = null,
   }) {
     const existing = this.inputForAction(actionId);
@@ -885,8 +889,8 @@ export class Store {
           .get(conversationId).n + 1;
     this.db
       .prepare(
-        `INSERT INTO queued_inputs(id,conversation_id,action_id,text,attachments,provider,model,effort,permissions,mode,status,position,created_at)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO queued_inputs(id,conversation_id,action_id,text,attachments,provider,model,effort,permissions,mode,status,position,created_at,goal_replacement)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id,
@@ -902,6 +906,7 @@ export class Store {
         status,
         place,
         this.now(),
+        replaceGoal ? 1 : 0,
       );
     return this.inputForAction(actionId);
   }
@@ -940,8 +945,8 @@ export class Store {
   restoreQueued(row) {
     this.db
       .prepare(
-        `INSERT INTO queued_inputs(id,conversation_id,action_id,text,attachments,provider,model,effort,permissions,mode,status,position,created_at)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO queued_inputs(id,conversation_id,action_id,text,attachments,provider,model,effort,permissions,mode,status,position,created_at,goal_replacement)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         row.id,
@@ -957,6 +962,7 @@ export class Store {
         "queued",
         row.position,
         row.created_at,
+        row.goal_replacement ?? 0,
       );
     return this.queuedInput(row.id);
   }

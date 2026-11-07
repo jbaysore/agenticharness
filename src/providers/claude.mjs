@@ -19,7 +19,8 @@ import { watchTools } from "../core/watch-tools.mjs";
 import { ownerPauseTool } from "../core/owner-pause.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
-import { claudeContent } from "./attachments.mjs";
+import { claudeContent, claudeGoalContext, claudeGoalObjective } from "./attachments.mjs";
+import { goalProgressTool, completeGoalTool } from "../core/goal-progress.mjs";
 import {
   checkClaudeBilling,
   claudeUsageForAccount,
@@ -409,6 +410,7 @@ export async function runClaude(
     baseOptions = claudeOptions,
     pollIntervalMs = CLAUDE_USAGE_POLL_INTERVAL_MS,
     usageForAccount = claudeUsageForAccount,
+    goalIdleTimeoutMs = 120000,
   } = {},
 ) {
   const planSince = Date.now();
@@ -424,6 +426,21 @@ export async function runClaude(
     name: "harness",
     version: "0.1.0",
     tools: [
+      tool("complete_goal", completeGoalTool.description, { evidence: z.string().min(1).max(4000) }, async (args) => {
+        const result = await ctx.history("complete_goal", args);
+        if (result?.complete && !ctx.signal.aborted) {
+          goalStatus = "complete";
+          clearGoalIdle();
+        }
+        return { isError: Boolean(result?.error), content: [{ type: "text", text: JSON.stringify(result) }] };
+      }, { alwaysLoad: true }),
+      tool("update_goal_progress", goalProgressTool.description, {
+        phases: z.array(z.object({ label: z.string().min(1).max(500), status: z.enum(["pending", "in_progress", "completed"]) })).min(1).max(50),
+        explanation: z.string().max(4000).optional(),
+      }, async (args) => {
+        const result = await ctx.history("update_goal_progress", args);
+        return { isError: Boolean(result?.error), content: [{ type: "text", text: JSON.stringify(result) }] };
+      }, { alwaysLoad: true }),
       tool(
         "history_search",
         "Search shared conversation history within the selected scope",
@@ -697,14 +714,22 @@ export async function runClaude(
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        // Project files sit after the stable prefix. A goal handoff stays in
-        // the user message so it does not rewrite this prefix.
-        append: [ctx.instructions, await projectInstructions(ctx.project.path)]
+        append: [ctx.instructions, await projectInstructions(ctx.project.path), claudeGoalContext(ctx),
+          ctx.mode === "goal" ? "Harness manages this Claude Goal. Keep working across replies until the full objective is met. Use update_goal_progress for phases. Call complete_goal with verification evidence only when the entire Goal is achieved, then finish your reply. A final reply alone does not complete the Goal. Use pause_for_owner for an owner dependency or register a Harness watch and yield_to_watch for supported waits. Do not use /goal or ProposeGoal: the SDK does not reliably drive their native evaluator." : ""]
           .filter(Boolean)
           .join("\n\n"),
       },
       mcpServers: { harness: historyServer },
-      canUseTool: async (name, args) => {
+      hooks: { ...base.hooks, PreToolUse: [...(base.hooks?.PreToolUse ?? []), {
+        matcher: "mcp__harness__(update_goal_progress|complete_goal)",
+        hooks: [async (event) => event.agent_id || ctx.mode !== "goal" || ctx.signal.aborted
+          ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Only the active root Goal may report phases or completion." } }
+          : {}],
+      }] },
+      canUseTool: async (name, args, options = {}) => {
+        if (["mcp__harness__update_goal_progress", "mcp__harness__complete_goal"].includes(name) &&
+            (options.agentID || ctx.mode !== "goal" || ctx.signal.aborted))
+          return { behavior: "deny", message: "Only the active root Goal may report phases or completion." };
         if (ctx.mode === "ask" && !claudeAskAllowed(name, ctx.tools))
           return { behavior: "deny", message: ASK_DENY };
         if (name.startsWith("mcp__harness__"))
@@ -771,6 +796,12 @@ export async function runClaude(
   const contextRead = contextSampler(q, context);
   let timer,
     killTimer,
+    goalIdleTimer,
+    goalIdleFailure,
+    goalRecoveryUsed = false,
+    nativeGoalSeen = false,
+    goalWorkSinceResult = false,
+    emptyGoalResults = 0,
     polling = false,
     finished = false,
     accepting = false,
@@ -785,8 +816,29 @@ export async function runClaude(
     pauseAcknowledged = false,
     queryClosed = false;
   const closeQuery = () => { if (!queryClosed) { queryClosed = true; q.close(); } };
+  const clearGoalIdle = () => { clearTimeout(goalIdleTimer); goalIdleTimer = null; };
+  const waitForGoalContinuation = () => {
+    clearGoalIdle();
+    goalIdleTimer = setTimeout(() => {
+      if (finished || stopped || ctx.signal.aborted || goalStopped(goalStatus)) return;
+      if (goalRecoveryUsed) {
+        goalIdleFailure = "Claude finished a turn but did not continue or confirm its Goal. The objective and phases are saved; send a message to retry.";
+        closeQuery();
+        return;
+      }
+      goalRecoveryUsed = true;
+      const reminder = ctx.goalProgress?.()?.phases?.length ? "" :
+        " Record the Goal phases with update_goal_progress before doing further implementation or waiting.";
+      ctx.emit("work", { kind: "goal-recovery", item: { title: "Recovering an idle Goal", description: "The completed native turn did not continue. Sending one continuation without replaying its actions." } });
+      input.push({ type: "user", message: { role: "user", content:
+        `Continue the full saved Harness Goal from the system instructions. The latest user message is feedback, not a replacement objective. Do not repeat completed actions. Use pause_for_owner or a registered Harness watch when appropriate.${reminder}` },
+        parent_tool_use_id: null, session_id: ctx.session?.id ?? "" });
+      waitForGoalContinuation();
+    }, goalIdleTimeoutMs);
+  };
   ctx.attachClose?.(closeQuery);
   const cancel = () => {
+    clearGoalIdle();
     interrupting ??= q.interrupt().then(() => {
       // An idle gap between Goal turns has no further result to wait for.
       if (ctx.signal.reason?.kind === "user-pause" && pendingResult) {
@@ -821,6 +873,10 @@ export async function runClaude(
       session_id: ctx.session?.id ?? "",
     };
     input.push(promptMessage);
+    if (ctx.mode === "goal") {
+      goalStatus = "active";
+      ctx.goalState?.("active", claudeGoalObjective(ctx));
+    }
     accepting = true;
     ctx.attachSteer?.((item) => {
       if (!accepting) throw new Error("Claude's turn has ended");
@@ -855,11 +911,17 @@ export async function runClaude(
         ctx.saveSession({ id: event.session_id });
         if (context.snapshot?.sessionId !== event.session_id) context.start(event.session_id);
       }
-      if (["assistant", "stream_event", "user"].includes(event.type))
+      if (["assistant", "stream_event", "user"].includes(event.type) && !event.parent_tool_use_id && !event.agent_id) {
         pendingResult = null;
+        clearGoalIdle();
+      }
       if (event.type === "active_goal") {
+        nativeGoalSeen = true;
+        const previousStatus = goalStatus;
         goalStatus = event.value ? "active" : "complete";
-        ctx.goalState?.(goalStatus, event.value?.condition);
+        if (goalStatus !== previousStatus || (event.value?.condition && event.value.condition !== claudeGoalObjective(ctx)))
+          ctx.goalState?.(goalStatus, event.value?.condition);
+        if (goalStopped(goalStatus)) clearGoalIdle();
         ctx.emit("work", {
           kind: "goal",
           provider: "claude",
@@ -944,6 +1006,8 @@ export async function runClaude(
         const results = Array.isArray(event.message?.content)
           ? event.message.content.filter((c) => c.type === "tool_result")
           : [];
+        if (!event.parent_tool_use_id && !event.agent_id && results.some((r) => !r.is_error))
+          goalWorkSinceResult = true;
         for (const result of results.length ? results : event.tool_use_result ? [null] : []) {
           ctx.emit("work", {
             kind: "tool-result",
@@ -1055,7 +1119,25 @@ export async function runClaude(
           (ctx.mode === "goal" || goalStatus === "active") &&
           !goalStopped(goalStatus)
         ) {
+          ctx.promptAccepted?.();
           pendingResult = result;
+          if (ctx.shouldYieldForInput?.() || ctx.chatMoving?.()) return result;
+          if (ctx.goalSuspending?.()) {
+            // Owner/watch suspension is about to interrupt this query.
+            continue;
+          }
+          if (!nativeGoalSeen && ctx.mode === "goal") {
+            emptyGoalResults = goalWorkSinceResult ? 0 : emptyGoalResults + 1;
+            goalWorkSinceResult = false;
+            if (emptyGoalResults >= 3)
+              return { status: "failed", error: "Claude ended three Goal turns without taking an action or confirming completion. The objective and phases are saved; send a message to retry." };
+            const reminder = ctx.goalProgress?.()?.phases?.length ? "" :
+              " Record the Goal phases with update_goal_progress.";
+            input.push({ type: "user", message: { role: "user", content:
+              `Continue the full Harness Goal from saved progress. Answering a follow-up or finishing a subtask does not complete it. Do the next authorized work; do not repeat completed actions. If every acceptance condition is met, call complete_goal with evidence. If only the owner can unblock it, use pause_for_owner. Use a registered Harness watch for supported waits.${reminder}` },
+              parent_tool_use_id: null, session_id: ctx.session?.id ?? "" });
+          }
+          waitForGoalContinuation();
           continue;
         }
         if (!event.is_error && result.status === "completed")
@@ -1073,7 +1155,7 @@ export async function runClaude(
         error:
           "Claude closed the turn before it read this message. Send it again.",
       };
-    throw new Error(stopped || "Claude ended without a final result");
+    throw new Error(stopped || goalIdleFailure || "Claude ended without a final result");
   } catch (error) {
     if (stopped) return { status: "failed", error: stopped };
     if (error instanceof SyntaxError && /JSON/i.test(error.message))
@@ -1088,6 +1170,7 @@ export async function runClaude(
     finished = true;
     accepting = false;
     clearInterval(timer);
+    clearGoalIdle();
     clearTimeout(killTimer);
     ctx.signal.removeEventListener("abort", cancel);
     input.end();

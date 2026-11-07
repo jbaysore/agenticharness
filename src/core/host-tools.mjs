@@ -6,6 +6,7 @@ import { landTool } from "./worktrees.mjs";
 import { restartTool } from "./self-restart.mjs";
 import { watchTools } from "./watch-tools.mjs";
 import { ownerPauseTool } from "./owner-pause.mjs";
+import { goalProgressTool, completeGoalTool } from "./goal-progress.mjs";
 
 // Harness's own tools, offered to every agent in every mode. A mode or a
 // chat's situation decides what a call may do when it is made, not which
@@ -20,6 +21,8 @@ export const hostTools = [
   restartTool,
   ...watchTools,
   ownerPauseTool,
+  goalProgressTool,
+  completeGoalTool,
 ];
 
 // A Codex thread keeps the tools it started with. A thread started under a

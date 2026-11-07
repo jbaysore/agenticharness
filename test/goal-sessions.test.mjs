@@ -10,7 +10,7 @@ import { Controller } from "../src/core/controller.mjs";
 import { AsyncQueue } from "../src/core/queue.mjs";
 import { runCodex, pauseCodexGoal } from "../src/providers/codex.mjs";
 import { runClaude, pauseClaudeGoal } from "../src/providers/claude.mjs";
-import { claudeContent } from "../src/providers/attachments.mjs";
+import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
 import { GOAL_INSTRUCTIONS } from "../src/core/modes.mjs";
 import { WATCH_INSTRUCTIONS } from "../src/core/watch-tools.mjs";
 import { goalPlanTracker } from "../src/core/goal-progress.mjs";
@@ -669,7 +669,8 @@ test("Claude intermediate results keep an active Goal alive until confirmed met"
           f.events.push({ type: "result" });
         } else f.events.push({ type: "active_goal", value: null });
         assert.equal((await f.run).status, "completed");
-        assert.deepEqual(f.states, ["active", "complete"]);
+        assert.equal(f.states.at(-1), "complete");
+        assert.ok(f.states.includes("active"));
         assert.equal(f.closes, 1);
       } finally {
         f.events.end();
@@ -945,7 +946,7 @@ test("Codex sets a resumed Goal again when its native copy is gone", async () =>
   }
 });
 
-test("Claude resumes a paused Goal by setting its saved objective again", async () => {
+test("Claude resumes a paused Goal with feedback and the saved objective separately", async () => {
   assert.equal(
     await claudeContent({
       mode: "goal",
@@ -954,8 +955,9 @@ test("Claude resumes a paused Goal by setting its saved objective again", async 
       goalObjective: "Saved objective",
       text: "Resume the paused goal.",
     }),
-    "Latest message for this Goal:\nResume the paused goal.\n\n/goal Saved objective",
+    "Resume the paused goal.",
   );
+  assert.match(claudeGoalContext({mode: "goal", goalObjective: "Saved objective", text: "Resume the paused goal."}), /Full Harness Goal \(binding objective\):\nSaved objective/);
 });
 
 test("Codex carries long Goals intact outside its bounded native field", async () => {

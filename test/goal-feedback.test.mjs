@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeContent } from "../src/providers/attachments.mjs";
+import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
 
 test("new Claude Goals do not duplicate their objective as feedback", async () => {
   for (const goalObjective of [undefined, "Ship the release"]) {
     assert.equal(
       await claudeContent({ mode: "goal", text: "Ship the release", goalObjective }),
-      "/goal Ship the release",
+      "Ship the release",
     );
   }
 });
@@ -18,7 +18,7 @@ test("restoring a Claude Goal without a message adds no empty feedback", async (
   for (const text of [undefined, ""]) {
     assert.equal(
       await claudeContent({ mode: "goal", goalObjective: "Ship the release", text }),
-      "/goal Ship the release",
+      "Continue the full saved Harness Goal from the system instructions.",
     );
   }
 });
@@ -33,7 +33,7 @@ test("Claude Goal feedback preserves context, attachment descriptions and image 
   try {
     await writeFile(path, pixel);
     const text = "The command failed.\nSee attached error.png and output.txt.";
-    const content = await claudeContent({
+    const ctx = {
       mode: "goal",
       resumeGoal: true,
       text,
@@ -41,12 +41,14 @@ test("Claude Goal feedback preserves context, attachment descriptions and image 
       addendum: "Memory and skill instructions",
       handoff: "Earlier work from another provider",
       attachments: [{ type: "image/png", path }],
-    });
+    };
+    const content = await claudeContent(ctx);
     assert.equal(content.length, 2);
     assert.equal(
       content[0].text,
-      `Memory and skill instructions\n\nEarlier work from another provider\n\nCurrent request:\nLatest message for this Goal:\n${text}\n\n/goal Ship the release`,
+      text,
     );
+    assert.equal(claudeGoalContext(ctx), `Full Harness Goal (binding objective):\nShip the release\n\nMemory and skill instructions\n\nEarlier work from another provider\n\nLatest message for this Goal:\n${text}`);
     assert.deepEqual(content[1], {
       type: "image",
       source: {

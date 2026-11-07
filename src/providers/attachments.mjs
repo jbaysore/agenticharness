@@ -16,20 +16,24 @@ export function codexInput(ctx) {
   ];
 }
 
+export const claudeGoalObjective = (ctx) => ctx.goalObjective ?? ctx.session?.goal?.objective ?? ctx.text;
+// The SDK's /goal surface does not reliably run its native Stop evaluator.
+// Harness owns Claude continuation and completion, with the full objective
+// outside the latest user message so a status question cannot replace it.
+export function claudeGoalContext(ctx) {
+  if (ctx.mode !== "goal") return "";
+  const objective = claudeGoalObjective(ctx);
+  return [
+    `Full Harness Goal (binding objective):\n${objective}`,
+    ctx.addendum, ctx.handoff,
+    ctx.text && ctx.text !== objective ? `Latest message for this Goal:\n${ctx.text}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
 export async function claudeContent(ctx) {
-  const goal = ctx.mode === "goal" && (!ctx.continuing || ctx.startGoal);
-  const objective = ctx.goalObjective ?? ctx.text;
-  // Reactivating /goal must preserve both its saved condition and this turn's
-  // feedback. Keep the feedback before the command so it is not part of the
-  // native Goal's condition, just like the existing context preface.
-  const feedback =
-    goal && ctx.text && ctx.text !== objective
-      ? `Latest message for this Goal:\n${ctx.text}\n\n`
-      : "";
-  const text = prefaceText(
-    ctx,
-    goal ? `${feedback}/goal ${objective}` : ctx.text,
-  );
+  const text = ctx.mode === "goal"
+    ? (ctx.text || "Continue the full saved Harness Goal from the system instructions.")
+    : prefaceText(ctx);
   const files = images(ctx);
   if (!files.length) return text;
   return [

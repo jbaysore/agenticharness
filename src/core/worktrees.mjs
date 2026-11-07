@@ -6,6 +6,7 @@ import {
   symlink,
   lstat,
   unlink,
+  rename,
 } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
@@ -91,7 +92,22 @@ export async function createWorktree({ projectPath, root, chatId }) {
 // starting that branch again from the project's branch if it was deleted.
 export async function restoreWorktree(projectPath, worktree) {
   const { path, branch, base } = worktree;
-  if (existsSync(path)) return;
+  let recoveryPath;
+  if (existsSync(path)) {
+    const top = (await git(path, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
+    if (top && samePath(top, path)) {
+      const actualBranch = (await git(path, ["branch", "--show-current"])).trim();
+      const common = resolve(path, (await git(path, ["rev-parse", "--git-common-dir"])).trim());
+      const expected = resolve(projectPath, (await git(projectPath, ["rev-parse", "--git-common-dir"])).trim());
+      if (actualBranch !== branch || !samePath(common, expected))
+        throw new Error(`The assigned checkout is on a different branch or belongs to another repository: ${path}`);
+      return;
+    }
+    // A failed Git removal can leave ignored files and no .git file. Keep the
+    // entire residual directory; it may also contain work worth recovering.
+    recoveryPath = `${path}.recovery-${Date.now()}-${process.pid}`;
+    await rename(path, recoveryPath);
+  }
   await git(projectPath, ["worktree", "prune"]);
   const kept = await git(projectPath, [
     "rev-parse",
@@ -112,6 +128,7 @@ export async function restoreWorktree(projectPath, worktree) {
     { timeout: 120000 },
   );
   await linkDependencies(projectPath, path);
+  return recoveryPath ? { recoveryPath } : undefined;
 }
 
 // Removes a worktree and its branch once nothing in them is missing from the

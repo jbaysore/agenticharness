@@ -18,6 +18,40 @@ function phases(items, label) {
     : null;
 }
 
+export const goalProgressTool = {
+  name: "update_goal_progress",
+  description: "Record phases for the current Goal, preserving completed work. Call after discovery and at meaningful milestones. This reports progress; it does not complete or replace the Goal.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      phases: { type: "array", minItems: 1, maxItems: 50, items: {
+        type: "object", properties: {
+          label: { type: "string", minLength: 1, maxLength: 500 },
+          status: { type: "string", enum: ["pending", "in_progress", "completed"] },
+        }, required: ["label", "status"], additionalProperties: false,
+      } },
+      explanation: { type: "string", maxLength: 4000 },
+    },
+    required: ["phases"], additionalProperties: false,
+  },
+};
+
+export const completeGoalTool = {
+  name: "complete_goal",
+  description: "Claude Code only: finish the current Harness Goal once the full objective and every acceptance condition are met. Give concrete verification evidence. Never use for a finished subtask, an owner dependency, a wait, or exhausted usage. Codex must use its native update_goal instead.",
+  inputSchema: { type: "object", properties: {
+    evidence: { type: "string", minLength: 1, maxLength: 4000 },
+  }, required: ["evidence"], additionalProperties: false },
+};
+
+export function checkGoalProgress(input) {
+  const plan = phases(input?.phases, "label");
+  if (!plan || (input.explanation !== undefined &&
+      (typeof input.explanation !== "string" || input.explanation.length > 4000)))
+    throw new Error("Supply 1–50 Goal phases with a label and pending, in_progress, or completed status.");
+  return { phases: plan, explanation: input.explanation?.trim() ?? "" };
+}
+
 export function goalPlanTracker(provider) {
   const todos = new Map();
   let sequence = 0, accepted = 0;
@@ -47,7 +81,7 @@ export function goalPlanTracker(provider) {
   };
 }
 
-export const GOAL_PROGRESS_INSTRUCTIONS = `Record Goal progress with your native planning tool (Codex: update_plan; Claude Code: TodoWrite). After initial discovery, record a short list of phases covering the entire Goal, including verification and delivery when needed. This is progress reporting within Goal mode; do not enter Plan mode. Keep the whole checklist across native turns, mark the current phase in progress, and update it at meaningful milestones. Preserve completed work. If new work changes the remaining phases, revise the checklist and briefly explain the change in your progress commentary (and the plan explanation when available). On resume or handoff, continue from the saved Goal phases below. Do not invent percentages or time estimates from phase counts.`;
+export const GOAL_PROGRESS_INSTRUCTIONS = `Record Goal progress with Codex update_plan or Harness update_goal_progress. Claude Code must use update_goal_progress: TodoWrite can be disabled. After initial discovery, record a short list of phases covering the entire Goal, including verification and delivery when needed, before starting implementation or a long wait. This is progress reporting within Goal mode; do not enter Plan mode. Keep the whole checklist across native turns, mark the current phase in progress, and update it at meaningful milestones. Preserve completed work. If new work changes the remaining phases, revise the checklist and briefly explain the change in your progress commentary (and the plan explanation when available). On resume or handoff, continue from the saved Goal phases below. Do not invent percentages or time estimates from phase counts.`;
 
 export function goalProgressContext(progress) {
   if (!progress) return "";

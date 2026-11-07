@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { blockingGoals } from "../src/core/goals.mjs";
-import { claudeContent } from "../src/providers/attachments.mjs";
+import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
 import { killIfMatched } from "../src/core/process-identity.mjs";
 
 const sha = "a".repeat(40);
@@ -359,7 +359,7 @@ for (const provider of ["codex", "claude"])
         assert.equal(prompt.split(followup.text).length - 1, 1);
         assert.match(prompt, /Outcome: failure/);
         assert.match(prompt, /Fix CI if needed and assess the saved goal/);
-        assert.ok(prompt.endsWith("/goal Ship passing CI"));
+        assert.match(claudeGoalContext(followup), /Full Harness Goal \(binding objective\):\nShip passing CI/);
       }
       const trigger = f.store
         .messages(f.chat.id)

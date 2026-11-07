@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { modeSuggestionTool } from "../src/core/modes.mjs";
-import { claudeContent } from "../src/providers/attachments.mjs";
+import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
 import { isHarnessTool, cursorAskRejection } from "../src/providers/cursor.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -142,7 +142,7 @@ for (const [from, to] of [
     if (to === "goal") {
       assert.equal(contexts[1].goalObjective, objective);
       const prompt = await claudeContent(contexts[1]);
-      assert.ok(prompt.endsWith("/goal " + objective));
+      assert.ok(claudeGoalContext(contexts[1]).includes("Full Harness Goal (binding objective):\n" + objective));
       assert.match(contexts[1].text, /Original request:\nImprove the parser/);
       assert.ok(prompt.includes(contexts[1].text));
     }

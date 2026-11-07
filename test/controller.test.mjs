@@ -1517,8 +1517,8 @@ test("a usage stop can continue on another provider without replacing a Goal", a
     assert.equal(store.conversation(chat.id).usage_stopped_at, null);
     assert.equal(seen.stored, "Ship the parser");
     assert.match(seen.text, /The goal is still:\nShip the parser/);
-    assert.match(seen.goalObjective, /^Ship the parser\n\nIncluded usage ran out on Codex\./);
-    assert.match(seen.goalObjective, /do not repeat completed work/);
+    assert.equal(seen.goalObjective, "Ship the parser");
+    assert.match(seen.text, /do not repeat completed work/i);
     assert.match(seen.handoff, /Started the parser/);
     assert.equal(
       store.messages(chat.id).find((message) => message.role === "user").content,

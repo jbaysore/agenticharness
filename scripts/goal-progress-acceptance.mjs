@@ -42,13 +42,12 @@ const finish = async (status) => {
   release();
   await task;
 };
-const record = (items, explanation = "") => {
+const record = async (items, explanation = "") => {
   if (context.chat.provider === "claude") {
-    const id = crypto.randomUUID();
-    context.emit("work", { kind: "tool", provider: "claude", item: {
-      id, name: "TodoWrite", input: { todos: items.map(({ step, status }) => ({ content: step, status: status === "inProgress" ? "in_progress" : status })) },
-    } });
-    context.emit("work", { kind: "tool-result", provider: "claude", toolUseId: id, isError: false });
+    const result = await context.history("update_goal_progress", {
+      phases: items.map(({ step, status }) => ({ label: step, status: status === "inProgress" ? "in_progress" : status })), explanation,
+    });
+    expect(result.error).toBeUndefined();
   } else context.emit("work", { kind: "plan", plan: items, explanation });
 };
 
@@ -66,7 +65,7 @@ try {
     { step: "Implement the fix", status: "inProgress" },
     { step: "Verify and deliver", status: "pending" },
   ];
-  record(plan, "Parser investigation is complete.");
+  await record(plan, "Parser investigation is complete.");
   await expect(summary).toContainText("1 of 3 phases complete");
   await expect(summary).toContainText("Implement the fix");
   await summary.focus();
@@ -75,7 +74,7 @@ try {
   await expect(strip.locator("li")).toHaveCount(3);
   await expect(strip).toContainText("Parser investigation is complete.");
   await expect(strip.locator("time")).toContainText("Last updated");
-  record([...plan, { step: "Check the discovered compatibility case", status: "pending" }], "Discovery added a compatibility check.");
+  await record([...plan, { step: "Check the discovered compatibility case", status: "pending" }], "Discovery added a compatibility check.");
   await expect(summary).toContainText("1 of 4 phases complete");
   await expect(strip).toContainText("Discovery added a compatibility check.");
   await page.screenshot({ path: ".local/screenshots/goal-progress-popover.png" });
@@ -114,15 +113,21 @@ try {
   await page.setViewportSize({ width: 720, height: 800 });
   await expect(strip).toBeInViewport();
 
-  // Claude uses its native todo list; a replacement Goal starts empty.
+  // Claude reports through Harness even when TodoWrite is unavailable.
   await page.setViewportSize({ width: 1512, height: 982 });
   const claude = app.store.createConversation({ projectId: project.id, title: "Claude progress", provider: "claude", model: "fixture", mode: "goal" });
   await page.goto(`${app.runtime.origin}/?chat=${claude.id}`);
   await start(claude);
-  record(plan);
+  await record(plan);
   await expect(summary).toContainText("1 of 3 phases complete");
   await finish("paused");
-  await start(claude);
+  const saved = app.store.conversation(claude.id).goalProgress;
+  await start(claude, { text: "How will I know when it is done?" });
+  await expect(summary).toContainText("1 of 3 phases complete");
+  expect(app.store.conversation(claude.id).goalProgress.goalId).toBe(saved.goalId);
+  expect(context.goalObjective).toBe("Ship the parser");
+  await finish("paused");
+  await start(claude, { text: "/goal Ship another parser" });
   await expect(summary).toContainText("Waiting for the agent to record phases");
   await finish("complete");
   await expect(summary).toContainText("Goal complete");
@@ -131,7 +136,7 @@ try {
   await expect(page.getByLabel("Message your coding agent")).toBeVisible();
   await expect(strip).toHaveCount(0);
   expect(errors).toEqual([]);
-  expect(modelCalls).toBe(4);
+  expect(modelCalls).toBe(5);
   console.log("Goal progress acceptance passed: both providers, live phase revisions, keyboard expansion, scrolling, reload, pause/resume, completion, replacement Goal, mobile and narrow layouts. No inference was used.");
 } finally {
   release?.();

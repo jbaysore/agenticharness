@@ -93,7 +93,8 @@ test("fresh and resumed Claude Goals deliver background limits in the SDK system
     assert.ok(seen.options.systemPrompt.append.includes(WATCH_INSTRUCTIONS));
     assert.ok(seen.options.systemPrompt.append.includes(GOAL_INSTRUCTIONS));
     assert.equal(seen.options.resume, resumed ? "saved-study-goal" : undefined);
-    assert.match(seen.message, /\/goal Inspect study results/);
+    assert.match(seen.options.systemPrompt.append, /Full Harness Goal \(binding objective\):\nInspect study results/);
+    assert.doesNotMatch(seen.message, /\/goal/);
   }
 });
 
@@ -388,7 +389,7 @@ test("Claude includes a Goal decline reason with the instruction not to retry", 
   assert.match(decision.message, /Do not retry this action/);
 });
 
-test("a Claude goal is set with /goal, and its hand-off stays in the user message", async () => {
+test("a Claude Goal carries its full objective and handoff without relying on slash dispatch", async () => {
   const { run, seen } = fakeClaude({
     text: "All tests in test/auth pass",
     mode: "goal",
@@ -396,9 +397,8 @@ test("a Claude goal is set with /goal, and its hand-off stays in the user messag
     approve: async () => ({ allow: true }),
   });
   await run;
-  assert.match(seen.message, /Earlier work from Codex/);
-  assert.match(seen.message, /\/goal All tests in test\/auth pass/);
-  assert.doesNotMatch(
+  assert.equal(seen.message, "All tests in test/auth pass");
+  assert.match(
     seen.options.systemPrompt.append,
     /Earlier work from Codex/,
   );
@@ -418,8 +418,9 @@ test("an approved Claude switch to Goal starts the concrete objective while resu
   await run;
   assert.equal(
     seen.message,
-    "Latest message for this Goal:\nContinue the current task without repeating completed actions\n\n/goal The parser tests pass",
+    "Continue the current task without repeating completed actions",
   );
+  assert.match(seen.options.systemPrompt.append, /Full Harness Goal \(binding objective\):\nThe parser tests pass/);
   assert.equal(seen.options.resume, "saved-session");
 });
 

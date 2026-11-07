@@ -62,6 +62,53 @@ function fixture() {
 }
 const passing = async () => ({ exitCode: 0, output: "ok" });
 
+test("local command and file watches hold their checkout against idle cleanup", async () => {
+  const f = fixture(), store = new Store(":memory:"), controller = new Controller(store, {});
+  try {
+    const project = store.addProject("Watched", f.project);
+    const chat = store.createConversation({ projectId: project.id });
+    const worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: chat.id });
+    store.updateConversation(chat.id, { worktree });
+    for (const kind of ["command", "file"]) {
+      store.watchStore.save({ id: "local-watch", chatId: chat.id, kind, status: "pending" });
+      assert.equal(controller.tidy(chat.id), undefined);
+      assert.ok(existsSync(join(worktree.path, ".git")));
+    }
+    store.watchStore.save({ id: "local-watch", chatId: chat.id, kind: "file", status: "success" });
+    await controller.tidy(chat.id);
+    assert.equal(existsSync(worktree.path), false);
+  } finally { await controller.close(); store.close(); f.done(); }
+});
+
+test("a partial worktree is restored on its saved branch with residual work preserved", async () => {
+  const f = fixture();
+  try {
+    const worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: "partial-checkout" });
+    commit(worktree.path, "saved.txt", "committed work", "Unlanded work");
+    writeFileSync(join(worktree.path, "draft.txt"), "uncommitted draft");
+    rmSync(join(worktree.path, ".git"));
+    rmSync(join(worktree.path, "a.txt"));
+    const recovered = await restoreWorktree(f.project, worktree);
+    assert.ok(recovered.recoveryPath);
+    assert.equal(readFileSync(join(recovered.recoveryPath, "draft.txt"), "utf8"), "uncommitted draft");
+    assert.equal(git(worktree.path, "branch", "--show-current"), worktree.branch);
+    assert.equal(readFileSync(join(worktree.path, "saved.txt"), "utf8"), "committed work");
+    assert.equal(readFileSync(join(worktree.path, "a.txt"), "utf8"), "one\n");
+    assert.equal(readFileSync(join(f.project, "node_modules", "dep", "index.js"), "utf8"), "1");
+    assert.equal(await restoreWorktree(f.project, worktree), undefined);
+  } finally { f.done(); }
+});
+
+test("restoration refuses a valid checkout on the wrong branch", async () => {
+  const f = fixture();
+  try {
+    const worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: "wrong-branch" });
+    git(worktree.path, "switch", "-c", "other-branch");
+    await assert.rejects(restoreWorktree(f.project, worktree), /different branch/);
+    assert.equal(git(worktree.path, "branch", "--show-current"), "other-branch");
+  } finally { f.done(); }
+});
+
 test("an unfinished worktree prevents moving the chat and automatic continuation", async () => {
   const f = fixture(),
     store = new Store(":memory:"),

@@ -16,13 +16,13 @@ function harness(provider = "codex") {
   const store = new Store(":memory:"),
     controller = new Controller(store, {}),
     seen = [],
-    prompts = [];
+    prompts = [], systems = [];
   controller.providers = [
     { id: provider, models: [{ id: "m", efforts: [] }] },
   ];
   controller.runners[provider] = async (ctx) => {
     seen.push(ctx);
-    if (ctx.text.startsWith("Block on the owner")) {
+    if (ctx.text.startsWith("Ship the release")) {
       ctx.goalState("active", "Ship the release");
       const paused = await ctx.history("pause_for_owner", {
         statement: STATEMENT,
@@ -55,11 +55,12 @@ function harness(provider = "codex") {
             limits: [{ kind: "five_hour", percent: 1 }],
           },
         }),
-        queryFn: ({ prompt }) => ({
+        queryFn: ({ prompt, options }) => ({
           interrupt: async () => {},
           close() {},
           async *[Symbol.asyncIterator]() {
             prompts.push((await prompt.next()).value.message.content);
+            systems.push(options.systemPrompt.append);
             yield { type: "active_goal", value: null };
             yield { type: "result", is_error: false };
           },
@@ -75,7 +76,10 @@ function harness(provider = "codex") {
     model: "m",
     mode: "goal",
   });
-  return { store, controller, seen, prompts, chat };
+  // These messages steer an established release Goal; the provider cannot
+  // substitute its own condition for the user's original objective.
+  store.setGoalState(chat.id, provider, "original-release-goal", "paused", "Ship the release");
+  return { store, controller, seen, prompts, systems, chat };
 }
 
 const send = async (controller, chat, actionId, text, extra = {}) => {
@@ -105,7 +109,7 @@ test("an owner pause needs a statement, and deny or other needs a reason", () =>
 test("a confirmed owner pause waits without a resume box, then each answer resumes the Goal", async () => {
   const { store, controller, seen, chat } = harness();
   try {
-    await send(controller, chat, "owner-pause-block-01", "Block on the owner");
+    await send(controller, chat, "owner-pause-block-01", "Ship the release");
     const saved = store.conversation(chat.id);
     assert.equal(saved.sessions.codex.goal.status, "owner");
     assert.equal(saved.sessions.codex.goal.objective, "Ship the release");
@@ -145,7 +149,7 @@ test("a confirmed owner pause waits without a resume box, then each answer resum
 test("deny and other resume with the reason, and a typed message does too", async () => {
   const { store, controller, seen, chat } = harness();
   try {
-    await send(controller, chat, "owner-pause-reason-01", "Block on the owner");
+    await send(controller, chat, "owner-pause-reason-01", "Ship the release");
     controller.answerOwnerPause(chat.id, {
       actionId: "owner-other-answer-01",
       choice: "other",
@@ -159,7 +163,7 @@ test("deny and other resume with the reason, and a typed message does too", asyn
       "Land it on the release branch instead.",
     );
 
-    await send(controller, chat, "owner-pause-again-01", "Block on the owner");
+    await send(controller, chat, "owner-pause-again-01", "Ship the release");
     await send(controller, chat, "owner-typed-message-1", "I merged it.");
     assert.match(seen.at(-1).text, /The owner wrote/);
     assert.match(seen.at(-1).text, /I merged it/);
@@ -194,9 +198,9 @@ for (const answer of [
   },
 ]) {
   test(`Claude receives ${answer.choice} owner feedback in its SDK prompt`, async () => {
-    const { store, controller, seen, prompts, chat } = harness("claude");
+    const { store, controller, seen, prompts, systems, chat } = harness("claude");
     try {
-      await send(controller, chat, "claude-owner-pause-01", "Block on the owner");
+      await send(controller, chat, "claude-owner-pause-01", "Ship the release");
       if (answer.choice === "typed")
         await send(controller, chat, "claude-owner-answer-01", answer.expected);
       else {
@@ -215,7 +219,7 @@ for (const answer of [
       );
       assert.equal(prompt.split(answer.expected).length - 1, 1);
       assert.match(prompt, /You asked the owner to:\n\nMerge the pull request/);
-      assert.ok(prompt.endsWith("/goal Ship the release"));
+      assert.match(systems[0], /Full Harness Goal \(binding objective\):\nShip the release/);
       const saved = store.conversation(chat.id);
       assert.equal(saved.sessions.claude.goal.objective, "Ship the release");
       assert.equal(saved.sessions.claude.goal.status, "complete");
@@ -245,7 +249,7 @@ test("a pause the agent does not confirm does not stay waiting", async () => {
 test("stop work leaves an owner pause as an ordinary paused Goal", async () => {
   const { store, controller, chat } = harness();
   try {
-    await send(controller, chat, "owner-stop-request-1", "Block on the owner");
+    await send(controller, chat, "owner-stop-request-1", "Ship the release");
     controller.cancel(chat.id);
     const saved = store.conversation(chat.id);
     assert.equal(saved.sessions.codex.goal.status, "paused");

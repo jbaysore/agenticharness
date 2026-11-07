@@ -57,8 +57,13 @@ it started with, so a thread started with a different set is replaced once with
 a handoff, unless an open Goal lives in it.
 **Plan** researches and proposes a plan. One **Confirm and build** button accepts
 it and returns the chat to Default so the plan can be built. **Goal** keeps Codex or Claude Code working until the
-message's condition is met. Cursor has no goal mode. `/ask`, `/plan`, `/goal`,
-and `/default` anywhere in a message switch modes the same way. `/queue` and
+message's condition is met. Codex uses its native Goal lifecycle. Harness continues
+Claude turns directly; Claude calls `complete_goal` with verification evidence
+when the entire objective is achieved. A finished reply alone does not complete
+a Claude Goal. Cursor has no goal mode. `/ask`, `/plan`, `/goal`,
+and `/default` anywhere in a message switch modes the same way. Ordinary Goal
+follow-ups retain the saved objective and phases. An explicit `/goal <objective>`
+replaces them; a message after completion starts a new Goal. `/queue` and
 `/steer` work anywhere too.
 
 In Goal the agent stays in Goal until the condition is met. It does not suggest
@@ -74,12 +79,22 @@ Goal chats show **Goal progress** as a small chip beside the Mode selector under
 the composer. The chip shows the completed-phase count and the current phase (or
 status); click it for the checklist, status, explanation when supplied, and last
 update time. Agents record phases for the whole objective, including verification
-and delivery, with their native plan or todo tool. Phase counts measure completed
+and delivery, with Codex `update_plan` or Harness `update_goal_progress` (Claude's
+`TodoWrite` may be disabled). Phase counts measure completed
 milestones; they do not estimate time or percentage of effort. Until the agent
 records phases, the chip says it is waiting. No extra model calls are made to
 collect progress. The checklist survives pauses, CI waits, restarts, chat moves,
 and provider handoffs. A replacement Goal starts a new checklist. Confirmed Goal
 completion completes its phases; other stops retain the last reported work.
+
+After a completed Claude turn, Harness sends the next Goal continuation itself.
+New queued user messages take priority. A continuation with no activity for two
+minutes gets one recovery request; another two minutes fails visibly with the
+objective and progress retained. Usage telemetry does not reset this deadline.
+Three consecutive turns without tool work or explicit completion also fail
+visibly. These checks do not interrupt an active tool or an owner/host watch wait.
+An incomplete chat worktree is preserved in a sibling `.recovery-*` directory
+and restored on its assigned branch before another provider turn starts.
 
 **Stop work** requests a Goal pause and waits for the provider to acknowledge it.
 The composer shows **Pausing…** while confirmation is pending. A disconnected

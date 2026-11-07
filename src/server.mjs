@@ -300,6 +300,12 @@ export async function createHarness({
           chat = store.conversation(chatId);
         if (chat?.mode === "ask" && !askHostAllowed(body.name))
           return json(res, 403, { error: ASK_DENY });
+        if (body.name === "update_goal_progress")
+          return json(res, 200, controller.bridgeGoalProgress.get(token)?.(body.arguments ?? {}) ??
+            { error: "The Goal reporting capability expired." });
+        if (body.name === "complete_goal")
+          return json(res, 200, controller.bridgeGoalComplete.get(token)?.(body.arguments ?? {}) ??
+            { error: "The Goal completion capability expired." });
         if (
           body.name === "watch_command" &&
           controller.bridgeWatchedCommands.has(token)

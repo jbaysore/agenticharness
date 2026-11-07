@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
-import { claudeContent } from "../src/providers/attachments.mjs";
+import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
 
 const deferred = () => Promise.withResolvers();
 const assertCompleted = (events) => {
@@ -170,12 +170,12 @@ for (const provider of ["codex", "claude"]) {
         const prompt = await claudeContent(ctx);
         assert.match(prompt, /The move is complete/);
         assert.equal(prompt.split(ctx.text).length - 1, 1);
-        assert.match(prompt, /\/goal Ship the parser with passing tests/);
+        assert.match(claudeGoalContext(ctx), /Full Harness Goal \(binding objective\):\nShip the parser with passing tests/);
         ctx.goalState("complete", objective);
       }
       return { status: "completed" };
     };
-    f.start();
+    f.start({ text: objective });
     await waitFor(() => !f.controller.active.has(f.chat.id));
     assertCompleted(f.events);
     assert.equal(seen.length, 2);
@@ -212,7 +212,7 @@ test("a permission change during a moved Goal resumes the new session without re
     }
     return { status: "completed" };
   };
-  f.start();
+  f.start({ text: objective });
   await entered.promise;
   f.controller.setPermissions(f.chat.id, "override");
   await waitFor(() => !f.controller.active.has(f.chat.id));
