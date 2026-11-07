@@ -1478,7 +1478,13 @@ small {
 .goal-progress details[open] .goal-progress-chevron { transform: rotate(90deg); }
 .goal-progress .sr-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .goal-progress-body { position: absolute; z-index: 15; left: 0; bottom: calc(100% + 6px); width: min(360px, 100%); max-height: min(320px, 50dvh); overflow: auto; overscroll-behavior: contain; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); box-shadow: 0 8px 30px #0006; color: var(--text-2); font-size: 12px; }
-.goal-progress-body > strong { display: block; color: var(--text); font-size: 13px; font-weight: 500; }
+.goal-progress-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.goal-progress-header > strong { color: var(--text); font-size: 13px; font-weight: 500; }
+.goal-objective-tip { display: flex; }
+.goal-objective-tip button { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 4px; color: var(--text-3); }
+.goal-objective-tip button:hover { background: var(--hover); color: var(--text); }
+.goal-objective-tooltip { position: fixed; inset: auto; margin: 0; padding: 12px 14px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-3); box-shadow: 0 8px 30px #0006; color: var(--text-2); font: 12px/1.5 var(--font-ui); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.goal-objective-tooltip > strong { display: block; margin-bottom: 6px; color: var(--text); font-size: 11px; font-weight: 500; }
 .goal-progress-status { display: block; color: var(--text-3); font-size: 11px; margin: 2px 0 10px; }
 .goal-progress ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .goal-progress li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: start; }

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "./components.jsx";
 import { waitingPhrase } from "./status.mjs";
 
@@ -16,6 +16,81 @@ const statusLabels = {
   unknown: "Progress last reported",
 };
 
+function SavedObjective({ objective }) {
+  const [open, setOpen] = useState(false),
+    root = useRef(null),
+    trigger = useRef(null),
+    tooltip = useRef(null),
+    closeTimer = useRef(null),
+    id = useId();
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const tip = tooltip.current, box = trigger.current.getBoundingClientRect(),
+      width = Math.min(360, innerWidth - 24),
+      above = box.top - 16, below = innerHeight - box.bottom - 16,
+      upwards = above >= Math.min(220, below);
+    Object.assign(tip.style, {
+      width: `${width}px`,
+      left: `${Math.max(12, Math.min(box.right - width, innerWidth - width - 12))}px`,
+      maxHeight: `${Math.max(40, Math.min(300, upwards ? above : below))}px`,
+      ...(upwards
+        ? { bottom: `${innerHeight - box.top + 6}px`, top: "auto" }
+        : { top: `${box.bottom + 6}px`, bottom: "auto" }),
+    });
+    tip.showPopover();
+    const close = () => setOpen(false),
+      outside = (e) => { if (!root.current.contains(e.target)) close(); },
+      details = root.current.closest("details"),
+      toggled = () => { if (!details.open) close(); },
+      escape = (e) => {
+        if (e.key !== "Escape") return;
+        if (tip.contains(document.activeElement)) trigger.current.focus();
+        close();
+        e.stopPropagation();
+        e.preventDefault();
+      };
+    window.addEventListener("resize", close);
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape, true);
+    details.addEventListener("toggle", toggled);
+    return () => {
+      tip.hidePopover();
+      window.removeEventListener("resize", close);
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape, true);
+      details.removeEventListener("toggle", toggled);
+    };
+  }, [open]);
+  return (
+    <span
+      className="goal-objective-tip"
+      ref={root}
+      onMouseEnter={() => {
+        clearTimeout(closeTimer.current);
+        setOpen(true);
+      }}
+      onMouseLeave={() => {
+        closeTimer.current = setTimeout(() => {
+          if (!root.current.contains(document.activeElement)) setOpen(false);
+        }, 150);
+      }}
+      onFocus={() => setOpen(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
+      }}
+    >
+      <button ref={trigger} type="button" aria-label="Saved objective" aria-describedby={open ? id : undefined} onClick={() => setOpen(true)}>
+        <Icon name="info" size={14} />
+      </button>
+      {open && <span ref={tooltip} id={id} className="goal-objective-tooltip" role="tooltip" popover="manual" tabIndex={0}>
+        <strong>Saved objective</strong>
+        <span>{objective}</span>
+      </span>}
+    </span>
+  );
+}
+
 export function GoalProgress({ chat, compact = false }) {
   const details = useRef(null);
   useEffect(() => {
@@ -27,6 +102,7 @@ export function GoalProgress({ chat, compact = false }) {
   }, []);
   if (chat?.mode !== "goal") return null;
   const progress = chat.goalProgress,
+    objective = chat.sessions?.[progress?.provider ?? chat.provider]?.goal?.objective,
     phases = progress?.phases ?? [],
     completed = phases.filter((phase) => phase.status === "completed").length,
     live = chat.activeRun?.id === progress?.runId && ["starting", "active"].includes(progress?.status),
@@ -65,7 +141,10 @@ export function GoalProgress({ chat, compact = false }) {
           <span className="goal-progress-chevron"><Icon name="chevron" size={11} /></span>
         </summary>
         <div className="goal-progress-body">
-          <strong>Goal progress</strong>
+          <div className="goal-progress-header">
+            <strong>Goal progress</strong>
+            {objective && <SavedObjective key={`${progress?.goalId}:${objective}`} objective={objective} />}
+          </div>
           <span className="goal-progress-status">{status ? `${status} · ${count}` : count}</span>
           {phases.length > 0 && <ol aria-label="Goal phases">
             {phases.map((phase, index) => (
