@@ -8,7 +8,7 @@ import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { blockingGoals } from "../src/core/goals.mjs";
 import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
-import { killIfMatched } from "../src/core/process-identity.mjs";
+import { killIfMatched, processIdentity } from "../src/core/process-identity.mjs";
 
 const sha = "a".repeat(40);
 function fixture({ path = ":memory:", mode = "default", provider = "codex", projectPath = process.cwd(), commands } = {}) {
@@ -651,6 +651,27 @@ function commandDouble(identity, read, kills) {
       }),
   };
 }
+
+test("command polling recognizes a live process using the real OS identity lookup", async () => {
+  const self = await processIdentity(process.pid);
+  assert.ok(self);
+  const f = fixture({ commands: {
+    start: async () => ({ ...self, statusDir: "unused" }),
+    read: async () => ({ done: false }),
+    identity: processIdentity,
+    killIfMatched: async () => assert.fail("This identity-only test must never kill a process"),
+  } });
+  try {
+    f.register();
+    const watch = await f.controller.watchers.startCommand(f.chat.id, {},
+      { command: "identity-only fixture", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() });
+    f.end();
+    await f.controller.watchers.tick();
+    const saved = f.store.watchStore.get(watch.id);
+    assert.equal(saved.status, "pending");
+    assert.equal(saved.runner.released, undefined);
+  } finally { await f.close(); }
+});
 
 test("command expiry stops a matching process and leaves a reused process id alone", async () => {
   const kills = [];

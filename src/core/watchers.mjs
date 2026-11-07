@@ -611,7 +611,7 @@ export class Watchers {
     }
     let live = null;
     try {
-      live = await this.commands.identity(current.runner);
+      live = await this.commands.identity(current.runner?.pid);
     } catch {
       live = null;
     }
