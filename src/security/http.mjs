@@ -87,8 +87,19 @@ export function safeOrigin(req, localOrigin, publicOrigin) {
   if (!origins.some((origin) => new URL(origin).host === req.headers.host))
     return false;
   if (req.headers.origin && !origins.includes(req.headers.origin)) return false;
-  if (req.headers["sec-fetch-site"] === "cross-site") return false;
+  if (req.headers["sec-fetch-site"] === "cross-site") return pageLoad(req);
   return true;
+}
+// Following a link or a Cloudflare Access sign-in redirect to Harness arrives
+// as a cross-site navigation. Opening the page that way reads nothing back to
+// the other site, so allow it; cross-site API calls and writes stay refused.
+function pageLoad(req) {
+  return (
+    ["GET", "HEAD"].includes(req.method) &&
+    req.headers["sec-fetch-mode"] === "navigate" &&
+    req.headers["sec-fetch-dest"] === "document" &&
+    !new URL(req.url ?? "/", "http://harness").pathname.startsWith("/api/")
+  );
 }
 export async function readJson(req, max = 512 * 1024) {
   if (!String(req.headers["content-type"] ?? "").startsWith("application/json"))

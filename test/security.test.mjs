@@ -48,6 +48,19 @@ test("DNS rebinding, foreign Origin, and cross-site requests are rejected", () =
     ),
     false,
   );
+  const navigation = (method, url) => ({
+    method,
+    url,
+    headers: {
+      host: "127.0.0.1:47831",
+      "sec-fetch-site": "cross-site",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "document",
+    },
+  });
+  assert.equal(safeOrigin(navigation("GET", "/?from=link"), origin), true);
+  assert.equal(safeOrigin(navigation("POST", "/"), origin), false);
+  assert.equal(safeOrigin(navigation("GET", "/api/state"), origin), false);
   assert.equal(
     safeOrigin(
       request({ host: "private.example", origin: "https://private.example" }),
