@@ -174,7 +174,7 @@ test("restoration refuses a valid checkout on the wrong branch", async () => {
   try {
     const worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: "wrong-branch" });
     git(worktree.path, "switch", "-c", "other-branch");
-    await assert.rejects(restoreWorktree(f.project, worktree), /different branch/);
+    await assert.rejects(restoreWorktree(f.project, worktree), /different branch.*branch "other-branch", expected "harness\/wrongbra"/);
     assert.equal(git(worktree.path, "branch", "--show-current"), "other-branch");
   } finally { f.done(); }
 });

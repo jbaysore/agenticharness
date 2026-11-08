@@ -98,11 +98,26 @@ export async function restoreWorktree(projectPath, worktree) {
   if (existsSync(path)) {
     const top = (await git(path, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
     if (top && samePath(top, path)) {
-      const actualBranch = (await git(path, ["branch", "--show-current"])).trim();
-      const common = resolve(path, (await git(path, ["rev-parse", "--git-common-dir"])).trim());
-      const expected = resolve(projectPath, (await git(projectPath, ["rev-parse", "--git-common-dir"])).trim());
-      if (actualBranch !== branch || !samePath(common, expected))
-        throw new Error(`The assigned checkout is on a different branch or belongs to another repository: ${path}`);
+      const identity = async () => ({
+        actualBranch: (await git(path, ["branch", "--show-current"])).trim(),
+        common: resolve(path, (await git(path, ["rev-parse", "--git-common-dir"])).trim()),
+        expected: resolve(projectPath, (await git(projectPath, ["rev-parse", "--git-common-dir"])).trim()),
+      });
+      const valid = (seen) =>
+        seen.actualBranch === branch && samePath(seen.common, seen.expected);
+      let seen = await identity();
+      // A valid checkout once failed this check and passed minutes later, so
+      // look again before refusing, and name what did not match.
+      if (!valid(seen)) {
+        await new Promise((done) => setTimeout(done, 1000));
+        seen = await identity();
+      }
+      if (!valid(seen))
+        throw new Error(
+          `The assigned checkout is on a different branch or belongs to another repository: ${path} ` +
+            `(branch "${seen.actualBranch || "detached"}", expected "${branch}"; ` +
+            `repository ${seen.common}, expected ${seen.expected})`,
+        );
       return;
     }
     // A failed Git removal can leave ignored files and no .git file. Keep any
