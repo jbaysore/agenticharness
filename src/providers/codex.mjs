@@ -305,6 +305,8 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
     completedTurn = null,
     onTurnStarted,
     pauseAcknowledged = false,
+    // A native pause request is in flight; parking waits for its answer.
+    pauseInFlight = false,
     cancelling;
   const goal = ctx.mode === "goal";
   const hasRunningGoal = goal || (goalStatus !== null && !goalStopped(goalStatus));
@@ -333,8 +335,18 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
       !goalStopped(goalStatus)
     )
       return;
-    finished = true;
     const parking = ctx.signal.reason?.kind;
+    // The turn can end before Codex answers the pause request. Wait for that
+    // answer, which calls back here, so the park is still confirmed.
+    if (
+      (parking === "watch-yield" || parking === "owner-pause") &&
+      goal &&
+      !goalStopped(goalStatus) &&
+      pauseInFlight &&
+      !rpc.closed
+    )
+      return;
+    finished = true;
     if (
       (parking === "watch-yield" || parking === "owner-pause") &&
       ((!goal && goalStatus === null) || goalStopped(goalStatus))
@@ -413,6 +425,7 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
         return;
       }
       const requests = [];
+      if (hasRunningGoal) pauseInFlight = true;
       if (hasRunningGoal) requests.push(rpc.call("thread/goal/set",
         { threadId, status: "paused", origin: "user" }, userGoalPause() ? 120000 : 5000)
         .catch(async (error) => {
@@ -424,7 +437,11 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
         .then(({ goal: paused }) => {
           pauseAcknowledged = goalStopped(normalizeGoalStatus(paused?.status));
           updateGoal(paused?.status ?? "unknown");
-        }).catch((error) => { if (userGoalPause()) throw error; }));
+        }).catch((error) => { if (userGoalPause()) throw error; })
+        .finally(() => {
+          pauseInFlight = false;
+          finishCompleted();
+        }));
       if (turnId && turnOpen) requests.push(rpc.call("turn/interrupt", { threadId, turnId }, userGoalPause() ? 120000 : 5000));
       await Promise.all(requests);
       if (!finishPause() && !turnOpen && !userGoalPause()) rpc.close();
@@ -460,10 +477,20 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
         return;
       }
       if (message.method === "item/tool/call") {
-        const result = await ctx.history(p.tool, p.arguments);
+        // Codex shows a rejected request only as "dynamic tool request
+        // failed", so return the host's reason as a failed result instead.
+        let result,
+          success = true;
+        try {
+          result = await ctx.history(p.tool, p.arguments);
+        } catch (error) {
+          result = { error: error.message };
+          success = false;
+        }
+        if (rpc.closed) return;
         rpc.respond(message.id, {
           contentItems: [{ type: "inputText", text: JSON.stringify(result) }],
-          success: true,
+          success,
         });
         return;
       }

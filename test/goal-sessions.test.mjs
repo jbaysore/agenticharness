@@ -372,6 +372,57 @@ test("Codex confirms an owner pause only after the native Goal pauses and the tu
   }
 });
 
+for (const kind of ["owner-pause", "watch-yield"])
+  test(`Codex still confirms a ${kind} when the turn ends before the native pause reply`, async () => {
+    let confirmed = false;
+    const f = codexFixture(
+      kind === "owner-pause"
+        ? { ownerParked: () => { confirmed = true; } }
+        : { watchParked: () => { confirmed = true; } },
+    );
+    await f.started;
+    const reply = deferred(),
+      call = f.rpc.call;
+    f.rpc.call = async (method, params, timeoutMs) => {
+      if (method === "thread/goal/set" && params.status === "paused") {
+        await reply.promise;
+        return call(method, params, timeoutMs);
+      }
+      return call(method, params, timeoutMs);
+    };
+    f.abort.abort({ kind });
+    await flush();
+    f.notify("turn/completed", { turn: { id: "turn-1", status: "interrupted" } });
+    await flush();
+    assert.equal(confirmed, false);
+    reply.resolve();
+    await f.run;
+    assert.equal(confirmed, true);
+  });
+
+test("Codex receives a host tool's error text instead of a generic failure", async () => {
+  const f = codexFixture({
+    history: async () => {
+      throw new Error("Yield only to watchers from the current user request.");
+    },
+  });
+  await f.started;
+  const responses = [];
+  f.rpc.respond = (id, result) => responses.push({ id, result });
+  f.rpc.reject = (id, message) => responses.push({ id, rejected: message });
+  f.rpc.emit("request", {
+    id: "tool-1",
+    method: "item/tool/call",
+    params: { tool: "yield_to_watch", arguments: {} },
+  });
+  await flush();
+  assert.equal(responses.length, 1);
+  assert.equal(responses[0].result.success, false);
+  assert.match(responses[0].result.contentItems[0].text, /current user request/);
+  f.rpc.close();
+  await f.run.catch(() => {});
+});
+
 test("Codex keeps its Goal session open across long continuation gaps", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
   const f = codexFixture();

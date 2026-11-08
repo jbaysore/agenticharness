@@ -250,13 +250,13 @@ export class Watchers {
         "Give 1–10 watcher IDs and a checkpoint under 2,000 characters.",
       );
     const watches = ids.map((id) => this.owned(chatId, id));
+    const root =
+      active.taskRootId ?? active.watchOrigin?.rootId ?? active.run.action_id;
+    // A Goal resumed by hand can adopt its still-running watchers; their
+    // later wakes count against the current request.
     if (
       watches.some(
-        (w) =>
-          w.rootId !==
-          (active.taskRootId ??
-            active.watchOrigin?.rootId ??
-            active.run.action_id),
+        (w) => w.rootId !== root && !(chat.mode === "goal" && watching(w)),
       )
     )
       throw new Error("Yield only to watchers from the current user request.");
@@ -281,6 +281,9 @@ export class Watchers {
           "Stop task work. This turn is already pausing for the owner, and this request's pending watchers stay armed.",
       };
     for (const watch of watches) {
+      watch.rootId = root;
+      if (watch.delivery === "blocked") watch.delivery = "none";
+      watch.reason = null;
       watch.armed = watch.resumeOn.length > 0;
       watch.checkpoint = checkpoint.trim();
       this.save(watch);
@@ -299,19 +302,19 @@ export class Watchers {
         "Stop task work. Harness is closing this turn and will watch without model calls.",
     };
   }
-  // An owner pause ends the turn too. This request's Goal watchers still
-  // running stay armed, so whichever answers first resumes the Goal.
+  // An owner pause ends the turn too. The Goal's watchers still running stay
+  // armed, so whichever answers first resumes the Goal.
   armForOwner(chatId, active, statement) {
     const root =
       active.taskRootId ?? active.watchOrigin?.rootId ?? active.run.action_id;
     const ids = [];
+    // Owner pauses are Goal-only, and a Goal's running watchers serve it even
+    // when a manual resume started a new request.
     for (const watch of this.records.list(chatId)) {
-      if (
-        !watching(watch) ||
-        watch.rootId !== root ||
-        !watch.resumeOn?.includes("complete")
-      )
-        continue;
+      if (!watching(watch) || !watch.resumeOn?.includes("complete")) continue;
+      watch.rootId = root;
+      if (watch.delivery === "blocked") watch.delivery = "none";
+      watch.reason = null;
       watch.armed = true;
       watch.checkpoint ||= `Paused for the owner: ${statement}`;
       watch.ownerStatement = statement;

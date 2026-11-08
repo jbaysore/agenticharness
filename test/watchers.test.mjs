@@ -478,6 +478,42 @@ for (const provider of ["codex", "claude"])
     }
   });
 
+test("a Goal resumed by hand can re-arm its still-running watcher with a yield or an owner pause", async () => {
+  for (const how of ["yield", "owner"]) {
+    const f = fixture({ mode: "goal" });
+    try {
+      const watch = f.register({ resumeOn: ["complete"], continuation: "Assess goal." });
+      f.end();
+      f.controller.watchers.invalidate(f.chat.id, "New user instructions superseded automatic follow-up.");
+      const run = f.store.createRun({
+        conversationId: f.chat.id,
+        actionId: randomUUID(),
+        provider: "codex",
+        model: "fixture",
+        text: "Resume the paused goal.",
+      });
+      f.controller.active.set(f.chat.id, { run, abort: new AbortController() });
+      if (how === "yield")
+        assert.equal(
+          f.controller.watchers.yield(f.chat.id, { ids: [watch.id], checkpoint: "Still waiting" }).parked,
+          true,
+        );
+      else
+        assert.deepEqual(
+          f.controller.watchers.armForOwner(f.chat.id, f.controller.active.get(f.chat.id), "Merge it."),
+          [watch.id],
+        );
+      const saved = f.store.watchStore.get(watch.id);
+      assert.equal(saved.armed, true);
+      assert.equal(saved.rootId, run.action_id);
+      assert.equal(saved.delivery, "none");
+      assert.equal(saved.reason, null);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
 test("pausing for the owner after yielding in the same turn is refused", async () => {
   const f = fixture({ mode: "goal" });
   try {
