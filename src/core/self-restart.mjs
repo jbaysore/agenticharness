@@ -145,6 +145,8 @@ export async function prepareRuntime({ source, revision, dataDir, signal }) {
   }
 }
 
+const MOVED = "Harness source moved after the selected delivery";
+
 export class SelfRestart {
   constructor({
     root,
@@ -405,7 +407,7 @@ export class SelfRestart {
     if ((await git(this.source.path, ["status", "--porcelain"])).trim())
       return "Uncommitted Harness source changes";
     if ((await git(this.source.path, ["rev-parse", "HEAD"])).trim() !== target)
-      return "Harness source moved after the selected delivery";
+      return MOVED;
     return null;
   }
   tick() {
@@ -451,6 +453,28 @@ export class SelfRestart {
       }
     };
     const sourceBlock = await this.sourceReady(target);
+    // A newer commit on the delivery branch includes the queued one, so the
+    // pending update follows it instead of waiting for another request.
+    if (sourceBlock === MOVED) {
+      const head = (await git(this.source.path, ["rev-parse", "HEAD"])).trim();
+      const newer = await git(this.source.path, [
+        "merge-base",
+        "--is-ancestor",
+        target,
+        head,
+      ]).then(
+        () => true,
+        () => false,
+      );
+      if (newer && this.state.request === request) {
+        request.target = head;
+        this.prepared = null;
+        this.idleSince = null;
+        await this.save();
+        this.publish();
+        return;
+      }
+    }
     if (sourceBlock) return wait([sourceBlock]);
     // Reading the process table takes a moment, so it is not done every tick.
     await this.terminals.checkRunning({ maxAge: 5000 });

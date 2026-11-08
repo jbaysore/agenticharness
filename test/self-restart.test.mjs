@@ -558,6 +558,32 @@ test("a newer delivery during preparation supersedes the old candidate", async (
   }
 });
 
+test("a waiting update follows a newer commit landed without another request", async () => {
+  const f = await fixture();
+  try {
+    const first = await f.bump("first");
+    await f.coordinator.request(f.source, "default", {
+      automatic: true,
+      commit: first,
+    });
+    f.controller.active.set("busy", {});
+    await f.coordinator.tick();
+    // Another delivery reaches the branch but never asks for an update.
+    const newest = await f.bump("second");
+    await f.coordinator.tick();
+    assert.equal(f.coordinator.status().target, newest);
+    assert.doesNotMatch(
+      JSON.stringify(f.coordinator.status().blockers),
+      /moved after the selected delivery/,
+    );
+    f.controller.active.clear();
+    await f.coordinator.tick();
+    assert.equal(f.handoffs[0].candidate.revision, newest);
+  } finally {
+    await f.close();
+  }
+});
+
 test("preparation reports no blockers, then waits only for work still running", async () => {
   const f = await fixture();
   try {
