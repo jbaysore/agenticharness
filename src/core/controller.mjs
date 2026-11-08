@@ -2090,11 +2090,12 @@ export class Controller extends EventEmitter {
           description: active.ownerPause.statement,
         },
       });
+      this.watchers.parked(chat.id, active.ownerPause.watchIds);
     } else if (parked) {
       status = "completed";
       error = null;
       if (chat.mode === "goal") this.store.setGoalState(chat.id, run.provider, run.id, "waiting");
-      this.watchers.parked(chat.id, active);
+      this.watchers.parked(chat.id, active.watchYield.ids);
     } else if (active?.goalStopRequested) {
       if (!active.pauseConfirmed && (chat.mode === "goal" || (savedGoal && !goalStopped(savedGoal.status)))) {
         this.store.setGoalState(chat.id, run.provider, run.id, "unknown");
@@ -2149,6 +2150,8 @@ export class Controller extends EventEmitter {
       status = "failed";
       error ||= "The agent did not confirm the Goal pause. Continue manually.";
     }
+    if (active?.ownerPause?.watchIds?.length && !ownerParked)
+      this.watchers.invalidate(chat.id, "The turn did not confirm the Goal pause. This watcher will only notify.");
     // A Plan turn that ended without a tagged or native proposal still gets a
     // card for its final answer, unless that answer is a clarifying question.
     if (
@@ -2209,7 +2212,10 @@ export class Controller extends EventEmitter {
     if (active.supersededByUser || this.store.queuedInputs(chatId).length)
       return { error: "Handle the newer user instructions before pausing." };
     if (active.watchYield)
-      return { error: "This turn is already pausing for CI." };
+      return {
+        error:
+          "This turn is already yielding to watchers. Next time call only pause_for_owner; it keeps this request's watchers running.",
+      };
     let statement;
     try {
       statement = checkOwnerPause(input).statement;
@@ -2218,7 +2224,8 @@ export class Controller extends EventEmitter {
     }
     if (active.ownerPause)
       return { parked: true, instruction: OWNER_PAUSE_STOP };
-    active.ownerPause = { statement };
+    const watchIds = this.watchers.armForOwner(chatId, active, statement);
+    active.ownerPause = { statement, watchIds };
     active.ownerPause.timer = setTimeout(() => {
       const current = this.active.get(chatId);
       if (
@@ -2229,7 +2236,11 @@ export class Controller extends EventEmitter {
       )
         current.abort.abort({ kind: "owner-pause" });
     }, 25);
-    return { parked: true, instruction: OWNER_PAUSE_STOP };
+    return {
+      parked: true,
+      ...(watchIds.length ? { watching: watchIds } : {}),
+      instruction: OWNER_PAUSE_STOP,
+    };
   }
   answerOwnerPause(chatId, input) {
     const chat = this.store.conversation(chatId);

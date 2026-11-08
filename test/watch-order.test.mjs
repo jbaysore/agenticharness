@@ -22,3 +22,15 @@ test("watch cards stay with the turn that registered them", () => {
   assert.deepEqual(placed.get("u2"), [second]);
   assert.deepEqual(placed.get(null), [latest, undated]);
 });
+
+test("a watch still in progress stays at the end after later turns", () => {
+  const messages = [
+    { id: "u1", role: "user", created_at: at(0) },
+    { id: "w1", role: "user", source: "watcher", created_at: at(30) },
+  ];
+  const running = { id: "running", status: "pending", createdAt: ms(10) },
+    done = { id: "done", status: "success", createdAt: ms(10) };
+  const placed = placeWatches(messages, [running, done]);
+  assert.deepEqual(placed.get("w1"), [done]);
+  assert.deepEqual(placed.get(null), [running]);
+});

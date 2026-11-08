@@ -411,6 +411,138 @@ test("an unconfirmed suspension never releases a Goal or arms a wake", async () 
   }
 });
 
+for (const provider of ["codex", "claude"])
+  test(`${provider}: an owner pause keeps this request's watchers armed, and the first result resumes the Goal`, async () => {
+    const f = fixture({ mode: "goal", provider });
+    try {
+      let calls = 0,
+        watch,
+        paused,
+        followup;
+      f.controller.runners[provider] = async (ctx) => {
+        calls++;
+        if (calls > 1) {
+          followup = ctx;
+          ctx.goalState("complete");
+          return { status: "completed" };
+        }
+        ctx.goalState("active", "Ship passing CI");
+        watch = await ctx.history("watch_github_ci", {
+          repository: "owner/repo",
+          commit: sha,
+          resumeOn: ["complete"],
+          continuation: "Assess the saved goal.",
+        });
+        paused = await ctx.history("pause_for_owner", {
+          statement: "Retry the six MLB rows in the wizard.",
+        });
+        // A late yield in the same turn keeps the owner pause.
+        const late = await ctx.history("yield_to_watch", {
+          ids: [watch.id],
+          checkpoint: "Waiting",
+        });
+        assert.equal(late.parked, true);
+        await new Promise((resolve) =>
+          ctx.signal.addEventListener("abort", resolve, { once: true }),
+        );
+        ctx.ownerParked();
+        return { status: "cancelled" };
+      };
+      const run = f.controller.send(f.chat.id, {
+        actionId: randomUUID(),
+        text: "Ship passing CI",
+        provider,
+        model: "fixture",
+        mode: "goal",
+      });
+      await finishRuns(f.controller);
+      assert.equal(f.store.run(run.id).status, "completed");
+      assert.deepEqual(paused.watching, [watch.id]);
+      const chat = f.store.conversation(f.chat.id);
+      assert.equal(chat.sessions[provider].goal.status, "owner");
+      assert.equal(chat.owner_pause, true);
+      const saved = f.store.watchStore.get(watch.id);
+      assert.equal(saved.armed, true);
+      assert.equal(saved.parked, true);
+      assert.match(saved.checkpoint, /Paused for the owner/);
+      f.result = terminal("success");
+      await f.controller.watchers.tick();
+      f.advance();
+      await f.controller.watchers.tick();
+      await finishRuns(f.controller);
+      assert.equal(calls, 2);
+      assert.equal(followup.resumeGoal, true);
+      assert.match(followup.text, /owner has not yet answered your pause request:\nRetry the six MLB rows/);
+    } finally {
+      await f.close();
+    }
+  });
+
+test("pausing for the owner after yielding in the same turn is refused", async () => {
+  const f = fixture({ mode: "goal" });
+  try {
+    let refused;
+    f.controller.runners.codex = async (ctx) => {
+      ctx.goalState("active", "Keep working");
+      const watch = await ctx.history("watch_github_ci", {
+        repository: "owner/repo",
+        commit: sha,
+        resumeOn: ["complete"],
+        continuation: "Assess goal.",
+      });
+      await ctx.history("yield_to_watch", { ids: [watch.id], checkpoint: "Waiting" });
+      refused = await ctx.history("pause_for_owner", { statement: "Merge it." });
+      await new Promise((resolve) =>
+        ctx.signal.addEventListener("abort", resolve, { once: true }),
+      );
+      ctx.watchParked();
+      return { status: "cancelled" };
+    };
+    f.controller.send(f.chat.id, {
+      actionId: randomUUID(),
+      text: "Keep working",
+      provider: "codex",
+      model: "fixture",
+      mode: "goal",
+    });
+    await finishRuns(f.controller);
+    assert.match(refused.error, /call only pause_for_owner/);
+    assert.equal(f.store.conversation(f.chat.id).sessions.codex.goal.status, "waiting");
+  } finally {
+    await f.close();
+  }
+});
+
+test("an unconfirmed owner pause leaves its watchers notification-only", async () => {
+  const f = fixture({ mode: "goal" });
+  try {
+    let watch;
+    f.controller.runners.codex = async (ctx) => {
+      ctx.goalState("active", "Keep working");
+      watch = await ctx.history("watch_github_ci", {
+        repository: "owner/repo",
+        commit: sha,
+        resumeOn: ["complete"],
+        continuation: "Assess goal.",
+      });
+      await ctx.history("pause_for_owner", { statement: "Merge it." });
+      throw new Error("Runner connection lost before acknowledgement");
+    };
+    const run = f.controller.send(f.chat.id, {
+      actionId: randomUUID(),
+      text: "Keep working",
+      provider: "codex",
+      model: "fixture",
+      mode: "goal",
+    });
+    await finishRuns(f.controller);
+    assert.equal(f.store.run(run.id).status, "failed");
+    assert.equal(f.store.watchStore.get(watch.id).armed, false);
+  } finally {
+    await f.close();
+  }
+});
+
 test("a passing watch disarms failure-only follow-up and requires no model", async () => {
   const f = fixture();
   try {
@@ -670,6 +802,7 @@ test("command polling recognizes a live process using the real OS identity looku
     const saved = f.store.watchStore.get(watch.id);
     assert.equal(saved.status, "pending");
     assert.equal(saved.runner.released, undefined);
+    assert.ok(Number.isFinite(saved.lastCheckedAt));
   } finally { await f.close(); }
 });
 

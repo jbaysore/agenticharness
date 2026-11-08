@@ -1167,6 +1167,11 @@ export function ChatPane({
             <OwnerPauseCard
               key={goal.provider}
               goal={goal}
+              watching={chat.watches?.some(
+                (w) =>
+                  w.armed &&
+                  ["registering", "pending", "settling", "retrying"].includes(w.status),
+              )}
               disabled={busy || modeBusy || permissionsBusy}
               onAnswer={(answer) => answerOwner(answer)}
             />

@@ -1,7 +1,7 @@
 export const ownerPauseTool = {
   name: "pause_for_owner",
   description:
-    "Pause this Goal until the owner finishes something only they can do, such as merging a pull request or running a command on a machine you cannot reach. Keep the statement short: the first line is the action itself, then only what they need to do it. The turn ends without further model calls. When they confirm it is done, or deny or choose Other with a reason, the Goal resumes automatically with that answer. Use only in Goal mode, and only when you cannot proceed without them. Do not use this for a choice you can make, a timed question, CI, or background process completion.",
+    "Pause this Goal until the owner finishes something only they can do, such as merging a pull request or running a command on a machine you cannot reach. Keep the statement short: the first line is the action itself, then only what they need to do it. The turn ends without further model calls. When they confirm it is done, or deny or choose Other with a reason, the Goal resumes automatically with that answer. This request's pending watchers with resumeOn complete stay armed, so whichever answers first resumes the Goal; call this instead of yield_to_watch when you need both. Never ask the owner for an action in plain text. Use only in Goal mode, and only when you cannot proceed without them. Do not use this for a choice you can make, a timed question, or to wait only on CI or a background process.",
   inputSchema: {
     type: "object",
     properties: {

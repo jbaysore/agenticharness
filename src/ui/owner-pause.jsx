@@ -11,7 +11,7 @@ function splitStatement(statement) {
   };
 }
 
-export function OwnerPauseCard({ goal, disabled, onAnswer }) {
+export function OwnerPauseCard({ goal, watching, disabled, onAnswer }) {
   const [choice, setChoice] = useState(null),
     [reason, setReason] = useState(""),
     [problem, setProblem] = useState(""),
@@ -115,6 +115,12 @@ export function OwnerPauseCard({ goal, disabled, onAnswer }) {
       <p className="owner-pause-hint">
         The goal resumes when you answer. Deny and Other need a reason.
       </p>
+      {watching && (
+        <p className="owner-pause-hint">
+          Background watchers are still running and may continue the goal
+          first.
+        </p>
+      )}
     </section>
   );
 }
