@@ -400,6 +400,31 @@ for (const kind of ["owner-pause", "watch-yield"])
     assert.equal(confirmed, true);
   });
 
+test("a quota read cut off by a park is not a billing stop", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const work = [];
+  let confirmed = false;
+  const f = codexFixture({
+    emit: (type, payload) => { if (type === "work") work.push(payload); },
+    ownerParked: () => { confirmed = true; },
+  });
+  await f.started;
+  const read = deferred(),
+    call = f.rpc.call;
+  f.rpc.call = async (method, params, timeoutMs) =>
+    method === "account/rateLimits/read" ? read.promise : call(method, params, timeoutMs);
+  t.mock.timers.tick(20000);
+  await flush();
+  f.abort.abort({ kind: "owner-pause" });
+  await flush();
+  f.notify("turn/completed", { turn: { id: "turn-1", status: "interrupted" } });
+  read.reject(new Error("Codex connection closed"));
+  await f.run;
+  await flush();
+  assert.equal(confirmed, true);
+  assert.equal(work.some((item) => item.kind === "billing-stop"), false);
+});
+
 test("Codex receives a host tool's error text instead of a generic failure", async () => {
   const f = codexFixture({
     history: async () => {

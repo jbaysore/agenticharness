@@ -829,6 +829,9 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
           await cancel();
         }
       } catch {
+        // A read cut off because the turn is already ending (a park, Stop or
+        // close) is not lost quota; reporting it would undo the park.
+        if (finished || rpc.closed || ctx.signal.aborted) return;
         ctx.emit("work", {
           kind: "billing-stop",
           reason: "Lost authoritative quota information",
