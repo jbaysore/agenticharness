@@ -840,8 +840,12 @@ export async function runClaude(
   const cancel = () => {
     clearGoalIdle();
     interrupting ??= q.interrupt().then(() => {
-      // An idle gap between Goal turns has no further result to wait for.
-      if (ctx.signal.reason?.kind === "user-pause" && pendingResult) {
+      const kind = ctx.signal.reason?.kind;
+      // Host waits can receive the control acknowledgement without a final
+      // result. Close the acknowledged query and confirm once its stream ends.
+      // An idle gap between Goal turns also has no further result to wait for.
+      if (kind === "watch-yield" || kind === "owner-pause" ||
+          (kind === "user-pause" && pendingResult)) {
         pauseAcknowledged = true;
         closeQuery();
       }
@@ -1147,6 +1151,8 @@ export async function runClaude(
     }
     if (ctx.signal.aborted && pauseAcknowledged) {
       ctx.pauseConfirmed?.();
+      if (ctx.signal.reason?.kind === "watch-yield") ctx.watchParked?.();
+      if (ctx.signal.reason?.kind === "owner-pause") ctx.ownerParked?.();
       return { status: "cancelled" };
     }
     if (retriedUnread && !sawModel)

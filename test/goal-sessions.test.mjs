@@ -637,7 +637,7 @@ test("resuming a saved session verifies Goal state before allowing its hold to c
     });
 });
 
-function claudeFixture(extra = {}, interruptResult = { type: "result" }) {
+function claudeFixture(extra = {}, interruptResult = { type: "result" }, interruptAck) {
   const events = new AsyncQueue(),
     states = [],
     started = deferred();
@@ -672,6 +672,7 @@ function claudeFixture(extra = {}, interruptResult = { type: "result" }) {
       }),
       queryFn: ({ prompt }) => ({
         interrupt: async () => {
+          await interruptAck;
           if (interruptResult) events.push(interruptResult);
         },
         close() {
@@ -718,6 +719,66 @@ test("Claude acknowledges watcher suspension on an interrupted result and closes
   assert.equal((await f.run).status, "cancelled");
   assert.equal(confirmed, true);
   assert.equal(f.closes, 1);
+});
+
+for (const kind of ["watch-yield", "owner-pause"])
+  test(`Claude confirms ${kind} after an acknowledged interrupt without a final result`, async () => {
+    const confirmed = [], ack = deferred();
+    const f = claudeFixture({
+      watchParked: () => confirmed.push("watch-yield"),
+      ownerParked: () => confirmed.push("owner-pause"),
+    }, null, ack.promise);
+    try {
+      await f.started;
+      f.abort.abort({ kind });
+      await flush();
+      assert.equal(f.settled, false);
+      assert.equal(f.closes, 0);
+      assert.deepEqual(confirmed, []);
+      ack.resolve();
+      await flush();
+      assert.equal(f.closes, 1);
+      assert.equal((await f.run).status, "cancelled");
+      assert.deepEqual(confirmed, [kind]);
+    } finally {
+      ack.resolve();
+      f.events.end();
+      await f.run.catch(() => {});
+    }
+  });
+
+test("Claude never confirms a watcher yield when the interrupt fails", async () => {
+  let confirmed = false;
+  const ack = deferred();
+  const f = claudeFixture({ watchParked: () => { confirmed = true; } }, null, ack.promise);
+  await f.started;
+  f.abort.abort({ kind: "watch-yield" });
+  ack.reject(new Error("Interrupt disconnected"));
+  await assert.rejects(f.run, /without a final result|Interrupt disconnected/);
+  assert.equal(confirmed, false);
+  assert.equal(f.closes, 1);
+});
+
+test("Claude never confirms a watcher yield when the interrupt times out", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let confirmed = false;
+  const ack = deferred();
+  const f = claudeFixture({ watchParked: () => { confirmed = true; } }, null, ack.promise);
+  try {
+    await f.started;
+    f.abort.abort({ kind: "watch-yield" });
+    t.mock.timers.tick(8000);
+    await assert.rejects(f.run, /without a final result/);
+    // Even a late acknowledgement cannot park an already-ended run.
+    ack.resolve();
+    await flush();
+    assert.equal(confirmed, false);
+    assert.equal(f.closes, 1);
+  } finally {
+    ack.resolve();
+    f.events.end();
+    await f.run.catch(() => {});
+  }
 });
 
 test("Claude intermediate results keep an active Goal alive until confirmed met", async (t) => {

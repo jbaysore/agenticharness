@@ -8,6 +8,7 @@ import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { blockingGoals } from "../src/core/goals.mjs";
 import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
+import { runClaude } from "../src/providers/claude.mjs";
 import { killIfMatched, processIdentity } from "../src/core/process-identity.mjs";
 
 const sha = "a".repeat(40);
@@ -293,7 +294,8 @@ for (const provider of ["codex", "claude"])
     try {
       let calls = 0,
         watch,
-        followup;
+        followup,
+        closes = 0;
       f.controller.runners[provider] = async (ctx) => {
         calls++;
         if (calls > 1) {
@@ -301,29 +303,58 @@ for (const provider of ["codex", "claude"])
           ctx.goalState("complete");
           return { status: "completed" };
         }
-        ctx.goalState("active", "Ship passing CI");
-        watch = await ctx.history("watch_github_ci", {
-          repository: "owner/repo",
-          commit: sha,
-          resumeOn: ["complete"],
-          continuation: "Fix CI if needed and assess the saved goal.",
-        });
-        assert.equal(
-          (
-            await ctx.history("yield_to_watch", {
-              ids: [watch.id],
-              checkpoint: "Pushed the tested change.",
-            })
-          ).parked,
-          true,
-        );
-        assert.equal(
-          f.store.conversation(f.chat.id).sessions[provider].goal.status,
-          "active",
-        );
-        await new Promise((resolve) =>
-          ctx.signal.addEventListener("abort", resolve, { once: true }),
-        );
+        const yieldTurn = async () => {
+          ctx.goalState("active", "Ship passing CI");
+          watch = await ctx.history("watch_github_ci", {
+            repository: "owner/repo",
+            commit: sha,
+            resumeOn: ["complete"],
+            continuation: "Fix CI if needed and assess the saved goal.",
+          });
+          assert.equal(
+            (
+              await ctx.history("yield_to_watch", {
+                ids: [watch.id],
+                checkpoint: "Pushed the tested change.",
+              })
+            ).parked,
+            true,
+          );
+          assert.equal(
+            f.store.conversation(f.chat.id).sessions[provider].goal.status,
+            "active",
+          );
+          await new Promise((resolve) =>
+            ctx.signal.addEventListener("abort", resolve, { once: true }),
+          );
+        };
+        if (provider === "claude")
+          return runClaude(ctx, {
+            baseOptions: () => ({}),
+            readAuth: async () => ({
+              loggedIn: true,
+              authMethod: "claude.ai",
+              apiProvider: "firstParty",
+              subscriptionType: "pro",
+            }),
+            readUsage: async () => ({
+              rate_limits_available: true,
+              rate_limits: {
+                extra_usage: { is_enabled: false, user_disabled: true },
+                limits: [{ kind: "five_hour", percent: 1 }],
+              },
+            }),
+            queryFn: ({ prompt }) => ({
+              interrupt: async () => {},
+              close() { closes++; },
+              async *[Symbol.asyncIterator]() {
+                await prompt.next();
+                await yieldTurn();
+                // The SDK acknowledges interruption but omits a final result.
+              },
+            }),
+          });
+        await yieldTurn();
         ctx.watchParked();
         return { status: "cancelled" };
       };
@@ -335,6 +366,9 @@ for (const provider of ["codex", "claude"])
         mode: "goal",
       });
       await finishRuns(f.controller);
+      if (provider === "claude") assert.equal(closes, 1);
+      assert.equal(f.store.watchStore.get(watch.id).armed, true);
+      assert.equal(f.store.watchStore.get(watch.id).parked, true);
       assert.equal(
         f.store.conversation(f.chat.id).sessions[provider].goal.status,
         "waiting",
