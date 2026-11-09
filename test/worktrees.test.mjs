@@ -169,6 +169,18 @@ test("a partial worktree is restored on its saved branch with residual work pres
   } finally { f.done(); }
 });
 
+test("a Git failure other than a missing repository never moves the checkout aside", async () => {
+  const f = fixture();
+  try {
+    const worktree = await createWorktree({ projectPath: f.project, root: f.root, chatId: "unreadable" });
+    rmSync(join(worktree.path, ".git"), { force: true });
+    writeFileSync(join(worktree.path, ".git"), "nonsense");
+    await assert.rejects(restoreWorktree(f.project, worktree), /Git could not read the assigned checkout/);
+    assert.equal(readFileSync(join(worktree.path, "a.txt"), "utf8"), "one\n");
+    assert.deepEqual(readdirSync(f.root).filter((name) => name.includes(".recovery-")), []);
+  } finally { f.done(); }
+});
+
 test("restoration refuses a valid checkout on the wrong branch", async () => {
   const f = fixture();
   try {

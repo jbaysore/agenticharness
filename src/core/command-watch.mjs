@@ -56,9 +56,22 @@ export async function readCommandResult(watch) {
   }
 }
 
+// The runner rewrites heartbeat.json every two seconds while it is alive.
+export async function readHeartbeat(watch) {
+  const dir = watch.runner?.statusDir ?? watch.statusDir;
+  if (!dir) return null;
+  try {
+    const { at } = JSON.parse(await readFile(join(dir, "heartbeat.json"), "utf8"));
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
 export const commandControls = {
   start: startDetached,
   read: readCommandResult,
+  heartbeat: readHeartbeat,
   identity: processIdentity,
   killIfMatched: (recorded) => killIfMatched(recorded),
   matches: identitiesMatch,

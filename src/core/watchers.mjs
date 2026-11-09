@@ -27,6 +27,8 @@ const publicWatch = ({
   ...watch
 }) => watch;
 const localInterval = 5_000;
+// The runner writes a heartbeat every two seconds.
+const heartbeatFresh = 30_000;
 
 export class Watchers {
   constructor(controller, { github = new GitHubCI(), now = Date.now, commands = commandControls } = {}) {
@@ -645,9 +647,17 @@ export class Watchers {
     } catch {
       live = null;
     }
+    // A process lookup can fail under load, as it did right after a restart.
+    // A fresh heartbeat proves the runner is alive, so look again later.
+    let beat = null;
+    if (!identitiesMatch(current.runner, live))
+      beat = await this.commands.heartbeat?.(current).catch(() => null);
     const again = this.records.get(watch.id);
     if (!again || !watching(again)) return;
-    if (!identitiesMatch(again.runner, live)) {
+    if (
+      !identitiesMatch(again.runner, live) &&
+      !(Number.isFinite(beat) && Date.now() - beat < heartbeatFresh)
+    ) {
       if (again.runner) again.runner.released = true;
       this.finish(
         again,

@@ -96,7 +96,15 @@ export async function restoreWorktree(projectPath, worktree) {
   const { path, branch, base } = worktree;
   let recoveryPath;
   if (existsSync(path)) {
-    const top = (await git(path, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
+    // Only Git saying this is not a repository marks a partial checkout. A
+    // slow or failed Git call under load once sent a valid checkout down the
+    // recovery path, so that is reported instead.
+    const top = (
+      await git(path, ["rev-parse", "--show-toplevel"], { timeout: 60000 }).catch((error) => {
+        if (/not a git repository/i.test(reason(error))) return "";
+        throw new Error(`Git could not read the assigned checkout at ${path}: ${reason(error) || "no response"}`);
+      })
+    ).trim();
     if (top && samePath(top, path)) {
       const identity = async () => ({
         actualBranch: (await git(path, ["branch", "--show-current"])).trim(),

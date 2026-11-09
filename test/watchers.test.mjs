@@ -935,6 +935,33 @@ test("a command with no exit code is unknown and does not count as success", asy
   }
 });
 
+test("a failed process lookup keeps a command watched while its runner heartbeat is fresh", async () => {
+  let beat = Date.now();
+  const f = fixture({
+    commands: {
+      ...commandDouble(async () => null, async () => ({ done: false }), []),
+      heartbeat: async () => beat,
+    },
+  });
+  try {
+    f.register();
+    const watch = await f.controller.watchers.startCommand(
+      f.chat.id,
+      {},
+      { command: "echo slow lookup", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() },
+    );
+    f.end();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "pending");
+    beat = Date.now() - 60_000;
+    f.advance();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "error");
+  } finally {
+    await f.close();
+  }
+});
+
 test("a file that does not exist yet can appear, and an escaping ancestor is rejected", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-file-")),
     outside = await mkdtemp(join(tmpdir(), "harness-outside-"));
