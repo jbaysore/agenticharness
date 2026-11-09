@@ -401,6 +401,10 @@ export async function readClaudePlan(directory, since) {
     ? proposalText(await readFile(latest.path, "utf8").catch(() => ""))
     : null;
 }
+export const claudeTokenRetryMs = { value: 60_000 };
+export const claudeTokenClash = (text) =>
+  /failed to refresh oauth token: another claude code process/i.test(String(text));
+
 export async function runClaude(
   ctx,
   {
@@ -811,6 +815,12 @@ export async function runClaude(
     pendingResult = null,
     sawModel = false,
     retriedUnread = false,
+    // Claude Code processes share one sign-in token. When another is
+    // refreshing it, a turn fails before any work and can be sent again.
+    tokenClash = false,
+    tokenRetries = 0,
+    workedSincePrompt = false,
+    lastErrorText = "",
     phase = "sign-in check",
     interrupting,
     pauseAcknowledged = false,
@@ -982,6 +992,11 @@ export async function runClaude(
             .filter((c) => c.type === "text")
             .map((c) => c.text)
             .join("\n");
+          if (event.error) lastErrorText = text;
+          if (event.error && claudeTokenClash(text) && !workedSincePrompt) {
+            tokenClash = true;
+            continue;
+          }
           if (text) {
             sawModel = true;
             ctx.emit("text", { nativeId: event.message.id, text });
@@ -990,7 +1005,10 @@ export async function runClaude(
         for (const block of event.message.content.filter(
           (c) => c.type === "tool_use",
         )) {
-          if (!event.parent_tool_use_id && !event.agent_id) sawModel = true;
+          if (!event.parent_tool_use_id && !event.agent_id) {
+            sawModel = true;
+            workedSincePrompt = true;
+          }
           ctx.emit("work", {
             kind:
               block.name === "Agent" || block.name === "Task"
@@ -1082,6 +1100,24 @@ export async function runClaude(
           !resultText &&
           event.duration_api_ms === 0;
         if (queuedFollows) continue;
+        if (event.is_error && tokenClash && tokenRetries < 2) {
+          tokenClash = false;
+          tokenRetries++;
+          ctx.emit("work", {
+            kind: "provider-retry",
+            item: {
+              title: "Waiting for Claude's sign-in to refresh",
+              description: "Another Claude Code process was refreshing the shared sign-in. Harness will send this message again in a minute.",
+            },
+          });
+          await new Promise((done) => {
+            const timer = setTimeout(done, claudeTokenRetryMs.value);
+            ctx.signal.addEventListener("abort", () => { clearTimeout(timer); done(); }, { once: true });
+          });
+          if (ctx.signal.aborted) return { status: "cancelled" };
+          input.push(promptMessage);
+          continue;
+        }
         if (unread && !retriedUnread) {
           retriedUnread = true;
           input.push(promptMessage);
@@ -1114,7 +1150,10 @@ export async function runClaude(
             : stopped || event.is_error
               ? "failed"
               : "completed",
-          error: stopped || event.errors?.join("\n"),
+          error:
+            stopped ||
+            event.errors?.join("\n") ||
+            (event.is_error ? lastErrorText || resultText || null : null),
         };
         if (ctx.signal.reason?.kind === "watch-yield") ctx.watchParked?.();
         if (ctx.signal.reason?.kind === "owner-pause") ctx.ownerParked?.();
