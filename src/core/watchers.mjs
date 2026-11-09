@@ -27,6 +27,9 @@ const publicWatch = ({
   ...watch
 }) => watch;
 const localInterval = 5_000;
+const fileKey = (watch) => `file:${JSON.stringify([
+  watch.projectId, watch.root, watch.path, watch.until, watch.pattern ?? null,
+])}`;
 // The runner writes a heartbeat every two seconds.
 const heartbeatFresh = 30_000;
 
@@ -42,14 +45,31 @@ export class Watchers {
     this.started = false;
     this.closed = false;
     this.abort = new AbortController();
-    for (const watch of this.records
-      .list()
-      .filter((w) => w.armed && !w.parked)) {
-      watch.armed = false;
-      watch.reason =
-        "Harness restarted before suspension was confirmed. Automatic follow-up was revoked.";
-      this.records.save(watch);
+    for (const watch of this.records.list()) {
+      let changed = watch.kind === "file" && watching(watch) && this.pinFileRoot(watch);
+      if (watch.armed && !watch.parked) {
+        watch.armed = false;
+        watch.reason =
+          "Harness restarted before suspension was confirmed. Automatic follow-up was revoked.";
+        changed = true;
+      }
+      if (changed) this.records.save(watch);
     }
+  }
+  fileRoot(chatId) {
+    const chat = this.store.conversation(chatId);
+    return chat?.worktree?.path ?? this.store.project(chat?.project_id)?.path;
+  }
+  pinFileRoot(watch) {
+    if (watch.root != null) return false;
+    const root = this.fileRoot(watch.chatId);
+    if (!root) return false;
+    // Older records omitted the directory. Recover the chat's actual checkout,
+    // then pin it so future folder changes cannot silently retarget the watch.
+    watch.root = root;
+    watch.key = fileKey(watch);
+    watch.candidate = null;
+    return true;
   }
   start() {
     this.started = true;
@@ -502,19 +522,19 @@ export class Watchers {
     } else if (input.pattern != null)
       throw new Error("A pattern is only used when waiting for a match.");
     const admitted = this.admission(chatId, input);
-    const project = this.store.project(admitted.chat.project_id);
-    const found = await inspectFile(project.path, input.path);
+    const root = this.fileRoot(chatId);
+    const found = await inspectFile(root, input.path);
     if (found.error) throw new Error(found.error);
-    const key = `file:${admitted.chat.project_id}:${input.path}:${input.until}:${input.pattern ?? ""}`;
+    const target = {
+      kind: "file", root, path: input.path, until: input.until,
+      pattern: input.pattern ?? null, url: null,
+    };
+    const key = fileKey({ ...target, projectId: admitted.chat.project_id });
     const existing = this.duplicate(chatId, key, admitted);
     if (existing) return { ...publicWatch(existing), duplicate: true };
     const watch = this.blank(chatId, admitted, {
-      kind: "file",
+      ...target,
       key,
-      path: input.path,
-      until: input.until,
-      pattern: input.pattern ?? null,
-      url: null,
     });
     watch.status = "pending";
     this.save(watch);
@@ -674,10 +694,10 @@ export class Watchers {
     this.save(again);
   }
   async pollFile(watch) {
-    const project = this.store.project(watch.projectId);
+    if (this.pinFileRoot(watch)) this.records.save(watch);
     let found;
     try {
-      found = await inspectFile(project?.path, watch.path);
+      found = await inspectFile(watch.root, watch.path);
     } catch (error) {
       const current = this.records.get(watch.id);
       if (!current || !watching(current)) return;

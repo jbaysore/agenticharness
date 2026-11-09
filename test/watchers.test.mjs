@@ -1000,6 +1000,187 @@ test("a file that does not exist yet can appear, and an escaping ancestor is rej
   }
 });
 
+test("file watches ignore shared-project files and resume once for their worktree sentinel", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-file-worktree-"));
+  const projectPath = join(root, "project"), worktreePath = join(root, "worktree");
+  await Promise.all([mkdir(projectPath), mkdir(worktreePath)]);
+  const f = fixture({ projectPath });
+  try {
+    f.store.updateConversation(f.chat.id, { worktree: { path: worktreePath } });
+    let calls = 0;
+    f.controller.runners.codex = async () => {
+      calls++;
+      return { status: "completed" };
+    };
+    f.register();
+    const input = {
+      path: "nested/job.done", until: "appears",
+      resumeOn: ["complete"], continuation: "Inspect the job result.",
+    };
+    const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", input);
+    assert.equal(watch.root, worktreePath);
+    assert.equal((await f.controller.watchers.handle(f.chat.id, "watch_file", input)).id, watch.id);
+    f.arm(watch);
+    await mkdir(join(projectPath, "nested"));
+    await writeFile(join(projectPath, "nested", "job.done"), "wrong job");
+    await f.controller.watchers.tick();
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "pending");
+    assert.equal(calls, 0);
+    await mkdir(join(worktreePath, "nested"));
+    await writeFile(join(worktreePath, "nested", "job.done"), "ready");
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    assert.equal(f.store.watchStore.get(watch.id).status, "success");
+    assert.equal(calls, 1);
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    assert.equal(calls, 1);
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("file watches keep their registered directory across restart and chat-folder changes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-file-restart-"));
+  const projectPath = join(root, "project"), worktreePath = join(root, "worktree"),
+    otherPath = join(root, "other"), path = join(root, "workspace.sqlite");
+  await Promise.all([mkdir(projectPath), mkdir(worktreePath), mkdir(otherPath)]);
+  let f = fixture({ path, projectPath });
+  try {
+    f.store.updateConversation(f.chat.id, { worktree: { path: worktreePath } });
+    f.register();
+    const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
+      path: "job.done", until: "matches", pattern: "ready",
+    });
+    const chatId = f.chat.id;
+    f.end();
+    f.store.updateConversation(chatId, { worktree: { path: otherPath } });
+    await f.close();
+    f = fixture({ path, projectPath });
+    assert.equal(f.store.watchStore.get(watch.id).root, worktreePath);
+    await writeFile(join(otherPath, "job.done"), "ready");
+    await f.controller.watchers.tick();
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "pending");
+    await writeFile(join(worktreePath, "job.done"), "ready");
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "success");
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy file watches recover their chat directory and discard observations of the wrong folder", async () => {
+  for (const ownWorktree of [true, false]) {
+    const root = await mkdtemp(join(tmpdir(), "harness-file-legacy-"));
+    const projectPath = join(root, "project"), worktreePath = join(root, "worktree"),
+      path = join(root, "workspace.sqlite");
+    await Promise.all([mkdir(projectPath), mkdir(worktreePath)]);
+    let f = fixture({ path, projectPath });
+    try {
+      if (ownWorktree)
+        f.store.updateConversation(f.chat.id, { worktree: { path: worktreePath } });
+      f.register();
+      const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
+        path: "job.done", until: "stable",
+        resumeOn: ["complete"], continuation: "Inspect the recovered job result.",
+      });
+      f.arm(watch);
+      const legacy = f.store.watchStore.get(watch.id);
+      delete legacy.root;
+      legacy.key = `file:${f.chat.project_id}:job.done:stable:`;
+      legacy.candidate = { fingerprint: "wrong-folder", since: f.now - 60_000 };
+      f.store.watchStore.save(legacy);
+      await f.close();
+      f = fixture({ path, projectPath });
+      let calls = 0;
+      f.controller.runners.codex = async () => {
+        calls++;
+        return { status: "completed" };
+      };
+      const directory = ownWorktree ? worktreePath : projectPath;
+      assert.equal(f.store.watchStore.get(watch.id).root, directory);
+      assert.equal(f.store.watchStore.get(watch.id).candidate, null);
+      await writeFile(join(directory, "job.done"), "ready");
+      await f.controller.watchers.tick();
+      assert.equal(f.store.watchStore.get(watch.id).status, "pending");
+      f.advance(60_000);
+      await f.controller.watchers.tick();
+      await finishRuns(f.controller);
+      assert.equal(f.store.watchStore.get(watch.id).status, "success");
+      assert.equal(calls, 1);
+    } finally {
+      await f.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("worktree file watches reject escaping links at registration and on later polls", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-file-containment-"));
+  const projectPath = join(root, "project"), worktreePath = join(root, "worktree");
+  await Promise.all([mkdir(projectPath), mkdir(worktreePath)]);
+  const f = fixture({ projectPath });
+  try {
+    f.store.updateConversation(f.chat.id, { worktree: { path: worktreePath } });
+    f.register();
+    await symlink(projectPath, join(worktreePath, "outside"), "junction");
+    await assert.rejects(
+      () => f.controller.watchers.handle(f.chat.id, "watch_file", { path: "outside/job.done", until: "appears" }),
+      /escapes the worktree/,
+    );
+    const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
+      path: "later/job.done", until: "appears",
+    });
+    f.end();
+    await symlink(projectPath, join(worktreePath, "later"), "junction");
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "error");
+    assert.match(f.store.watchStore.get(watch.id).reason, /escapes the worktree/);
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an unavailable worktree fails instead of watching the shared project", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-file-missing-root-"));
+  const projectPath = join(root, "project"), worktreePath = join(root, "worktree");
+  await Promise.all([mkdir(projectPath), mkdir(worktreePath)]);
+  const f = fixture({ projectPath });
+  try {
+    f.store.updateConversation(f.chat.id, { worktree: { path: worktreePath } });
+    f.register();
+    const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
+      path: "job.done", until: "appears",
+    });
+    await rm(worktreePath, { recursive: true });
+    await assert.rejects(
+      () => f.controller.watchers.handle(f.chat.id, "watch_file", { path: "other.done", until: "appears" }),
+      /worktree could not be resolved/,
+    );
+    f.end();
+    await writeFile(join(projectPath, "job.done"), "wrong job");
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "error");
+    assert.match(f.store.watchStore.get(watch.id).reason, /worktree could not be resolved/);
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("an already-merged pull request settles, and a new comment does not fire from the baseline", async () => {
   const f = fixture();
   try {

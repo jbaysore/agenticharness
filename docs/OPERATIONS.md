@@ -600,6 +600,12 @@ modification time for 60 seconds, or its last 8KB contains a literal pattern.
 The target does not need to exist yet. Each poll resolves the nearest existing
 parent and requires that path, and every new component, to stay inside the
 worktree. A symlink that escapes is an error and is not followed.
+Registration saves the chat's worktree directory (or its project directory when
+the chat has no worktree) as `root`, returned by `watch_file` and `list_watches`.
+Polling keeps using that saved directory across restarts; it never falls back
+to the shared project if the worktree disappears. Older pending file watches
+without a saved directory recover it from their chat on startup, discarding
+any observations made against the old directory.
 
 Notification only is the default. When the existing task authorizes follow-up,
 the agent sets `resumeOn` (`success`, `failure`, or `complete`) and a short
