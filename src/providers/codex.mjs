@@ -1,5 +1,6 @@
 import { RpcProcess } from "../core/rpc.mjs";
 import { CodexStartupLog } from "../core/codex-startup-log.mjs";
+import { waitForDiagnostics } from "../core/diagnostic-writes.mjs";
 import { contextReporter, openAIUsage, tokenCount } from "../core/context.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
@@ -51,19 +52,23 @@ export function codexServerArgs(platform = process.platform) {
 
 export async function openCodex(
   cwd,
-  { signal, dataDir, chatId, runId, purpose, progress } = {},
+  { signal, dataDir, chatId, runId, purpose, progress, timing } = {},
   {
     resolveExecutable = executable,
     environment = subscriptionEnvironment,
     createRpc = (...args) => new RpcProcess(...args),
     timeoutMs = 120_000,
     nativeLogPath,
+    createStartupLog = (options) => new CodexStartupLog(options),
   } = {},
 ) {
   signal?.throwIfAborted();
-  const command = resolveExecutable("codex");
+  const executableDone = timing?.("executable-discovery");
+  let command;
+  try { command = resolveExecutable("codex"); executableDone?.(); }
+  catch (error) { executableDone?.("failed"); throw error; }
   if (!command) throw new Error("Codex CLI is not installed");
-  const startup = new CodexStartupLog({
+  const startup = createStartupLog({
     dataDir,
     cwd,
     chatId,
@@ -72,15 +77,21 @@ export async function openCodex(
     nativeLogPath,
   });
   let rpc;
+  let initializeDone;
   const stop = () => rpc?.close();
   signal?.addEventListener("abort", stop, { once: true });
   try {
     signal?.throwIfAborted();
     const startedAt = Date.now();
     progress?.({ phase: "initialize", state: "starting", startedAt: new Date(startedAt).toISOString(), deadlineAt: new Date(startedAt + timeoutMs).toISOString() });
-    rpc = createRpc(command, codexServerArgs(), { cwd, env: environment() });
+    const environmentDone = timing?.("environment-discovery");
+    let env;
+    try { env = environment(); environmentDone?.(); }
+    catch (error) { environmentDone?.("failed"); throw error; }
+    rpc = createRpc(command, codexServerArgs(), { cwd, env });
     startup.attach(rpc, command);
     startup.record("initialize-sent", { timeoutMs });
+    initializeDone = timing?.("provider-initialize");
     await rpc.call(
       "initialize",
       {
@@ -94,18 +105,21 @@ export async function openCodex(
       timeoutMs,
     );
     signal?.throwIfAborted();
+    initializeDone?.();
     rpc.notify("initialized");
-    await startup.finish("ready");
+    const loggingDone = timing?.("diagnostic-persistence");
+    void startup.finish("ready").then((saved) => loggingDone?.(saved ? "ready" : "unavailable"), () => loggingDone?.("failed"));
     signal?.throwIfAborted();
     progress?.({ phase: "initialize", state: "ready" });
     return rpc;
   } catch (error) {
+    initializeDone?.(signal?.aborted ? "cancelled" : "failed");
     rpc?.close();
     progress?.({ phase: "initialize", state: signal?.aborted ? "cancelled" : "failed" });
-    const saved = await startup.finish(
+    const saved = await waitForDiagnostics(startup.finish(
       signal?.aborted ? "cancelled" : "failed",
       error,
-    );
+    ));
     rpc?.close();
     if (saved && !signal?.aborted)
       error.message += ` Startup diagnostics: ${startup.path}`;
@@ -270,6 +284,7 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
     runId: ctx.runId,
     purpose: "chat",
     progress,
+    timing: ctx.timing,
   });
   ctx.attachClose?.(() => rpc.close());
   const setupLog = rpc.child ? new CodexStartupLog({ dataDir: ctx.dataDir, cwd: ctx.project.path, chatId: ctx.chat?.id, runId: ctx.runId, purpose: "session-setup" }) : null;
@@ -279,9 +294,16 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
     const startedAt = Date.now();
     progress({ phase: method, state: "starting", startedAt: new Date(startedAt).toISOString(), deadlineAt: new Date(startedAt + setupTimeoutMs).toISOString() });
     setupLog?.record(method + "-sent", { timeoutMs: setupTimeoutMs });
-    const response = await rpc.call(method, params, setupTimeoutMs);
-    progress({ phase: method, state: "ready" });
-    return response;
+    const setupDone = ctx.timing?.("thread-setup");
+    try {
+      const response = await rpc.call(method, params, setupTimeoutMs);
+      setupDone?.();
+      progress({ phase: method, state: "ready" });
+      return response;
+    } catch (error) {
+      setupDone?.(ctx.signal.aborted ? "cancelled" : "failed");
+      throw error;
+    }
   };
   const context = contextReporter(ctx, "codex");
   let compacting = false;
@@ -679,13 +701,21 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
     : fullGoalObjective;
   let timer;
   try {
-    const { account } = await rpc.call("account/read"),
-      usage = await rpc.call("account/rateLimits/read");
+    const preflightDone = ctx.timing?.("provider-preflight");
+    let account, usage, configResult;
+    try {
+      [{ account }, usage, configResult] = await Promise.all([
+        rpc.call("account/read"),
+        rpc.call("account/rateLimits/read"),
+        rpc.call("config/read", { includeLayers: false }),
+      ]);
+      preflightDone?.();
+    } catch (error) {
+      preflightDone?.("failed");
+      throw error;
+    }
     const blocked = checkCodexBilling(account, usage);
     if (blocked) throw new Error(blocked);
-    const configResult = await rpc.call("config/read", {
-      includeLayers: false,
-    });
     const routeReason = checkCodexRoute(configResult.config);
     if (routeReason) throw new Error(routeReason);
     const options = {
@@ -738,7 +768,10 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
     threadId = response.thread.id;
     if (ctx.signal.aborted) { cancelling = null; await cancel(); return await done; }
     ctx.saveSession({ id: threadId });
-    await setupLog?.finish("ready");
+    if (setupLog) {
+      const loggingDone = ctx.timing?.("diagnostic-persistence");
+      void setupLog.finish("ready").then((saved) => loggingDone?.(saved ? "ready" : "unavailable"), () => loggingDone?.("failed"));
+    }
     context.start(threadId);
     if (ctx.session?.id && !ctx.startGoal && (goal || ctx.session.goal)) {
       const version = goalVersion;
@@ -844,7 +877,7 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
     return await done;
   } catch (error) {
     if (setupLog) {
-      const saved = await setupLog.finish(ctx.signal.aborted ? "cancelled" : "failed", error);
+      const saved = await waitForDiagnostics(setupLog.finish(ctx.signal.aborted ? "cancelled" : "failed", error));
       if (saved && !ctx.signal.aborted) error.message += ` Startup diagnostics: ${setupLog.path}`;
     }
     progress({ phase: "session", state: ctx.signal.aborted ? "cancelled" : "failed" });

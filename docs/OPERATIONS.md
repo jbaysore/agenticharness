@@ -118,6 +118,30 @@ time, and **Stop work** remains available during startup. Session setup failures
 retain the saved native session. Startup and thread-setup diagnostics are saved
 under `diagnostics/codex-startup.jsonl` in the data folder.
 
+Successful startup does not wait for diagnostic files to finish writing. Writes
+are queued with a fixed limit and retain the existing rotation and filtering;
+failure reporting waits at most 250 ms for persistence. Logs are best effort if
+the disk is stalled or the queue is full.
+
+For responsiveness investigations, `diagnostics/performance.jsonl` records
+startup phases, first provider activity and text, slow HTTP requests (250 ms or
+more), and a minute-by-minute event-loop summary. It retains a 2 MiB file and
+three rotated backups. HTTP routes are templates without query strings; phase
+records contain durations and chat/run/provider identifiers, not prompts or
+credentials. `Server-Timing` response headers report host request time separately
+from browser/network delay. A successful connection's diagnostic-persistence
+span measures background log writing rather than time blocking startup.
+
+Goal pause polling reads only current run and pause status, without reloading
+the transcript each second. Actual provider acknowledgment is still required.
+Run `npm.cmd run test:performance` for a synthetic archive, concurrent HTTP
+benchmark, and browser checks locally and with 150 ms simulated network latency.
+The check uses simulated providers and consumes no model usage.
+`npm.cmd run perf:workspace` compares the old and scoped action-history queries
+against the current archive using a read-only SQLite connection and checks that
+their selected events match. An optional database filename can be passed after
+`--`; the script never runs Store migrations or changes the archive.
+
 When a Goal is blocked on something only you can do, such as merging a pull
 request or running a command on a machine the agent cannot reach, it calls
 `pause_for_owner` and the turn ends. The native Goal is confirmed paused, then

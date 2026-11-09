@@ -423,7 +423,10 @@ export async function runClaude(
       ? join(ctx.dataDir, "plans", "claude", ctx.chat.id)
       : null;
   if (planDirectory) await mkdir(planDirectory, { recursive: true });
-  const base = baseOptions(ctx.project.path);
+  const environmentDone = ctx.timing?.("environment-discovery");
+  let base;
+  try { base = baseOptions(ctx.project.path); environmentDone?.(); }
+  catch (error) { environmentDone?.("failed"); throw error; }
   const input = new AsyncQueue();
   let currentId = "initial";
   const historyServer = createSdkMcpServer({
@@ -869,10 +872,17 @@ export async function runClaude(
   };
   ctx.signal.addEventListener("abort", cancel, { once: true });
   try {
-    const auth = await readAuth();
+    const authDone = ctx.timing?.("provider-sign-in");
+    let auth;
+    try { auth = await readAuth(); authDone?.(); }
+    catch (error) { authDone?.("failed"); throw error; }
     phase = "subscription usage check";
     const monitor = usageForAccount(auth),
-      initial = await monitor.read(() => readUsage(q));
+      initial = await (async () => {
+        const usageDone = ctx.timing?.("provider-preflight");
+        try { const value = await monitor.read(() => readUsage(q)); usageDone?.(); return value; }
+        catch (error) { usageDone?.("failed"); throw error; }
+      })();
     ctx.emit("usage", initial.usage);
     if (initial.reason) throw new Error(initial.reason);
     if (ctx.signal.aborted)

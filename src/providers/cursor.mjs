@@ -384,10 +384,12 @@ export async function runCursor(ctx, deps = {}) {
   // sent to a session until the account is confirmed.
   const authenticate = deps.cursorAuth ?? cursorAuth;
   const connect = deps.openCursor ?? openCursor;
+  const preflightDone = ctx.timing?.("provider-preflight");
   const [status, opened] = await Promise.allSettled([
     authenticate(),
     connect(ctx.project.path),
   ]);
+  preflightDone?.(status.status === "rejected" || opened.status === "rejected" ? "failed" : "ready");
   const reason =
     status.status === "fulfilled" &&
     (checkAccountConfirmation(
@@ -573,7 +575,10 @@ export async function runCursor(ctx, deps = {}) {
       ctx.emit("work", { kind: "plan", provider: "cursor", item: p });
   });
   try {
-    const opened = await openCursorSession(rpc, ctx);
+    const setupDone = ctx.timing?.("thread-setup");
+    let opened;
+    try { opened = await openCursorSession(rpc, ctx); setupDone?.(); }
+    catch (error) { setupDone?.("failed"); throw error; }
     // A saved id that Cursor cannot load must not skip the transcript. The
     // controller already included one when this turn was a provider switch.
     if (!opened.resumed) ctx.ensureHandoff?.();

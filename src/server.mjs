@@ -7,6 +7,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { Store } from "./core/store.mjs";
+import { PerformanceDiagnostics } from "./core/performance.mjs";
+import { flushDiagnostics } from "./core/diagnostic-writes.mjs";
 import {
   CHAT_MODES,
   Controller,
@@ -125,6 +127,7 @@ export async function createHarness({
     .catch(() => null);
   await mkdir(join(dataDir, "connection-probe"), { recursive: true });
   const store = new Store(join(dataDir, "workspace.sqlite"));
+  const diagnostics = new PerformanceDiagnostics(dataDir);
   // Providers need a cwd even for general conversation. Each directoryless
   // chat gets a private, persistent workspace without adding a user project.
   const chatProject = async (projectId, current = null) => {
@@ -162,12 +165,13 @@ export async function createHarness({
     { locked: () => !!selfRestart?.gated },
   );
   const json = (res, status, value, headers = {}) => {
+    const body = JSON.stringify(value);
     res.writeHead(status, {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
       ...headers,
     });
-    res.end(JSON.stringify(value));
+    res.end(body);
   };
   // A chat in its own worktree sees that worktree as its primary repository.
   // Between turns a fully landed worktree is removed, and the project folder
@@ -193,6 +197,7 @@ export async function createHarness({
     return ref.path;
   };
   const server = createServer(async (req, res) => {
+    diagnostics.request(req, res);
     let counted = false;
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -708,6 +713,11 @@ export async function createHarness({
           controller.event(chat.id, null, "chat", chat);
           return json(res, 201, store.conversationSnapshot(chat.id));
         }
+        if ((match = path.match(/^\/api\/chats\/([^/]+)\/status$/)) && method === "GET") {
+          if (!store.conversation(match[1]))
+            return json(res, 404, { error: "Conversation not found" });
+          return json(res, 200, store.conversationStatus(match[1]));
+        }
         if ((match = path.match(/^\/api\/chats\/([^/]+)\/reliability(?:\/(actions|evidence\/(\d+)))?$/))) {
           const id = match[1];
           if (!store.conversation(id)) return json(res, 404, { error: "Conversation not found" });
@@ -1146,6 +1156,7 @@ export async function createHarness({
   localOrigin = `http://127.0.0.1:${actualPort}`;
   controller = new Controller(store, {
     dataDir,
+    diagnostics,
     probePath: join(dataDir, "connection-probe"),
     bridgeUrl: localOrigin,
     browser,
@@ -1230,6 +1241,8 @@ export async function createHarness({
       );
       server.closeAllConnections();
       await step("store", () => store.close());
+      diagnostics.close();
+      await flushDiagnostics();
     })());
   if (enableSelfRestart) {
     const candidate = new SelfRestart({

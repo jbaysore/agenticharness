@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { RpcProcess } from "../src/core/rpc.mjs";
 import { openCodex } from "../src/providers/codex.mjs";
+import { flushDiagnostics } from "../src/core/diagnostic-writes.mjs";
 import {
   appendStartupRecord,
   codexNativeStartup,
@@ -19,8 +20,10 @@ async function directory(t) {
   return path;
 }
 const logPath = (dir) => join(dir, "diagnostics", "codex-startup.jsonl");
-const records = async (dir) =>
-  (await readFile(logPath(dir), "utf8")).trim().split("\n").map(JSON.parse);
+const records = async (dir) => {
+  await flushDiagnostics();
+  return (await readFile(logPath(dir), "utf8")).trim().split("\n").map(JSON.parse);
+};
 function fixture(code, nativeLogPath, timeoutMs = 1000) {
   let rpc;
   return {
@@ -184,8 +187,49 @@ test("unwritable startup logging does not prevent a successful connection", asyn
   t.mock.method(console, "error", (...args) => warnings.push(args));
   const rpc = await openCodex(process.cwd(), { dataDir: blocked }, f.deps);
   rpc.close();
+  await flushDiagnostics();
   assert.ok(warnings.length);
   assert.match(warnings[0][0], /diagnostics could not be saved/);
+});
+
+test("a stalled diagnostic write cannot hold up a ready connection or retain startup listeners", { timeout: 2000 }, async (t) => {
+  const dir = await directory(t);
+  const f = fixture(echo, join(dir, "missing.sqlite"));
+  const blocked = Promise.withResolvers();
+  f.deps.createStartupLog = (options) => {
+    const log = new CodexStartupLog(options);
+    t.mock.method(log, "record", () => blocked.promise);
+    return log;
+  };
+  try {
+    const rpc = await openCodex(process.cwd(), { dataDir: dir }, f.deps);
+    assert.equal(rpc.listenerCount("diagnostic"), 0);
+    assert.equal(rpc.listenerCount("notification"), 0);
+    await rpc.call("after");
+  } finally {
+    blocked.resolve(true);
+    f.rpc?.close();
+  }
+});
+
+test("a failed connection stops waiting for stalled diagnostics without retrying", { timeout: 2000 }, async (t) => {
+  const dir = await directory(t);
+  const f = fixture("process.stdin.resume()", join(dir, "missing.sqlite"), 50);
+  const blocked = Promise.withResolvers();
+  f.deps.createStartupLog = (options) => {
+    const log = new CodexStartupLog(options);
+    t.mock.method(log, "record", () => blocked.promise);
+    return log;
+  };
+  try {
+    await assert.rejects(openCodex(process.cwd(), { dataDir: dir }, f.deps), (error) => {
+      assert.equal(error.code, "AGENT_RPC_TIMEOUT");
+      assert.doesNotMatch(error.message, /Startup diagnostics:/);
+      return true;
+    });
+    assert.equal(f.rpc.sequence, 1);
+    assert.equal(f.rpc.closed, true);
+  } finally { blocked.resolve(false); f.rpc?.close(); }
 });
 
 test("startup diagnostics omit credentials, HTTP headers, payloads and overlong lines", () => {

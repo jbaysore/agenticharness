@@ -13,6 +13,8 @@
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "test:attachments": "npm run build && node scripts/attachments-acceptance.mjs",
     "test:directory": "npm run build && node scripts/directory-acceptance.mjs",
+    "test:performance": "npm run build && node scripts/performance-acceptance.mjs",
+    "perf:workspace": "node scripts/performance-workspace.mjs",
     "test:directoryless": "npm run build && node scripts/directoryless-acceptance.mjs",
     "test:codex-commands": "node scripts/codex-command-acceptance.mjs",
     "test:layout": "npm run build && node scripts/layout-acceptance.mjs",

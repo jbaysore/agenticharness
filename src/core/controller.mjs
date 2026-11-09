@@ -131,6 +131,7 @@ export class Controller extends EventEmitter {
       openrouter = null,
       memoryWeb = null,
       watcherOptions = {},
+      diagnostics = null,
     },
   ) {
     super();
@@ -139,6 +140,7 @@ export class Controller extends EventEmitter {
     this.memoryWeb = memoryWeb;
     this.probePath = probePath;
     this.dataDir = dataDir;
+    this.diagnostics = diagnostics;
     this.bridgeUrl = bridgeUrl;
     this.openrouter = openrouter;
     this.providers = [];
@@ -1066,11 +1068,17 @@ export class Controller extends EventEmitter {
       home = this.store.project(chat.project_id),
       messageMap = new Map(),
       proposalBuffers = new Map();
+    const timing = (phase) => this.diagnostics?.start(phase, { chatId: chat.id, runId: run.id, provider: run.provider });
+    const preparationDone = timing("turn-preparation");
+    let firstActivityDone, firstTextDone;
     this.store.setRunMode(run.id, chat.mode);
     let project;
     try {
-      project = await this.chatFolder(chat, home, run);
+      const workspaceDone = timing("workspace-preparation");
+      try { project = await this.chatFolder(chat, home, run); workspaceDone?.(); }
+      catch (error) { workspaceDone?.("failed"); throw error; }
     } catch (failure) {
+      preparationDone?.("failed");
       const error = `This chat's worktree could not be prepared: ${failure.message}`;
       this.store.setRun(run.id, "failed", null, error);
       const entry = this.active.get(chat.id);
@@ -1213,6 +1221,8 @@ export class Controller extends EventEmitter {
       if (type === "nativeModel" && typeof payload.model === "string")
         actualModel = payload.model;
       if (type === "text") {
+        firstActivityDone?.();
+        firstTextDone?.();
         noteActivity();
         let id = messageMap.get(payload.nativeId);
         if (!id) {
@@ -1255,8 +1265,10 @@ export class Controller extends EventEmitter {
       } else if (
         type === "work" &&
         !["token-usage", "error", "provider-startup", "cancellation", "goal"].includes(payload?.kind)
-      )
+      ) {
+        firstActivityDone?.();
         noteActivity();
+      }
       if (type === "usage") {
         // Reloading the page must keep the latest reading, including stale status.
         this.providers = this.providers.map((p) =>
@@ -1350,9 +1362,13 @@ export class Controller extends EventEmitter {
     );
     const requestText = text + attachmentContext(files);
     const memoryProject = projectFolder(this.store.project(chat.project_id));
-    const memory = this.memoryWeb
-      ? await this.memoryWeb.context(requestText, memoryProject)
-      : "";
+    const contextDone = timing("context-preparation");
+    const memoryTask = Promise.resolve().then(() => this.memoryWeb
+      ? this.memoryWeb.context(requestText, memoryProject)
+      : "").then((memory) => { contextDone?.(); return memory; }, (error) => {
+        contextDone?.("failed");
+        throw error;
+      });
     const continuationText = continuing
       ? [
           modeChange
@@ -1400,17 +1416,16 @@ export class Controller extends EventEmitter {
     // Chats sharing this folder are told about each other when that notice
     // changes. The shared Git rules go out with the first notice only.
     const savedSession = session && typeof session === "object" ? session : {},
-      peers = workspacePeers(this.store, chat.id),
-      notice = workspaceNotice(
-        peers,
-        peers.length
-          ? await repositoryState(project.path).then(
-              (state) => state.changes,
-              () => null,
-            )
-          : null,
-        { rules: !savedSession.noticeRulesSent },
-      );
+      peers = workspacePeers(this.store, chat.id);
+    const noticeDone = timing("workspace-notice");
+    const changesTask = peers.length
+      ? repositoryState(project.path).then(
+          (state) => { noticeDone?.(); return state.changes; },
+          () => { noticeDone?.("unavailable"); return null; },
+        )
+      : Promise.resolve(null).then((value) => { noticeDone?.(); return value; });
+    const [memory, changes] = await Promise.all([memoryTask, changesTask]);
+    const notice = workspaceNotice(peers, changes, { rules: !savedSession.noticeRulesSent });
     if (notice)
       this.event(chat.id, run.id, "work", {
         kind: "workspace-notice",
@@ -1804,6 +1819,7 @@ export class Controller extends EventEmitter {
     const ctx = {
       project,
       runId: run.id,
+      timing,
       dataDir: this.dataDir,
       chat,
       attachments: files,
@@ -1917,6 +1933,7 @@ export class Controller extends EventEmitter {
         if (current?.run.id !== run.id || current.abort !== abort || !current.goalStopRequested ||
             (chat.mode !== "goal" && (!savedGoal || goalStopped(savedGoal.status)))) return;
         current.pauseConfirmed = true;
+        current.pauseTimingDone?.();
         this.store.setGoalState(chat.id, run.provider, run.id, status === "complete" ? "complete" : "paused");
         this.event(chat.id, run.id, "work", { kind: "cancellation", state: "confirmed", text: status === "complete" ? "The provider confirmed the Goal is complete." : "Goal paused at your request. Resume it any time." });
       },
@@ -2007,6 +2024,9 @@ export class Controller extends EventEmitter {
       ],
     };
     try {
+      preparationDone?.();
+      firstActivityDone = timing("first-provider-activity");
+      firstTextDone = timing("first-text");
       this.store.setRun(run.id, "running");
       this.event(chat.id, run.id, "run", {
         status: "running",
@@ -2027,6 +2047,8 @@ export class Controller extends EventEmitter {
       error = caught.message;
       noteUsageFailure(error);
     } finally {
+      firstActivityDone?.(abort.signal.aborted ? "cancelled" : "unavailable");
+      firstTextDone?.(abort.signal.aborted ? "cancelled" : "unavailable");
       await reviewer?.close();
       const reading = this.store.contextByProvider(chat.id)[run.provider];
       if (reading?.runId === run.id && (abort.signal.aborted || status === "failed"))
@@ -2097,6 +2119,7 @@ export class Controller extends EventEmitter {
       if (chat.mode === "goal") this.store.setGoalState(chat.id, run.provider, run.id, "waiting");
       this.watchers.parked(chat.id, active.watchYield.ids);
     } else if (active?.goalStopRequested) {
+      active.pauseTimingDone?.(active.pauseConfirmed ? "ready" : "unconfirmed");
       if (!active.pauseConfirmed && (chat.mode === "goal" || (savedGoal && !goalStopped(savedGoal.status)))) {
         this.store.setGoalState(chat.id, run.provider, run.id, "unknown");
         this.event(chat.id, run.id, "work", { kind: "cancellation", state: "unconfirmed", text: "The provider disconnected before confirming the Goal pause." });
@@ -2603,6 +2626,9 @@ export class Controller extends EventEmitter {
       if (active.goalStopRequested) return { requested: true };
       active.cancelled = true;
       active.goalStopRequested = true;
+      active.pauseTimingDone = this.diagnostics?.start("pause-confirmation", {
+        chatId, runId: active.run.id, provider: active.run.provider,
+      });
       this.event(chatId, active.run.id, "work", {
         kind: "cancellation",
         state: "requested",
@@ -2617,19 +2643,25 @@ export class Controller extends EventEmitter {
         const abort = new AbortController();
         const task = Promise.resolve().then(async () => {
           for (const goal of goals) {
+            const pauseTiming = (phase) => this.diagnostics?.start(phase, {
+              chatId, runId: goal.runId, provider: goal.provider,
+            });
+            const pauseDone = pauseTiming("pause-verification");
             this.event(chatId, goal.runId ?? null, "work", { kind: "cancellation", state: "requested", text: "Reconnecting to verify the Goal pause…" });
             try {
               const session = chat.sessions[goal.provider];
               const saved = typeof session === "string" ? { id: session } : session;
               if (!saved?.id) throw new Error("The Goal has no saved native session to verify");
-              const status = await this.pauseRunners[goal.provider](this.store.project(chat.project_id).path, saved, { dataDir: this.dataDir, signal: abort.signal });
+              const status = await this.pauseRunners[goal.provider](this.store.project(chat.project_id).path, saved, { dataDir: this.dataDir, signal: abort.signal, timing: pauseTiming });
               if (!goalStopped(status)) throw new Error("The provider did not confirm the Goal stopped");
+              pauseDone?.();
               if (abort.signal.aborted || this.active.has(chatId)) return;
               const latest = this.store.conversation(chatId)?.sessions[goal.provider];
               if ((typeof latest === "string" ? latest : latest?.id) !== saved.id || latest?.goal?.runId !== goal.runId) continue;
               this.store.setGoalState(chatId, goal.provider, goal.runId, status === "complete" ? "complete" : "paused");
               this.event(chatId, goal.runId ?? null, "work", { kind: "cancellation", state: "confirmed", text: "The provider confirmed the Goal stopped." });
             } catch (error) {
+              pauseDone?.(abort.signal.aborted ? "cancelled" : "unconfirmed");
               this.event(chatId, goal.runId ?? null, "work", { kind: "cancellation", state: "unconfirmed", text: "Could not verify the Goal pause: " + error.message });
             }
           }

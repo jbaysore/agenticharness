@@ -299,9 +299,11 @@ export function ChatPane({
     let ignored = false, timer;
     const poll = async () => {
       try {
-        const next = await reload(chat.id);
+        const next = await api(`/api/chats/${chat.id}/status`);
         if (ignored) return;
         if (!next.activeRun && next.pause?.state !== "requested") {
+          await reload(chat.id);
+          if (ignored) return;
           setStopping("");
           return;
         }

@@ -1,12 +1,10 @@
-import { appendFile, mkdir, rename, rm, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { stripVTControlCharacters } from "node:util";
 import { DatabaseSync } from "node:sqlite";
-import { retryFileOperation } from "./file-retry.mjs";
+import { appendDiagnosticRecord } from "./diagnostic-writes.mjs";
 
-const writes = new Map();
 const MAX_LINE = 16_384;
 const MAX_LINES = 32;
 
@@ -50,44 +48,7 @@ function errorCode(error) {
 }
 
 // Serialize writes/rotation across concurrent chats and connection checks.
-export function appendStartupRecord(
-  path,
-  record,
-  { maxBytes = 2 * 1024 * 1024 } = {},
-) {
-  const previous = writes.get(path) ?? Promise.resolve();
-  const next = previous
-    .catch(() => {})
-    .then(async () => {
-      await mkdir(dirname(path), { recursive: true });
-      const line = JSON.stringify(record) + "\n";
-      const size = await stat(path).then(
-        (s) => s.size,
-        (e) => {
-          if (e.code !== "ENOENT") throw e;
-          return 0;
-        },
-      );
-      if (size && size + Buffer.byteLength(line) > maxBytes) {
-        await retryFileOperation(() => rm(path + ".3", { force: true }));
-        for (let n = 2; n >= 0; n--)
-          await retryFileOperation(() =>
-            rename(n ? path + "." + n : path, path + "." + (n + 1))).catch(
-            (e) => {
-              if (e.code !== "ENOENT") throw e;
-            },
-          );
-      }
-      await appendFile(path, line, { mode: 0o600 });
-    });
-  writes.set(path, next);
-  next
-    .finally(() => {
-      if (writes.get(path) === next) writes.delete(path);
-    })
-    .catch(() => {});
-  return next;
-}
+export const appendStartupRecord = appendDiagnosticRecord;
 
 // A quiet child may still have native records. Read only its startup window.
 export function codexNativeStartup(path, pid, startedAt, endedAt) {
@@ -179,10 +140,9 @@ export class CodexStartupLog {
       phase,
       ...details,
     };
-    this.queue = this.queue
-      .then(() => appendStartupRecord(this.path, record))
+    this.queue = appendStartupRecord(this.path, record)
       .then(
-        () => true,
+        (saved) => saved,
         (error) => {
           console.error(
             "Codex startup diagnostics could not be saved",

@@ -88,6 +88,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS events_conversation ON events(conversation_id,id);
       CREATE INDEX IF NOT EXISTS events_conversation_type ON events(conversation_id,type,id);
       CREATE INDEX IF NOT EXISTS events_run_type_time ON events(run_id,type,created_at);
+      CREATE INDEX IF NOT EXISTS events_run_control ON events(run_id,id)
+        WHERE type='work' AND json_extract(payload,'$.kind') IN ('provider-startup','cancellation');
       CREATE TABLE IF NOT EXISTS reliability_actions(action_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, payload TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS conversation_context(conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, provider TEXT NOT NULL, payload TEXT NOT NULL, last_event_id INTEGER NOT NULL, PRIMARY KEY(conversation_id,provider));
       CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,created_at);
@@ -1266,14 +1268,14 @@ export class Store {
       .prepare(
         // A reply's first text event is enough to place the steps after it.
         `SELECT e.id, e.run_id, e.type, e.payload, r.status FROM events e JOIN runs r ON r.id=e.run_id
-        WHERE e.run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
+        WHERE e.conversation_id=? AND e.run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
         AND ((e.type='work' AND json_extract(e.payload,'$.kind') NOT IN ('command-output','token-usage'))
           OR e.id IN (SELECT MIN(id) FROM events WHERE conversation_id=? AND type='text'
             AND run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
             GROUP BY json_extract(payload,'$.messageId')))
         ORDER BY e.id`,
       )
-      .all(conversationId, conversationId, conversationId)) {
+      .all(conversationId, conversationId, conversationId, conversationId)) {
       const run = (byRun[e.run_id] ??= { status: e.status, payloads: [] });
       run.payloads.push({ id: e.id, type: e.type, payload: JSON.parse(e.payload) });
     }
@@ -1366,19 +1368,27 @@ export class Store {
       .get(run.id);
     return approved ? null : { runId: run.id, plan, mode: run.mode };
   }
-  conversationSnapshot(id) {
+  conversationStatus(id) {
     const activeRun = this.activeRun(id);
     if (activeRun) Object.assign(activeRun, this.runProgress(activeRun.id));
     const latestRun = activeRun ?? this.db.prepare("SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1").get(id);
     return {
+      id,
+      activeRun,
+      pause: activeRun ? activeRun.pause : (latestRun ? this.runProgress(latestRun.id).pause : undefined),
+      lastEventId: this.latestEventId(),
+    };
+  }
+  conversationSnapshot(id) {
+    const status = this.conversationStatus(id);
+    return {
       ...this.conversation(id),
-      pause: latestRun ? this.runProgress(latestRun.id).pause : undefined,
+      ...status,
       contextByProvider: this.contextByProvider(id),
       messages: this.messages(id),
       proposedPlans: this.proposedPlans(id),
       planReviews: this.planReviews(id),
       openPlan: this.openPlan(id),
-      activeRun,
       queue: this.queuedInputs(id),
       watches: this.watchStore.list(id).map(({ checkpoint, rootId, originRunId, runner, ...watch }) => watch),
       approvals: this.pendingApprovals(id),
@@ -1401,6 +1411,7 @@ export class Store {
     const progress = {};
     for (const [key, kind] of [["startup", "provider-startup"], ["pause", "cancellation"]]) {
       const row = this.db.prepare(`SELECT payload FROM events WHERE run_id=? AND type='work'
+        AND json_extract(payload,'$.kind') IN ('provider-startup','cancellation')
         AND json_extract(payload,'$.kind')=? ORDER BY id DESC LIMIT 1`).get(runId, kind);
       if (row) progress[key] = JSON.parse(row.payload);
     }
