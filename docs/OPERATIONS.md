@@ -981,6 +981,10 @@ run `Unregister-ScheduledTask -TaskName 'Agentic Harness' -Confirm:$false`.
 Open the context meter beneath the composer for context history, continuity
 notices, recorded checks, and conversation timing. The 75% and 90% colors describe
 capacity; session age and occupancy do not estimate hallucination probability.
+At 75% the meter says the conversation costs more included usage because each
+turn rereads it, including cached tokens. At 90% it says compaction has not run.
+That warning is about subscription usage, not correctness. Compaction itself
+stays the provider's action; this meter does not start it.
 Task requirements and source correctness remain **Not assessed** in this release.
 
 Compaction, model-session handoffs, and interruptions produce nonblocking notices.

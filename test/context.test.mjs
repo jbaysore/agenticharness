@@ -10,6 +10,7 @@ import {
 } from "../src/core/context.mjs";
 import {
   contextView,
+  contextUsageWarning,
   cacheReuse,
   mergeContextSnapshots,
 } from "../src/ui/context.mjs";
@@ -250,6 +251,17 @@ test("context display distinguishes unknown, zero, high context, and another mod
   assert.equal(Math.round(over.percent), 110);
   assert.equal(over.fill, 100);
   assert.equal(over.level, "high");
+  assert.equal(over.usageWarning.label, "Needs compaction");
+  assert.equal(
+    contextView({ ...reading, usedTokens: 150000 }, { model: "m" }).usageWarning
+      .label,
+    "Costs usage",
+  );
+  assert.equal(
+    contextView({ ...reading, usedTokens: 149999 }, { model: "m" }).usageWarning,
+    null,
+  );
+  assert.equal(contextUsageWarning({ percent: 96, compacting: true }), null);
   assert.equal(contextView(reading, { model: "other" }).percent, null);
   assert.equal(
     contextView({ ...reading, windowTokens: null }, { model: "m" }).label,

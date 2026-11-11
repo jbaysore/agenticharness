@@ -51,7 +51,28 @@ export function contextView(
     level: percent >= 90 ? "high" : percent >= 75 ? "elevated" : "normal",
     updating: active && !compacting,
     outdated: reading?.state === "outdated",
+    usageWarning: contextUsageWarning({ percent, compacting }),
   };
+}
+
+// A large window is reread on every turn. Included usage still moves when
+// those tokens are cache reads, so a full context can spend a session limit
+// before the provider compacts.
+export function contextUsageWarning({ percent, compacting = false } = {}) {
+  if (compacting || percent == null || percent < 75) return null;
+  return percent >= 90
+    ? {
+        level: "high",
+        label: "Needs compaction",
+        detail:
+          "Context is nearly full and compaction has not run. Each turn rereads almost this whole window. Included usage still rises when those tokens are cache reads, and one turn can spend a large share of a usage window. Compact this chat, or continue from a fresh chat that keeps only the current state.",
+      }
+    : {
+        level: "elevated",
+        label: "Costs usage",
+        detail:
+          "This conversation is large enough that each turn rereads it. Included usage rises faster, including cached tokens. Compaction is what shrinks the transcript.",
+      };
 }
 
 export function cacheReuse(usage) {

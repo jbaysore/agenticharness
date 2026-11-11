@@ -90,7 +90,9 @@ try {
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Context details" });
   await expect(dialog).toContainText("90% (72,000 input tokens)");
-  await expect(dialog).toContainText("Cached tokens still occupy context");
+  await expect(dialog).toContainText(
+    "Included usage still rises when those tokens are cache reads",
+  );
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
   await expect(dialog).toHaveCount(0);
@@ -136,9 +138,14 @@ try {
   await expect(
     page.getByRole("button", { name: /^Context unavailable/ }),
   ).toHaveCount(1);
+  const fullContext = page.getByRole("button", { name: /^Context 110%/ });
+  await expect(fullContext).toHaveCount(1);
+  await expect(fullContext).toContainText("Needs compaction");
+  await fullContext.click();
   await expect(
-    page.getByRole("button", { name: /^Context 110%/ }),
-  ).toHaveCount(1);
+    page.getByRole("dialog", { name: "Context details" }),
+  ).toContainText("compaction has not run");
+  await page.keyboard.press("Escape");
   await expect(
     page.getByRole("button", { name: /^≈ Context 42%/ }),
   ).toHaveCount(1);

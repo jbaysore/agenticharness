@@ -1505,6 +1505,10 @@ small {
 .context-meter.high .context-track > span { background: var(--danger-ink); }
 .context-meter.outdated .context-track { opacity: .5; }
 .context-note { font-size: 10px; }
+.context-usage-warning { flex-shrink: 0; font-size: 10px; font-weight: 600; }
+.context-usage-warning.elevated { color: #946719; }
+.context-usage-warning.high { color: var(--danger-ink); }
+.context-usage-alert { color: var(--text); }
 .context-updating { color: var(--text-3); }
 .context-popover { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; width: min(380px, 100%); max-height: min(420px, 60vh); overflow: auto; padding: 16px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 28px #0002; color: var(--text-2); font-size: 12px; }
 .context-popover > strong { color: var(--text); font-size: 13px; }
@@ -1961,6 +1965,7 @@ small {
 .context-meter.compact .context-track,
 .context-meter.compact .context-count,
 .context-meter.compact .context-note { display: none; }
+.context-meter.compact .context-usage-warning { display: inline; }
 .context-meter.compact .context-trigger { flex-wrap: nowrap; gap: 5px; }
 .context-meter.compact .reliability-badge { font-size: 10px; }
 .permissions-control select,

@@ -22,7 +22,7 @@ export function ContextBar({ chat, provider, model, compact = false }) {
     active,
     started: chat?.runs?.some((r) => r.provider === provider),
   });
-  const { reading, percent } = view;
+  const { reading, percent, usageWarning } = view;
   const reuse = cacheReuse(reading?.cache);
   const reliability = useReliability(chat, provider, model, open);
   const triggerLabel = !compact ? view.label : percent !== null ? view.label.replace("Context ", "") : reading?.state === "compacting" ? "Compacting…" : reading?.state === "unavailable" ? "Not reported" : "Not measured";
@@ -73,7 +73,7 @@ export function ContextBar({ chat, provider, model, compact = false }) {
       document.removeEventListener("keydown", escape);
     };
   }, [open]);
-  const description = `${view.label}${view.used !== null && percent !== null ? `, ${count(view.used)} of ${count(view.window)} tokens` : ""}${view.outdated ? ", last reading" : ""}${view.updating ? ", updating" : ""}${reliability.data?.notices.length ? `, ${reliability.data.status}` : ""}`;
+  const description = `${view.label}${view.used !== null && percent !== null ? `, ${count(view.used)} of ${count(view.window)} tokens` : ""}${usageWarning ? `. ${usageWarning.detail}` : ""}${view.outdated ? ", last reading" : ""}${view.updating ? ", updating" : ""}${reliability.data?.notices.length ? `, ${reliability.data.status}` : ""}`;
   return (
     <div
       className={`context-meter ${view.level}${view.outdated ? " outdated" : ""}${compact ? " compact" : ""}`}
@@ -106,6 +106,11 @@ export function ContextBar({ chat, provider, model, compact = false }) {
             ? `${short(view.used)}${view.window > 0 ? ` / ${short(view.window)}` : " tokens"}`
             : "—"}
         </span>
+        {usageWarning && (
+          <span className={`context-usage-warning ${usageWarning.level}`}>
+            {usageWarning.label}
+          </span>
+        )}
         {view.outdated && <span className="context-note">Last reading</span>}
         {reliability.data?.notices.length > 0 && <span className="reliability-badge" title={reliability.data.status}>{compact ? "Review" : reliability.data.status}</span>}
         {view.updating && (
@@ -122,6 +127,11 @@ export function ContextBar({ chat, provider, model, compact = false }) {
           aria-label="Context details"
         >
           <strong>Context &amp; reliability</strong>
+          {usageWarning && (
+            <p className="context-usage-alert" role="status">
+              {usageWarning.detail}
+            </p>
+          )}
           {reading?.state === "compacting" && (
             <p>
               Updating after compaction. These are the last values reported
@@ -203,8 +213,9 @@ export function ContextBar({ chat, provider, model, compact = false }) {
             </p>
           )}
           <p>
-            Cached tokens still occupy context. This is separate from your
-            subscription allowance.
+            A full window is reread on every turn. Included usage still rises
+            when those tokens are cache reads. This meter is the conversation
+            size, not the subscription allowance. Compaction is what shrinks it.
           </p>
           <p>
             The working window may follow the provider’s compaction policy.
