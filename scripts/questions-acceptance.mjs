@@ -54,11 +54,23 @@ try {
       .fill("Ask the fixture question");
     await page.getByLabel("Send message").click();
     await expect(approval).toBeVisible();
+    const confirming = questions[0]?.answer === "done";
     if (questions.length > 1) {
-      await expect(
-        approval.getByRole("button", { name: "Next", exact: true }),
-      ).toBeDisabled();
+      if (confirming)
+        await expect(
+          approval.getByRole("button", { name: "I've done this", exact: true }),
+        ).toBeEnabled();
+      else {
+        await expect(
+          approval.getByRole("button", { name: "Next", exact: true }),
+        ).toBeDisabled();
+        await expect(send).toHaveCount(0);
+      }
+    } else if (confirming) {
       await expect(send).toHaveCount(0);
+      await expect(
+        approval.getByRole("button", { name: "I've done this", exact: true }),
+      ).toBeEnabled();
     } else await expect(send).toBeDisabled();
   };
   const sent = async (answer) => {
@@ -150,7 +162,7 @@ try {
     approval.getByText("Question 2 of 2", { exact: true }),
   ).toBeVisible();
   const notes = approval.getByRole("textbox", {
-    name: "Your response",
+    name: "Anything else to keep in mind?",
     exact: true,
   });
   await expect(send).toBeDisabled();
@@ -341,13 +353,47 @@ try {
   await sent({ allow: true, answers: { custom: "Use a new approach" } });
 
   await ask("codex", [
+    {
+      id: "code",
+      question: "What is the release code?",
+      answer: "text",
+      placeholder: "Release code",
+    },
+  ]);
+  await expect(
+    approval.getByRole("button", { name: "I've done this", exact: true }),
+  ).toHaveCount(0);
+  const code = approval.getByRole("textbox", {
+    name: "What is the release code?",
+    exact: true,
+  });
+  await expect(code).toHaveAttribute("placeholder", "Release code");
+  await expect(send).toBeDisabled();
+  await code.fill("rc-9");
+  await send.click();
+  await sent({ allow: true, answers: { code: "rc-9" } });
+
+  await ask("codex", [
+    {
+      id: "merged",
+      question: "Merge the pull request, then confirm.",
+      answer: "done",
+    },
+  ]);
+  await expect(approval.getByRole("textbox")).toHaveCount(0);
+  await approval
+    .getByRole("button", { name: "I've done this", exact: true })
+    .click();
+  await sent({ allow: true, answers: { merged: "Done" } });
+
+  await ask("codex", [
     { id: "decline", question: "Choose an approach", options: ["Proceed"] },
   ]);
   await approval.getByRole("button", { name: "Decline", exact: true }).click();
   await sent({ allow: false, answers: {} });
   expect(errors).toEqual([]);
   console.log(
-    "Question checks passed: styled choices, descriptions, Other, keyboard, mobile, single/multiple answers, provider formats, validation, retry, submission lock, and decline. Providers were simulated; no inference.",
+    "Question checks passed: styled choices, descriptions, Other, keyboard, mobile, single/multiple answers, text output, done confirmation, provider formats, validation, retry, submission lock, and decline. Providers were simulated; no inference.",
   );
 } finally {
   await browser?.close();

@@ -716,7 +716,7 @@ export function ChatPane({
       setBusy(false);
     }
   }
-  // Confirming, denying, or Other resumes the Goal with that answer.
+  // Confirming, sending a requested value, denying, or Other resumes the Goal.
   async function answerOwner(answer) {
     if (!chat || busy || sending.current || chat.activeRun) return;
     setBusy(true);

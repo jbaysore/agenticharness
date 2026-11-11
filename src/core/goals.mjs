@@ -58,7 +58,8 @@ const watchContinuing = (watch) =>
 // The bottom of a Goal chat offers resume only for the Goal the latest turn
 // left unfinished. An older provider's pause stays saved, and a Goal parked
 // on an armed CI watch continues on its own, so neither becomes another box.
-// An owner pause has its own card; confirming, denying, or Other resumes it.
+// An owner pause has its own card. Confirming, sending a requested value,
+// denying, or Other resumes it.
 export function resumeOffers(chat) {
   if (chat?.activeRun) return [];
   const continuing = (chat?.watches ?? []).some(watchContinuing);

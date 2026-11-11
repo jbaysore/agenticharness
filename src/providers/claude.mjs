@@ -515,6 +515,8 @@ export async function runClaude(
                   z.object({
                     id: z.string().min(1),
                     question: z.string().min(1),
+                    answer: z.enum(["choice", "text", "done"]).optional(),
+                    placeholder: z.string().min(1).max(120).optional(),
                     multiSelect: z.boolean().optional(),
                     options: z
                       .array(
@@ -593,7 +595,11 @@ export async function runClaude(
           tool(
             t.name,
             t.description,
-            { statement: z.string().min(1).max(2000) },
+            {
+              statement: z.string().min(1).max(2000),
+              expects: z.enum(["done", "text"]).optional(),
+              prompt: z.string().min(1).max(120).optional(),
+            },
             async (args) => ({
               content: [
                 {

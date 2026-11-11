@@ -464,14 +464,33 @@ export function Approval({ approval, onAnswer, review, onReview }) {
           onClick={() => {
             if (r.kind === "plan" && revisingPlan)
               respond({ allow: false, reason: feedback.trim() });
-            else if (step?.primary === "next") setPage(step.index + 1);
+            else if (step?.confirm) {
+              const id = questionId(current);
+              const marked = { ...responses, [id]: { done: true } };
+              if (step.primary === "next") {
+                setResponses(marked);
+                setPage(step.index + 1);
+                return;
+              }
+              respond({
+                allow: true,
+                answers: Object.fromEntries(
+                  (r.questions ?? []).map((q) => [
+                    questionId(q),
+                    questionAnswer(q, marked[questionId(q)]),
+                  ]),
+                ),
+              });
+            } else if (step?.primary === "next") setPage(step.index + 1);
             else respond({ allow: true, answers });
           }}
         >
           {r.kind === "question"
-            ? step?.primary === "next"
-              ? "Next"
-              : "Send answer"
+            ? step?.confirm
+              ? "I've done this"
+              : step?.primary === "next"
+                ? "Next"
+                : "Send answer"
             : r.kind === "plan"
               ? revisingPlan
                 ? "Send feedback"

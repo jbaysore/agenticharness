@@ -462,6 +462,9 @@ export class Store {
               ownerPause: {
                 statement: pause.statement,
                 askedAt: pause.askedAt ?? this.now(),
+                ...(pause.expects === "text" && pause.prompt
+                  ? { expects: "text", prompt: pause.prompt }
+                  : {}),
               },
             }),
           },

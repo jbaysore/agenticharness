@@ -26,6 +26,19 @@ app.controller.providers = [
 ];
 app.controller.runners.codex = async (ctx) => {
   prompts.push(ctx.text);
+  if (ctx.text.startsWith("Block on a value")) {
+    ctx.goalState("active", "Ship the release");
+    await ctx.history("pause_for_owner", {
+      statement: "Paste the release code.",
+      expects: "text",
+      prompt: "Release code",
+    });
+    await new Promise((resolve) =>
+      ctx.signal.addEventListener("abort", resolve, { once: true }),
+    );
+    ctx.ownerParked();
+    return { status: "cancelled" };
+  }
   if (ctx.text.startsWith("Block on the owner")) {
     ctx.goalState("active", "Ship the release");
     await ctx.history("pause_for_owner", {
@@ -43,7 +56,7 @@ app.controller.runners.codex = async (ctx) => {
   return { status: "completed" };
 };
 const project = app.store.addProject("Owner pause", projectPath);
-const create = async (title) => {
+const create = async (title, text = "Block on the owner") => {
   const chat = app.store.createConversation({
     projectId: project.id,
     title,
@@ -53,7 +66,7 @@ const create = async (title) => {
   });
   app.controller.send(chat.id, {
     actionId: randomUUID(),
-    text: "Block on the owner",
+    text,
     mode: "goal",
     provider: "codex",
     model: "fixture",
@@ -67,6 +80,7 @@ try {
   const done = await create("Confirm owner pause");
   const denied = await create("Deny owner pause");
   const other = await create("Other owner pause");
+  const value = await create("Provide a value", "Block on a value");
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const page = await browser.newPage({ viewport: { width: 1512, height: 982 } });
   page.on("pageerror", (error) => errors.push(error.message));
@@ -113,9 +127,26 @@ try {
   await expect(page.getByText("Goal continued.", { exact: true })).toBeVisible();
   assertPrompt(/Other/);
   assertPrompt(/follow-up/);
+
+  await page.setViewportSize({ width: 1512, height: 982 });
+  await open(value);
+  await expect(
+    card.getByRole("button", { name: "I've done this", exact: true }),
+  ).toHaveCount(0);
+  const field = card.getByLabel("Release code");
+  const sendValue = card.getByRole("button", { name: "Send", exact: true });
+  await expect(field).toBeVisible();
+  await expect(sendValue).toBeDisabled();
+  await field.fill("rc-9");
+  await expect(sendValue).toBeEnabled();
+  await sendValue.click();
+  await expect(page.getByText("Goal continued.", { exact: true })).toBeVisible();
+  await expect(card).toHaveCount(0);
+  assertPrompt(/The owner provided/);
+  assertPrompt(/rc-9/);
   expect(errors).toEqual([]);
   console.log(
-    "Owner pause checks passed: persisted card, confirm, deny with a reason, Other with a reason, and mobile layout. The provider was simulated.",
+    "Owner pause checks passed: persisted card, confirm, deny with a reason, Other with a reason, a value field without a done button, and mobile layout. The provider was simulated.",
   );
 } finally {
   await browser?.close();

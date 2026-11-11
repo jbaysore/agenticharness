@@ -14,8 +14,10 @@ function splitStatement(statement) {
 export function OwnerPauseCard({ goal, watching, disabled, onAnswer }) {
   const [choice, setChoice] = useState(null),
     [reason, setReason] = useState(""),
+    [output, setOutput] = useState(""),
     [problem, setProblem] = useState(""),
     [submitting, setSubmitting] = useState(false);
+  const expectsText = goal.ownerPause.expects === "text";
   const { headline, detail } = splitStatement(goal.ownerPause.statement);
   const submit = async (answer) => {
     if (submitting || disabled) return;
@@ -50,6 +52,19 @@ export function OwnerPauseCard({ goal, watching, disabled, onAnswer }) {
           Goal: {goal.objective}
         </span>
       )}
+      {expectsText && !choice && (
+        <label className="question-custom">
+          {goal.ownerPause.prompt || "Your response"}
+          <textarea
+            rows={3}
+            autoFocus
+            value={output}
+            disabled={submitting || disabled}
+            placeholder={goal.ownerPause.prompt || "Write the requested value…"}
+            onChange={(event) => setOutput(event.target.value)}
+          />
+        </label>
+      )}
       {choice && (
         <label className="question-custom">
           {choice === "deny" ? "Why not?" : "What should happen instead?"}
@@ -69,14 +84,26 @@ export function OwnerPauseCard({ goal, watching, disabled, onAnswer }) {
       )}
       {problem && <p className="error-text">{problem}</p>}
       <div className="owner-pause-actions">
-        <button
-          type="button"
-          className="notice-action primary"
-          disabled={submitting || disabled}
-          onClick={() => submit({ choice: "done" })}
-        >
-          I've done this
-        </button>
+        {expectsText && !choice && (
+          <button
+            type="button"
+            className="notice-action primary"
+            disabled={submitting || disabled || !output.trim()}
+            onClick={() => submit({ choice: "text", reason: output.trim() })}
+          >
+            Send
+          </button>
+        )}
+        {!expectsText && (
+          <button
+            type="button"
+            className="notice-action primary"
+            disabled={submitting || disabled}
+            onClick={() => submit({ choice: "done" })}
+          >
+            I've done this
+          </button>
+        )}
         <button
           type="button"
           className="notice-action"
@@ -113,7 +140,9 @@ export function OwnerPauseCard({ goal, watching, disabled, onAnswer }) {
         )}
       </div>
       <p className="owner-pause-hint">
-        The goal resumes when you answer. Deny and Other need a reason.
+        {expectsText
+          ? "Send the requested value to resume the goal. Deny and Other need a reason."
+          : "The goal resumes when you answer. Deny and Other need a reason."}
       </p>
       {watching && (
         <p className="owner-pause-hint">

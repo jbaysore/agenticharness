@@ -22,6 +22,20 @@ function harness(provider = "codex") {
   ];
   controller.runners[provider] = async (ctx) => {
     seen.push(ctx);
+    if (ctx.text.startsWith("Need the code")) {
+      ctx.goalState("active", "Ship the release");
+      const paused = await ctx.history("pause_for_owner", {
+        statement: "Paste the release code.",
+        expects: "text",
+        prompt: "Release code",
+      });
+      assert.equal(paused.parked, true);
+      await new Promise((resolve) =>
+        ctx.signal.addEventListener("abort", resolve, { once: true }),
+      );
+      ctx.ownerParked();
+      return { status: "cancelled" };
+    }
     if (ctx.text.startsWith("Ship the release")) {
       ctx.goalState("active", "Ship the release");
       const paused = await ctx.history("pause_for_owner", {
@@ -97,13 +111,34 @@ const send = async (controller, chat, actionId, text, extra = {}) => {
 
 test("an owner pause needs a statement, and deny or other needs a reason", () => {
   assert.equal(checkOwnerPause({ statement: "  Merge it.  " }).statement, "Merge it.");
+  assert.equal(checkOwnerPause({ statement: "Merge it." }).expects, "done");
   assert.throws(() => checkOwnerPause({ statement: "   " }));
   assert.throws(() => checkOwnerPause({ statement: "x".repeat(601) }));
+  assert.throws(() => checkOwnerPause({ statement: "Merge it.", expects: "later" }));
+  assert.throws(() =>
+    checkOwnerPause({ statement: "Merge it.", expects: "text" }),
+  );
+  assert.deepEqual(
+    checkOwnerPause({
+      statement: "Paste the code.",
+      expects: "text",
+      prompt: "  Release code  ",
+    }),
+    { statement: "Paste the code.", expects: "text", prompt: "Release code" },
+  );
   assert.equal(checkOwnerAnswer("done", "").choice, "done");
   assert.throws(() => checkOwnerAnswer("deny", "  "));
   assert.throws(() => checkOwnerAnswer("other", ""));
+  assert.throws(() => checkOwnerAnswer("done", "", "text"), /value/);
+  assert.throws(() => checkOwnerAnswer("text", "  ", "text"), /value/);
+  assert.equal(checkOwnerAnswer("text", " rc-9 ", "text").reason, "rc-9");
+  assert.equal(checkOwnerAnswer("deny", "Not now.", "text").choice, "deny");
   assert.equal(checkOwnerAnswer("other", " Use the other branch. ").reason, "Use the other branch.");
   assert.match(ownerAnswerPrompt("Merge it.", { choice: "deny", reason: "Not yet." }), /Denied/);
+  assert.match(
+    ownerAnswerPrompt("Paste the code.", { choice: "text", reason: "rc-9" }),
+    /The owner provided:\nrc-9/,
+  );
 });
 
 test("a confirmed owner pause waits without a resume box, then each answer resumes the Goal", async () => {
@@ -140,6 +175,41 @@ test("a confirmed owner pause waits without a resume box, then each answer resum
     assert.equal(store.conversation(chat.id).sessions.codex.goal.status, "complete");
     assert.equal(store.conversation(chat.id).sessions.codex.goal.objective, "Ship the release");
     assert.equal(store.conversation(chat.id).owner_pause, false);
+  } finally {
+    await controller.close();
+    store.close();
+  }
+});
+
+test("a text owner pause collects the value and rejects a bare done confirmation", async () => {
+  const { store, controller, seen, chat } = harness();
+  try {
+    await send(controller, chat, "owner-pause-value-01", "Need the code");
+    const pause = store.conversation(chat.id).sessions.codex.goal.ownerPause;
+    assert.equal(pause.expects, "text");
+    assert.equal(pause.prompt, "Release code");
+    assert.equal(pause.statement, "Paste the release code.");
+    assert.throws(
+      () =>
+        controller.answerOwnerPause(chat.id, {
+          actionId: "owner-value-done-01",
+          choice: "done",
+        }),
+      /value/,
+    );
+    controller.answerOwnerPause(chat.id, {
+      actionId: "owner-value-text-01",
+      choice: "text",
+      reason: "rc-9",
+    });
+    await controller.active.get(chat.id).task;
+    assert.match(seen.at(-1).text, /The owner provided/);
+    assert.match(seen.at(-1).text, /rc-9/);
+    assert.equal(
+      store.messages(chat.id).filter((m) => m.role === "user").at(-1).content,
+      "rc-9",
+    );
+    assert.equal(store.conversation(chat.id).sessions.codex.goal.status, "complete");
   } finally {
     await controller.close();
     store.close();

@@ -147,7 +147,10 @@ request or running a command on a machine the agent cannot reach, it calls
 `pause_for_owner` and the turn ends. The native Goal is confirmed paused, then
 saved as **waiting on you**, with its objective kept and no further model
 calls. The card leads with the action you need to take as a headline, with
-any details it needs underneath. **I've done this** resumes the Goal.
+any details it needs underneath. When the agent needs you to finish an action
+and report that it is done, **I've done this** resumes the Goal. When the
+agent needs a specific value, such as a code or a URL, the card shows a field
+for that value and **Send**, and it does not offer **I've done this**.
 **Deny** and **Other** each need a reason, and that reason resumes it too. A
 message you send while the card is up also resumes the Goal and is passed
 along as your answer. **Stop work** leaves it paused for a later manual resume.
@@ -511,11 +514,14 @@ when they need you. Open the action details before **Allow once**. Approvals are
 limited to that request. **Decline** rejects it. The square stop button interrupts
 work and expires pending approvals. A repeated approval response cannot apply twice.
 
-Agent questions use selectable cards with the agent's brief explanation beneath
-each option. Choose one option, or several when the question allows it. Choose
-**Other** to write a different response; questions without suggested options
-show a response field directly. **Send answer** stays disabled until each
-question has an answer. A failed submission keeps your answers for retry.
+Agent questions use the control that matches the ask. A choice shows selectable
+cards with the agent's brief explanation beneath each option. Choose one
+option, or several when the question allows it. Choose **Other** to write a
+different response. A request for a specific output shows a field for that
+output. **Send answer** stays disabled until the field has text. A request to
+perform an action and confirm shows **I've done this**. **Send answer** stays
+disabled until each choice or written question has an answer. A failed
+submission keeps your answers for retry.
 
 Agents are instructed to explain each option's benefit or tradeoff. Cursor's
 current ACP bridge accepts option IDs but drops free text, so Harness forwards

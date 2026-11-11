@@ -1,29 +1,48 @@
 import React, { useId } from "react";
-import { questionIdentity } from "../core/questions.mjs";
+import {
+  questionAnswer,
+  questionIdentity,
+  questionKind,
+} from "../core/questions.mjs";
 
 export const questionId = questionIdentity;
-const multipleChoice = (q) => q.multiple || q.multiSelect;
-const optionValue = (q, option) =>
-  q.selectionOnly ? option.id : (option.label ?? option);
+export { questionAnswer };
 
-export function questionAnswer(q, response = {}) {
-  if (response.other && !response.text?.trim()) return undefined;
-  const values = (response.selected ?? []).map((i) =>
-    optionValue(q, q.options[i]),
-  );
-  if (response.other || !q.options?.length) {
-    if (response.text?.trim()) values.push(response.text.trim());
-  }
-  if (!values.length) return undefined;
-  return multipleChoice(q) ? values : values[0];
-}
+const multipleChoice = (q) => q.multiple || q.multiSelect;
 
 export function QuestionField({ question: q, value = {}, onChange, disabled }) {
   const id = useId(),
+    kind = questionKind(q),
     multiple = multipleChoice(q),
-    hasOptions = q.options?.length > 0,
-    custom = value.other || !hasOptions,
+    hasOptions = kind === "choice" && q.options?.length > 0,
+    custom = kind === "choice" && value.other,
     inputType = multiple ? "checkbox" : "radio";
+  if (kind === "done")
+    return (
+      <fieldset className="agent-question" disabled={disabled}>
+        <legend>{q.question ?? q.header}</legend>
+        <p className="question-hint">Confirm when this is done.</p>
+      </fieldset>
+    );
+  if (kind === "text") {
+    const legendId = `${id}-legend`;
+    return (
+      <fieldset className="agent-question" disabled={disabled}>
+        <legend id={legendId}>{q.question ?? q.header}</legend>
+        <div className="question-custom">
+          <textarea
+            rows={3}
+            autoFocus
+            aria-labelledby={legendId}
+            value={value.text ?? ""}
+            placeholder={q.placeholder?.trim() || "Write your answer…"}
+            autoComplete="off"
+            onChange={(e) => onChange({ ...value, text: e.target.value })}
+          />
+        </div>
+      </fieldset>
+    );
+  }
   const select = (index, checked) => {
     const selected = value.selected ?? [];
     onChange({

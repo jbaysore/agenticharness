@@ -9,6 +9,7 @@ import {
   checkQuestions,
   claudeQuestionAnswers,
   codexQuestionAnswers,
+  questionAnswer,
   questionPage,
 } from "../src/core/questions.mjs";
 import { proposalText, taggedProposal, visibleReply } from "../src/core/plans.mjs";
@@ -80,6 +81,61 @@ test("questions validate distinct IDs and usable options before waiting", () => 
       checkQuestions({ questions: [{ ...questions[0], options: ["a", "b"] }] }),
     /labels/,
   );
+  assert.throws(
+    () =>
+      checkQuestions({
+        questions: [{ id: "a", question: "Which?", answer: "nope" }],
+      }),
+    /choice, text, or done/,
+  );
+  assert.throws(
+    () =>
+      checkQuestions({
+        questions: [{ id: "a", question: "Which code?", answer: "text", options: questions[0].options }],
+      }),
+    /does not take options/,
+  );
+  assert.throws(
+    () =>
+      checkQuestions({
+        questions: [{ id: "a", question: "Merge it.", answer: "done", options: questions[0].options }],
+      }),
+    /does not take options/,
+  );
+  assert.throws(
+    () =>
+      checkQuestions({
+        questions: [{ id: "a", question: "Which?", answer: "choice" }],
+      }),
+    /labels/,
+  );
+  assert.equal(
+    checkQuestions({
+      questions: [{ id: "code", question: "What is the code?", answer: "text", placeholder: "Release code" }],
+    })[0].placeholder,
+    "Release code",
+  );
+});
+
+test("a done question confirms immediately and a text question waits for a value", () => {
+  const asked = [
+    { id: "act", question: "Merge it.", answer: "done" },
+    { id: "code", question: "What is the code?", answer: "text" },
+  ];
+  const open = questionPage(asked, {});
+  assert.equal(open.confirm, true);
+  assert.equal(open.primary, "next");
+  assert.equal(open.primaryEnabled, true);
+  const last = questionPage(asked, { act: "Done" }, 1);
+  assert.equal(last.confirm, false);
+  assert.equal(last.primary, "send");
+  assert.equal(last.primaryEnabled, false);
+  const ready = questionPage(asked, { act: "Done", code: "rc-9" }, 1);
+  assert.equal(ready.primaryEnabled, true);
+  assert.equal(questionAnswer(asked[0], {}), undefined);
+  assert.equal(questionAnswer(asked[0], { done: true }), "Done");
+  assert.equal(questionAnswer(asked[1], { text: "  rc-9  " }), "rc-9");
+  assert.equal(questionAnswer(asked[1], { text: "   " }), undefined);
 });
 
 test("several questions advance one page at a time and send only at the end", () => {

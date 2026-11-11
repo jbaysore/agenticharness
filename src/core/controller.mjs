@@ -2104,6 +2104,8 @@ export class Controller extends EventEmitter {
       this.store.setGoalState(chat.id, run.provider, run.id, "owner", undefined, {
         statement: active.ownerPause.statement,
         askedAt: new Date().toISOString(),
+        expects: active.ownerPause.expects,
+        prompt: active.ownerPause.prompt,
       });
       this.event(chat.id, run.id, "work", {
         kind: "owner-pause",
@@ -2239,16 +2241,16 @@ export class Controller extends EventEmitter {
         error:
           "This turn is already yielding to watchers. Next time call only pause_for_owner; it keeps this request's watchers running.",
       };
-    let statement;
+    let pause;
     try {
-      statement = checkOwnerPause(input).statement;
+      pause = checkOwnerPause(input);
     } catch (error) {
       return { error: error.message };
     }
     if (active.ownerPause)
       return { parked: true, instruction: OWNER_PAUSE_STOP };
-    const watchIds = this.watchers.armForOwner(chatId, active, statement);
-    active.ownerPause = { statement, watchIds };
+    const watchIds = this.watchers.armForOwner(chatId, active, pause.statement);
+    active.ownerPause = { ...pause, watchIds };
     active.ownerPause.timer = setTimeout(() => {
       const current = this.active.get(chatId);
       if (
@@ -2274,7 +2276,11 @@ export class Controller extends EventEmitter {
       (item) => item.status === "owner" && item.ownerPause?.statement,
     );
     if (!goal) throw new Error("This Goal is not waiting on you.");
-    const answer = checkOwnerAnswer(input?.choice, input?.reason);
+    const answer = checkOwnerAnswer(
+      input?.choice,
+      input?.reason,
+      goal.ownerPause.expects,
+    );
     const model =
       goal.provider === chat.provider
         ? chat.model
