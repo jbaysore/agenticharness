@@ -30,6 +30,8 @@ test("background instructions explain the supported watches and the unregistered
   assert.match(GOAL_INSTRUCTIONS, /Do not use pause_for_owner for.*to wait only on CI or a background process/);
   assert.match(GOAL_INSTRUCTIONS, /Never ask the owner for an action or a decision in plain text/);
   assert.match(GOAL_INSTRUCTIONS, /call pause_for_owner instead of yield_to_watch/);
+  assert.match(GOAL_INSTRUCTIONS, /exact command, URL, or steps/);
+  assert.match(GOAL_INSTRUCTIONS, /file, runbook, or earlier message/);
 });
 
 for (const provider of ["codex", "claude", "cursor", "openrouter"])

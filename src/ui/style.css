@@ -2141,12 +2141,23 @@ small {
   overflow-wrap: anywhere;
 }
 .owner-pause .owner-pause-statement {
+  max-height: 320px;
   margin: 0 0 6px;
+  overflow: auto;
   color: var(--text-2);
   font-size: 14px;
   line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+}
+.owner-pause .owner-pause-statement .markdown {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.owner-pause .owner-pause-statement .markdown p {
+  margin: 0 0 8px;
+}
+.owner-pause .owner-pause-statement .code-block {
+  margin: 4px 0 8px;
 }
 .owner-pause .goal-objective {
   display: block;

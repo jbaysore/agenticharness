@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Markdown } from "./components.jsx";
 
 // The first line is the action; anything after it is supporting detail.
 function splitStatement(statement) {
@@ -46,7 +47,11 @@ export function OwnerPauseCard({ goal, watching, disabled, onAnswer }) {
     <section className="approval owner-pause" aria-label="Waiting on you">
       <div className="eyebrow">Waiting on you</div>
       <h3>{headline}</h3>
-      {detail && <p className="owner-pause-statement">{detail}</p>}
+      {detail && (
+        <div className="owner-pause-statement">
+          <Markdown text={detail} />
+        </div>
+      )}
       {goal.objective && (
         <span className="goal-objective" title={goal.objective}>
           Goal: {goal.objective}

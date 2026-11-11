@@ -146,8 +146,9 @@ When a Goal is blocked on something only you can do, such as merging a pull
 request or running a command on a machine the agent cannot reach, it calls
 `pause_for_owner` and the turn ends. The native Goal is confirmed paused, then
 saved as **waiting on you**, with its objective kept and no further model
-calls. The card leads with the action you need to take as a headline, with
-any details it needs underneath. When the agent needs you to finish an action
+calls. The card leads with the action you need to take as a headline. Under it
+is the exact command, URL, or steps, rendered so a command can be copied.
+A file link can add context; it is not a substitute for the command. When the agent needs you to finish an action
 and report that it is done, **I've done this** resumes the Goal. When the
 agent needs a specific value, such as a code or a URL, the card shows a field
 for that value and **Send**, and it does not offer **I've done this**.

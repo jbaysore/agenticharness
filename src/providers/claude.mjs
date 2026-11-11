@@ -16,7 +16,7 @@ import { claudeQuestionAnswers } from "../core/questions.mjs";
 import { planRevisionRequest, proposalText } from "../core/plans.mjs";
 import { goalStopped } from "../core/goals.mjs";
 import { watchTools } from "../core/watch-tools.mjs";
-import { ownerPauseTool } from "../core/owner-pause.mjs";
+import { ownerPauseTool, OWNER_PAUSE_STATEMENT_MAX } from "../core/owner-pause.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { claudeContent, claudeGoalContext, claudeGoalObjective } from "./attachments.mjs";
@@ -596,7 +596,7 @@ export async function runClaude(
             t.name,
             t.description,
             {
-              statement: z.string().min(1).max(2000),
+              statement: z.string().min(1).max(OWNER_PAUSE_STATEMENT_MAX),
               expects: z.enum(["done", "text"]).optional(),
               prompt: z.string().min(1).max(120).optional(),
             },

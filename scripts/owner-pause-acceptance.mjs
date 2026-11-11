@@ -43,7 +43,7 @@ app.controller.runners.codex = async (ctx) => {
     ctx.goalState("active", "Ship the release");
     await ctx.history("pause_for_owner", {
       statement:
-        "Merge pull request 18.\n\nhttps://github.com/example/repo/pull/18 — I'll tag the release once it lands.",
+        "Merge pull request 18.\n\n```bash\ngit checkout main\n```\n\nhttps://github.com/example/repo/pull/18 — I'll tag the release once it lands.",
     });
     await new Promise((resolve) =>
       ctx.signal.addEventListener("abort", resolve, { once: true }),
@@ -91,6 +91,8 @@ try {
   await open(done);
   await expect(card.getByRole("heading", { name: "Merge pull request 18." })).toBeVisible();
   await expect(card).toContainText("tag the release once it lands");
+  await expect(card.locator("pre code")).toContainText("git checkout main");
+  await expect(card.getByRole("button", { name: "Copy", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Resume goal", exact: true })).toHaveCount(0);
   await page.reload();
   await expect(card).toContainText("Merge pull request 18");

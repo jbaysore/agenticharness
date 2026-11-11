@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import {
+  OWNER_PAUSE_STATEMENT_MAX,
   checkOwnerAnswer,
   checkOwnerPause,
   ownerAnswerPrompt,
+  ownerPauseTool,
 } from "../src/core/owner-pause.mjs";
 import { ownerPauses } from "../src/core/goals.mjs";
 import { runClaude } from "../src/providers/claude.mjs";
@@ -113,7 +115,11 @@ test("an owner pause needs a statement, and deny or other needs a reason", () =>
   assert.equal(checkOwnerPause({ statement: "  Merge it.  " }).statement, "Merge it.");
   assert.equal(checkOwnerPause({ statement: "Merge it." }).expects, "done");
   assert.throws(() => checkOwnerPause({ statement: "   " }));
-  assert.throws(() => checkOwnerPause({ statement: "x".repeat(601) }));
+  assert.equal(ownerPauseTool.inputSchema.properties.statement.maxLength, OWNER_PAUSE_STATEMENT_MAX);
+  assert.match(ownerPauseTool.description, /exact command, URL, or steps/);
+  assert.match(ownerPauseTool.description, /cannot be the only way to get the command/);
+  assert.equal(checkOwnerPause({ statement: "x".repeat(8000) }).statement.length, 8000);
+  assert.throws(() => checkOwnerPause({ statement: "x".repeat(8001) }), /8000/);
   assert.throws(() => checkOwnerPause({ statement: "Merge it.", expects: "later" }));
   assert.throws(() =>
     checkOwnerPause({ statement: "Merge it.", expects: "text" }),
