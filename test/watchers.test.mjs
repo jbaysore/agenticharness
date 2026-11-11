@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { blockingGoals } from "../src/core/goals.mjs";
+import { fileReviewInterval } from "../src/core/watchers.mjs";
 import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
 import { runClaude } from "../src/providers/claude.mjs";
 import { killIfMatched, processIdentity } from "../src/core/process-identity.mjs";
@@ -1040,6 +1041,75 @@ test("file watches ignore shared-project files and resume once for their worktre
     f.advance(5_000);
     await f.controller.watchers.tick();
     assert.equal(calls, 1);
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("armed file watches wake the agent hourly to review progress without spending result wakes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-file-review-"));
+  const f = fixture({ projectPath: root });
+  try {
+    const texts = [];
+    f.controller.runners.codex = async (ctx) => {
+      texts.push(ctx.text);
+      return { status: "completed" };
+    };
+    f.register();
+    const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
+      path: "frames.done", until: "appears",
+      resumeOn: ["complete"], continuation: "Verify the frame counts.",
+      expiryHours: 24,
+    });
+    f.arm(watch);
+    await f.controller.watchers.tick();
+    f.advance(fileReviewInterval - 1);
+    await f.controller.watchers.tick();
+    assert.equal(texts.length, 0);
+    // More reviews than the three result wakes a request gets.
+    for (let review = 1; review <= 4; review++) {
+      f.advance(fileReviewInterval);
+      await f.controller.watchers.tick();
+      await finishRuns(f.controller);
+      assert.equal(texts.length, review);
+      assert.match(texts.at(-1), /Scheduled progress review/);
+      assert.match(texts.at(-1), new RegExp(`Watcher ID: ${watch.id}`));
+      assert.match(texts.at(-1), /Verify the frame counts/);
+      const saved = f.store.watchStore.get(watch.id);
+      assert.equal(saved.status, "pending");
+      assert.equal(saved.armed, false);
+      // Without a new yield the watch only notifies; no further reviews.
+      f.advance(fileReviewInterval + 5_000);
+      await f.controller.watchers.tick();
+      await finishRuns(f.controller);
+      assert.equal(texts.length, review);
+      const run = f.store.createRun({
+        conversationId: f.chat.id, actionId: randomUUID(),
+        provider: "codex", model: "fixture", text: "Review",
+      });
+      // The review turn belongs to the same request as the watch.
+      f.controller.active.set(f.chat.id, {
+        run, abort: new AbortController(), taskRootId: saved.rootId,
+      });
+      await f.controller.watchers.handle(f.chat.id, "yield_to_watch", {
+        ids: [watch.id], checkpoint: "Job still progressing.",
+      });
+      const active = f.controller.active.get(f.chat.id);
+      clearTimeout(active.watchYield.timer);
+      f.end();
+      f.controller.watchers.parked(f.chat.id, [watch.id]);
+      assert.equal(f.store.watchStore.get(watch.id).delivery, "none");
+    }
+    await writeFile(join(root, "frames.done"), "done");
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    assert.equal(f.store.watchStore.get(watch.id).status, "success");
+    assert.equal(texts.length, 5);
+    assert.match(texts.at(-1), /Background file result/);
   } finally {
     await f.close();
     await rm(root, { recursive: true, force: true });

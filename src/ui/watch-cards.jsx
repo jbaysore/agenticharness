@@ -147,7 +147,11 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
                   ? " Authorized follow-up is armed."
                   : " Notification only."}{" "}
                 · Last check: {time(watch.lastCheckedAt)} · Next:{" "}
-                {time(watch.nextCheckAt)} · Expires: {time(watch.expiresAt)}
+                {time(watch.nextCheckAt)}
+                {watch.armed && watch.reviewAt
+                  ? ` · Agent review: ${time(watch.reviewAt)}`
+                  : ""}{" "}
+                · Expires: {time(watch.expiresAt)}
               </p>
             ) : (
               <div className="watch-times">
