@@ -35,6 +35,7 @@
     "test:watchers": "npm run build && node scripts/watchers-acceptance.mjs",
     "test:goal-progress": "npm run build && node scripts/goal-progress-acceptance.mjs",
     "test:context": "npm run build && node scripts/context-acceptance.mjs",
+    "test:compaction": "npm run build && node scripts/compaction-cursor-acceptance.mjs",
     "test:modes": "npm run build && node scripts/mode-suggestions-acceptance.mjs",
     "test:reviewer": "npm run build && node scripts/cursor-review-acceptance.mjs",
     "test:reviewer-settings": "npm run build && node scripts/reviewer-settings-acceptance.mjs",

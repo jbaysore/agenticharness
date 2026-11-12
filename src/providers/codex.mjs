@@ -329,6 +329,21 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
   };
   const context = contextReporter(ctx, "codex");
   let compacting = false;
+  // A Goal gets Harness's checkpoint straight after compaction, inside the
+  // turn. If Codex refuses it, the next turn re-delivers the phase block,
+  // because compaction resets prompt delivery.
+  const reanchorGoal = async (id) => {
+    const checkpoint = await ctx.goalCheckpoint?.().catch(() => "");
+    if (!checkpoint || ctx.signal.aborted || rpc.closed) return;
+    try {
+      await rpc.call("thread/inject_items", { threadId: id, items: [
+        { type: "message", role: "developer", content: [{ type: "input_text", text: checkpoint }] },
+      ] }, 10000);
+      ctx.emit("work", { kind: "goal-checkpoint", provider: "codex", delivered: true });
+    } catch (error) {
+      ctx.emit("work", { kind: "goal-checkpoint", provider: "codex", delivered: false, reason: error.message });
+    }
+  };
   let turnId,
     threadId,
     finished = false,
@@ -685,7 +700,10 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
       compacting = true;
       context.compact();
     }
-    if (method === "item/completed" && p.item?.type === "contextCompaction") compacting = false;
+    if (method === "item/completed" && p.item?.type === "contextCompaction") {
+      compacting = false;
+      if (ctx.mode === "goal" && threadId) void reanchorGoal(threadId);
+    }
     if (method === "thread/tokenUsage/updated" && threadId) {
       ctx.emit("work", { kind: "token-usage", ...p });
       const usage = p.tokenUsage;

@@ -370,6 +370,12 @@ export function ReliabilityPanel({ chatId, data, error, reading }) {
         <div className="reliability-notice" key={n.id}>
           <p>{n.title}</p>
           {n.note && <p>{n.note}</p>}
+          {n.summary && (
+            <details>
+              <summary>What the compaction kept</summary>
+              <pre className="compaction-summary">{n.summary}</pre>
+            </details>
+          )}
           <Evidence chatId={chatId} {...n} />
           <div className="reliability-actions">
             {["compaction", "handoff", "interruption"].includes(n.type) && (

@@ -1808,7 +1808,7 @@ function App() {
       {modal === "connections" && (
         <Modal title="Connections & usage" wide onClose={() => setModal(null)}>
           <div className="modal-intro">
-            <p>Codex, Claude Code and Cursor use native subscription sign-in. OpenRouter uses a separate, approved free-model connection.</p>
+            <p>Codex and Claude Code use native subscription sign-in. OpenRouter uses a separate, approved free-model connection.</p>
             <button
               className="secondary"
               disabled={busy}
@@ -1931,6 +1931,15 @@ function App() {
                       This confirmation stays with the signed-in Cursor account.
                       Model responses are not billing proof.
                     </small>
+                    <button
+                      className="secondary"
+                      onClick={action(async () => {
+                        const r = await api("/api/providers/cursor/enabled", { enabled: false });
+                        setState((s) => ({ ...s, cursorEnabled: r.cursorEnabled, providers: r.providers }));
+                      })}
+                    >
+                      Turn off Cursor
+                    </button>
                   </div>
                 )}
                 <div className="capability-list">
@@ -1947,6 +1956,29 @@ function App() {
               </section>
               );
             })}
+            {state.cursorEnabled === false && (
+              <section className="connection cursor">
+                <header>
+                  <span className="provider-dot cursor" />
+                  <h3>Cursor</h3>
+                  <span className="badge off">Turned off</span>
+                </header>
+                <p className="muted small">
+                  Cursor is hidden from the header and agent menus and does not run.
+                  Earlier Cursor chats stay readable and continue on another agent.
+                </p>
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  onClick={action(async () => {
+                    const r = await api("/api/providers/cursor/enabled", { enabled: true });
+                    setState((s) => ({ ...s, cursorEnabled: r.cursorEnabled, providers: r.providers }));
+                  })}
+                >
+                  Turn on
+                </button>
+              </section>
+            )}
           </div>
           <OpenRouterSettings onChanged={async () => {
             const next = await api("/api/state");

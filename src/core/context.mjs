@@ -127,7 +127,7 @@ export function contextReporter(ctx, provider) {
       )
         return;
       const normalized = { ...patch };
-      for (const key of ["usedTokens", "windowTokens", "reserveTokens"])
+      for (const key of ["usedTokens", "windowTokens", "reserveTokens", "compactAtTokens"])
         if (key in normalized) normalized[key] = tokenCount(normalized[key]);
       if ("windowTokens" in normalized && normalized.windowTokens === 0)
         normalized.windowTokens = null;
@@ -162,6 +162,12 @@ export function contextReporter(ctx, provider) {
         cache: null,
       };
       ctx.invalidatePromptDelivery?.();
+      publish();
+    },
+    // The provider's own summary of what the compaction kept.
+    compactSummary(text) {
+      if (!snapshot || typeof text !== "string" || !text.trim()) return;
+      snapshot = { ...snapshot, compactSummary: text.trim().slice(0, 20000) };
       publish();
     },
     finish() {
@@ -213,6 +219,9 @@ export function contextSampler(
             {
               usedTokens: reading.totalTokens,
               windowTokens: tokenCount(reading.rawMaxTokens) > 0 ? reading.rawMaxTokens : reading.maxTokens,
+              // Where the provider compacts on its own, when it will.
+              compactAtTokens: reading.isAutoCompactEnabled && tokenCount(reading.autoCompactThreshold) > 0
+                ? reading.autoCompactThreshold : null,
               accuracy: "provider-estimated",
               basis: "current-context",
               source: "Claude SDK context summary",

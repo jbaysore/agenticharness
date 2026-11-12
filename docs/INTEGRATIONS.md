@@ -128,6 +128,17 @@ fingerprints. Full tool fingerprints are diagnostic and do not change the legacy
 thread-migration key. Instructions retain their bytes, order, and priority.
 Native compaction, model/effort selection, and all billing protections are unchanged.
 
+Compaction controls verified in the installed builds on 2026-11-12. Claude
+Code 2.1.292 reads `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, clamped to at least 100k
+and at most the model window, and fires at that window less a summary buffer.
+`getContextUsage` reports the result as `autoCompactThreshold`. A PreCompact
+callback's `systemMessage` becomes the summary's custom instructions;
+`SessionStart` runs with `source: "compact"` afterwards and accepts
+`additionalContext`; `PostCompact` carries `compact_summary`. Codex 26.1106
+exposes `thread/inject_items` (raw Responses items), `thread/compact/start`,
+`model_auto_compact_token_limit` and `compact_prompt`. Harness leaves
+`compact_prompt` alone, because it replaces OpenAI's own summary prompt.
+
 Independent block delivery defaults on for Codex following native verification.
 Other routes retain legacy combined addenda pending native validation; their
 existing provider-managed caching remains active. The internal SQLite setting

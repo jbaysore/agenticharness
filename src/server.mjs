@@ -504,6 +504,7 @@ export async function createHarness({
           return json(res, 200, {
             ...store.snapshot(),
             providers: controller.providers,
+            cursorEnabled: controller.cursorEnabled(),
             terminals: terminals.list({ output: false }),
             remoteOrigin: publicOrigin,
             version: APP_VERSION,
@@ -592,6 +593,13 @@ export async function createHarness({
           await openrouter.catalogRefresh();
           await controller.refreshOpenRouter();
           return json(res, 200, await openrouter.settings());
+        }
+        if (path === "/api/providers/cursor/enabled" && method === "POST") {
+          const body = await readJson(req);
+          return json(res, 200, {
+            cursorEnabled: body.enabled === true,
+            providers: await controller.setCursorEnabled(body.enabled === true),
+          });
         }
         if (path === "/api/providers/cursor/confirm" && method === "POST") {
           const body = await readJson(req);

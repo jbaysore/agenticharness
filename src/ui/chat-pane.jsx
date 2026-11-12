@@ -395,6 +395,18 @@ export function ChatPane({
   useEffect(() => {
     if (["cursor", "openrouter"].includes(provider) && mode === "goal") setMode("default");
   }, [provider, mode]);
+  // Cursor is turned off: a Cursor chat or saved choice continues on the first
+  // agent that can take it, through the usual agent-switch handoff.
+  useEffect(() => {
+    if (provider !== "cursor" || !providers.length || providers.some((p) => p.id === "cursor")) return;
+    const next = ["codex", "claude"].map((id) => providers.find((p) => p.id === id))
+      .find((p) => p?.connected && !p.blockReason) ?? providers.find((p) => p.id === "codex");
+    if (!next) return;
+    const nextModel = next.models?.find((m) => m.isDefault && !m.disabled) ?? next.models?.find((m) => !m.disabled);
+    setProvider(next.id);
+    setModel(nextModel?.id ?? "");
+    setEffort(nextModel?.defaultEffort ?? "");
+  }, [provider, providers]);
   useEffect(() => {
     setKeptPlans(new Set());
   }, [chat?.id]);
@@ -814,7 +826,7 @@ export function ChatPane({
     if (checkingConnections) return;
     setCheckingConnections(true);
     try {
-      const targets = (chat.mode === "goal" ? ["codex", "claude"] : ["codex", "claude", "cursor", "openrouter"])
+      const targets = (chat.mode === "goal" ? ["codex", "claude"] : ["codex", "claude", ...(providers.some((p) => p.id === "cursor") ? ["cursor"] : []), "openrouter"])
         .filter((id) => id !== (chat.usage_stopped_provider ?? chat.provider));
       await Promise.all(targets.map((provider) => api("/api/providers/refresh", { provider })));
       await refresh();

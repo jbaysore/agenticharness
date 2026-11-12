@@ -257,6 +257,10 @@ function codexFixture(extra = {}, savedGoal = "active") {
       return { turn: { id: "turn-1" } };
     }
     if (method === "turn/interrupt") return {};
+    if (method === "thread/inject_items") {
+      if (extra.injectError) throw extra.injectError;
+      return {};
+    }
     assert.fail("Unexpected RPC: " + method);
   };
   const abort = new AbortController();
@@ -511,6 +515,35 @@ test("Codex context uses the root's last request and compaction, never cumulativ
     f.notify("thread/goal/updated", { goal: { status: "complete" } });
     await f.run;
   } finally { f.rpc.close(); await f.run.catch(() => {}); }
+});
+
+test("Codex hands a Goal its checkpoint after compaction, inside the turn", async (t) => {
+  for (const injectError of [null, new Error("not accepted")])
+    await t.test(injectError ? "refused" : "accepted", async () => {
+      const work = [];
+      const f = codexFixture({
+        injectError,
+        goalCheckpoint: async () => "Harness Goal checkpoint. Goal ID: goal-1",
+        emit: (type, value) => { if (type === "work") work.push(value); },
+      });
+      try {
+        await f.started;
+        await flush();
+        f.notify("item/started", { item: { id: "compact", type: "contextCompaction" } });
+        assert.equal(f.calls.some((c) => c.method === "thread/inject_items"), false);
+        f.notify("item/completed", { item: { id: "compact", type: "contextCompaction" } });
+        await flush();
+        const inject = f.calls.find((c) => c.method === "thread/inject_items");
+        assert.equal(inject.params.threadId, "native-goal");
+        assert.deepEqual(inject.params.items, [{ type: "message", role: "developer",
+          content: [{ type: "input_text", text: "Harness Goal checkpoint. Goal ID: goal-1" }] }]);
+        const note = work.find((w) => w.kind === "goal-checkpoint");
+        assert.equal(note.delivered, !injectError);
+        f.notify("turn/completed", { turn: { id: "turn-1", status: "completed" } });
+        f.notify("thread/goal/updated", { goal: { status: "complete" } });
+        await f.run;
+      } finally { f.rpc.close(); await f.run.catch(() => {}); }
+    });
 });
 
 test("Codex handles terminal Goal events on either side of turn completion", async (t) => {

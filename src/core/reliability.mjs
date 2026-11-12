@@ -200,12 +200,13 @@ export function reliabilityProjection({
       if (
         (!t.provider || t.provider === provider) &&
         (!t.sessionId || t.sessionId === sessionId)
-      )
-        transitions.set(t.key, {
-          ...t,
-          eventId: event.id,
-          observedAt: event.createdAt,
-        });
+      ) {
+        const earlier = transitions.get(t.key);
+        // A later summary keeps the boundary's own time and evidence.
+        transitions.set(t.key, earlier && t.summary
+          ? { ...earlier, summary: t.summary }
+          : { ...t, eventId: event.id, observedAt: event.createdAt });
+      }
     }
     if (event.type !== "context-usage") continue;
     const p = event.payload;
@@ -277,6 +278,7 @@ export function reliabilityProjection({
           : t.kind === "interruption"
             ? "The session was interrupted. Review partial work before continuing."
             : "The model session changed. Review continuity before continuing.",
+      ...(t.summary && { summary: t.summary }),
       eventId: t.eventId,
       observedAt: t.observedAt,
       acknowledged: actions.some(

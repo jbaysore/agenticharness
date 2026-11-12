@@ -1,8 +1,8 @@
 # Agentic Harness
 
-A personal Windows coding workspace for Codex, Claude Code and Cursor, using
-their native subscription sign-ins. An optional OpenRouter connection runs only
-explicitly approved free models. Chats and project history live on this PC.
+A personal Windows coding workspace for Codex and Claude Code, using their
+native subscription sign-ins. Cursor is supported but off by default. An
+optional OpenRouter connection runs only explicitly approved free models. Chats and project history live on this PC.
 
 ## Open the app
 
@@ -137,7 +137,11 @@ automatic reviewer are unavailable. See [OpenRouter setup](docs/OPERATIONS.md#op
 - Codex must report ChatGPT login, included usage available and no paid credits.
 - Claude Code must report Claude sign-in, current quota and user-disabled extra
   usage. Fast mode and direct API routes are disabled.
-- Cursor must use native login. Confirm **on-demand usage off** in its dashboard
+- Cursor is turned off by default; its subscription ended on 2026-11-14. It is
+  hidden from the header and agent menus and does not run. Earlier Cursor chats
+  stay readable and continue on Codex or Claude Code. **Turn on** in Connections
+  & usage brings it back.
+- When turned on, Cursor must use native login. Confirm **on-demand usage off** in its dashboard
   once. The app keeps that confirmation for the signed-in account. ACP supplies no
   reliable quota meter, so the header shows an assumed reset at noon local time
   on the 14th of each month and does not show a percentage. Auto is omitted from the picker. Models that offer Fast

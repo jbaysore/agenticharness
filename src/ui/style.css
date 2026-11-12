@@ -1525,6 +1525,7 @@ small {
 .reliability-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: 11px; }
 .reliability-notice, .recorded-check { padding: 9px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .recorded-check code { display: block; white-space: pre-wrap; margin-top: 5px; }
+.compaction-summary { white-space: pre-wrap; max-height: 240px; overflow: auto; margin: 6px 0 0; font-size: 11px; }
 .reliability-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
 .context-history { display: block; width: 100%; height: 64px; color: var(--agent); margin-top: 12px; }
 .issue-control, .check-control { display: inline-flex; flex-wrap: wrap; gap: 6px; min-width: 0; }

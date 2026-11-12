@@ -454,7 +454,11 @@ extract or relay subscription tokens. Account/model probes do not submit prompts
   `is_enabled=false`. Fast mode and external API environment variables are off.
   The usage control is experimental and version-sensitive: a future incompatible
   version will block work rather than infer billing safety.
-- **Cursor:** use the official Cursor CLI browser sign-in and disable on-demand
+- **Cursor:** off by default since its subscription ended on 2026-11-14. While
+  off it is not probed, listed, offered or run, and a Cursor chat continues on
+  Codex or Claude Code through the usual agent handoff. **Turn on** in
+  Connections & usage restores it; **Turn off Cursor** there hides it again.
+  When on, use the official Cursor CLI browser sign-in and disable on-demand
   usage in the account dashboard. Confirm that setting once in Connections & usage.
   The confirmation stays with that account and does not expire. Confirm again only
   after signing in to a different Cursor account. ACP exposes no authoritative
@@ -1004,8 +1008,22 @@ notices, recorded checks, and conversation timing. The 75% and 90% colors descri
 capacity; session age and occupancy do not estimate hallucination probability.
 At 75% the meter says the conversation costs more included usage because each
 turn rereads it, including cached tokens. At 90% it says compaction has not run.
-That warning is about subscription usage, not correctness. Compaction itself
-stays the provider's action; this meter does not start it.
+When the provider reports where it compacts, as Claude does, both marks and the
+colors are measured against that point, and the meter's details show
+**Compacts at**. That warning is about subscription usage, not correctness.
+Compaction itself stays the provider's action; this meter does not start it.
+
+Claude Code compacts at a 600k-token window (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
+instead of near the whole 1M window of its larger models. Codex keeps its own
+threshold. Before Claude compacts, Harness asks the summary to keep the
+objective, decisions and why, changed files, check results, blockers and the
+next step. After either agent compacts a Goal, Harness hands back a checkpoint
+built from its own records, with no model call: Goal ID, phases, recent checks,
+active watches, any owner wait, branch, HEAD and uncommitted files, and the last
+few user messages. Claude receives it as session-start context; Codex receives
+it through `thread/inject_items`, and if Codex refuses, the next turn re-sends the
+phase block. Claude's own summary is attached to the compaction notice under
+**What the compaction kept**.
 Task requirements and source correctness remain **Not assessed** in this release.
 
 Compaction, model-session handoffs, and interruptions produce nonblocking notices.

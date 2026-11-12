@@ -1086,6 +1086,9 @@ export class Store {
         this.insertEvent(conversationId, runId, "reliability-transition", { kind: "handoff", key: "handoff:" + event.id, provider: payload.provider, sessionId: payload.sessionId });
       if (payload.state === "compacting" && (!previous || previous.provider !== payload.provider || previous.sessionId !== payload.sessionId || previous.model !== payload.model || previous.generation !== payload.generation))
         this.insertEvent(conversationId, runId, "reliability-transition", { kind: "compaction", key: `compaction:${payload.provider}:${payload.sessionId}:${payload.model}:${payload.generation}`, provider: payload.provider, sessionId: payload.sessionId });
+      // The summary arrives after the boundary; it joins the same notice.
+      if (payload.compactSummary && payload.compactSummary !== previous?.compactSummary)
+        this.insertEvent(conversationId, runId, "reliability-transition", { kind: "compaction", key: `compaction:${payload.provider}:${payload.sessionId}:${payload.model}:${payload.generation}`, provider: payload.provider, sessionId: payload.sessionId, summary: payload.compactSummary });
       this.db.exec("RELEASE context_event");
       return event;
     } catch (error) {

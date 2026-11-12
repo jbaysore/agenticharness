@@ -156,6 +156,12 @@ export function ContextBar({ chat, provider, model, compact = false }) {
             <dd>{count(reading?.usedTokens)} tokens</dd>
             <dt>Working window</dt>
             <dd>{count(reading?.windowTokens)} tokens</dd>
+            {view.compactAt && (
+              <>
+                <dt>Compacts at</dt>
+                <dd>{count(view.compactAt)} tokens</dd>
+              </>
+            )}
             <dt>Available</dt>
             <dd>
               {reading?.usedTokens != null && reading?.windowTokens > 0

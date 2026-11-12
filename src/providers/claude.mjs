@@ -15,6 +15,7 @@ import { memoryTools } from "../core/memory-web.mjs";
 import { claudeQuestionAnswers } from "../core/questions.mjs";
 import { planRevisionRequest, proposalText } from "../core/plans.mjs";
 import { goalStopped } from "../core/goals.mjs";
+import { CLAUDE_AUTO_COMPACT_WINDOW, COMPACTION_GUIDANCE } from "../core/compaction.mjs";
 import { watchTools } from "../core/watch-tools.mjs";
 import { ownerPauseTool, OWNER_PAUSE_STATEMENT_MAX } from "../core/owner-pause.mjs";
 import {
@@ -104,13 +105,39 @@ function memoryClaudeTools(ctx) {
   ];
 }
 
+// The summary is the provider's; Harness adds what to keep and, for a Goal,
+// its own checkpoint once the compacted session starts again. A PreCompact
+// callback's systemMessage becomes the summary's custom instructions.
+export function compactionHooks(ctx, reporter) {
+  return {
+    PreCompact: [{ hooks: [async (event) =>
+      event.agent_id ? {} : { systemMessage: COMPACTION_GUIDANCE }] }],
+    SessionStart: [{ hooks: [async (event) => {
+      if (event.source !== "compact" || event.agent_id || ctx.mode !== "goal") return {};
+      const checkpoint = await ctx.goalCheckpoint?.().catch(() => "");
+      return checkpoint
+        ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: checkpoint } }
+        : {};
+    }] }],
+    PostCompact: [{ hooks: [async (event) => {
+      if (!event.agent_id) reporter()?.compactSummary(event.compact_summary);
+      return {};
+    }] }],
+  };
+}
+
 export function claudeOptions(cwd) {
   const path = executable("claude");
   if (!path) throw new Error("Claude Code is not installed");
   return {
     cwd,
     pathToClaudeCodeExecutable: path,
-    env: subscriptionEnvironment(),
+    // The 1M models otherwise compact only near the whole window, and each turn
+    // there rereads almost all of it against the session limit.
+    env: {
+      ...subscriptionEnvironment(),
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CLAUDE_AUTO_COMPACT_WINDOW),
+    },
     settingSources: [],
     strictMcpConfig: true,
     settings: CLAUDE_SESSION_SETTINGS,
@@ -757,7 +784,7 @@ export async function runClaude(
           .join("\n\n"),
       },
       mcpServers: { harness: historyServer },
-      hooks: { ...base.hooks, PreToolUse: [...(base.hooks?.PreToolUse ?? []), {
+      hooks: { ...base.hooks, ...compactionHooks(ctx, () => context), PreToolUse: [...(base.hooks?.PreToolUse ?? []), {
         matcher: "mcp__harness__(update_goal_progress|complete_goal)",
         hooks: [async (event) => event.agent_id || ctx.mode !== "goal" || ctx.signal.aborted
           ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Only the active root Goal may report phases or completion." } }

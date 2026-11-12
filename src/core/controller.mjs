@@ -99,7 +99,8 @@ import {
   ownerAnswerDisplay,
   ownerAnswerPrompt,
 } from "./owner-pause.mjs";
-import { Watchers } from "./watchers.mjs";
+import { Watchers, watching } from "./watchers.mjs";
+import { goalCheckpoint } from "./compaction.mjs";
 import { GOAL_PROGRESS_INSTRUCTIONS, goalPlanTracker, goalProgressContext, checkGoalProgress } from "./goal-progress.mjs";
 
 function clearOwnerPauseAttempt(active) {
@@ -206,10 +207,31 @@ export class Controller extends EventEmitter {
     this.reliability?.observe(e);
     return e;
   }
+  // Cursor is off unless turned on in Connections: the subscription ended on
+  // 2026-11-14. Its code stays so it can be turned back on.
+  cursorEnabled() {
+    return this.store.setting("cursor-enabled") === true;
+  }
+  // Turning Cursor off removes it from the live list at once, so a listed
+  // Cursor is one that may still run.
+  cursorUsable() {
+    return this.cursorEnabled() || this.providers.some((p) => p.id === "cursor");
+  }
+  async setCursorEnabled(enabled) {
+    this.store.setting("cursor-enabled", enabled === true);
+    if (!this.cursorEnabled()) {
+      this.providers = this.providers.filter((p) => p.id !== "cursor");
+      this.event(null, null, "providers", { providers: this.providers });
+      return this.providers;
+    }
+    return this.refreshProvider("cursor");
+  }
   async refreshProviders() {
     if (this.refreshing) return this.refreshing;
     this.refreshing = (async () => {
-      await Promise.all(["codex", "claude", "cursor", ...(this.openrouter ? ["openrouter"] : [])].map((id) => this.refreshProvider(id)));
+      if (!this.cursorEnabled())
+        this.providers = this.providers.filter((p) => p.id !== "cursor");
+      await Promise.all(["codex", "claude", ...(this.cursorEnabled() ? ["cursor"] : []), ...(this.openrouter ? ["openrouter"] : [])].map((id) => this.refreshProvider(id)));
       this.scheduleProviderRefresh();
       return this.providers;
     })().finally(() => {
@@ -225,6 +247,7 @@ export class Controller extends EventEmitter {
       ...(this.openrouter && { openrouter: () => this.openrouter.inspect({ refresh: true }) }),
     }[id];
     if (!inspect) throw new Error("Unknown agent");
+    if (id === "cursor" && !this.cursorEnabled()) return this.providers;
     this.providerRefreshes ??= new Map();
     if (this.providerRefreshes.has(id)) return this.providerRefreshes.get(id);
     const task = Promise.resolve().then(inspect).catch((error) => ({
@@ -232,7 +255,8 @@ export class Controller extends EventEmitter {
       connected: false, models: [], blockReason: error.message, usage: { authoritative: false, windows: [] },
     })).then((provider) => {
       const order = ["codex", "claude", "cursor", "openrouter"];
-      this.providers = [...this.providers.filter((p) => p.id !== id), provider]
+      const off = id === "cursor" && !this.cursorEnabled();
+      this.providers = [...this.providers.filter((p) => p.id !== id), ...(off ? [] : [provider])]
         .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
       this.event(null, null, "providers", { providers: this.providers });
       this.scheduleProviderRefresh();
@@ -285,6 +309,28 @@ export class Controller extends EventEmitter {
       Math.min(delay, 2 ** 31 - 1),
     );
     this.providerTimer.unref?.();
+  }
+  // Handed back to a Goal after its provider compacts. Every part is read from
+  // Harness records; a part that cannot be read is left out.
+  async goalCheckpoint(chatId) {
+    const chat = this.store.conversation(chatId);
+    if (!chat || chat.mode !== "goal") return "";
+    const root = chat.worktree?.path ?? this.store.project(chat.project_id)?.path;
+    const [reliability, repository] = await Promise.all([
+      this.reliability.read(chatId).catch(() => null),
+      root ? repositoryState(root).catch(() => null) : null,
+    ]);
+    return goalCheckpoint({
+      progress: chat.goalProgress,
+      checks: reliability?.checks ?? [],
+      watches: this.watchers.records.list(chatId).filter(watching).map((w) => ({
+        id: w.id, kind: w.kind ?? "ci", status: w.status,
+        label: w.path ?? w.command ?? w.ref ?? w.repo ?? "",
+      })),
+      ownerPause: this.active.get(chatId)?.ownerPause ?? null,
+      repository,
+      feedback: this.store.messages(chatId).filter((m) => m.role === "user").slice(-3).map((m) => m.content),
+    });
   }
   // Effort levels Cursor has shown for a model, kept for its picker.
   learnCursorEfforts(configOptions) {
@@ -447,6 +493,8 @@ export class Controller extends EventEmitter {
       throw new Error("Enter a message under 250,000 characters");
     if (!["codex", "claude", "cursor", "openrouter"].includes(provider))
       throw new Error("Unknown agent");
+    if (provider === "cursor" && !this.cursorUsable())
+      throw new Error("Cursor is turned off in Connections");
     permissions ??= chat.permissions;
     if (!PERMISSION_MODES.includes(permissions))
       throw new Error("Choose auto-review, manual review or override");
@@ -1907,6 +1955,7 @@ export class Controller extends EventEmitter {
       resumeGoal: resumeGoal || (chat.mode === "goal" && !replacementGoal && !startGoal),
       goalObjective,
       goalProgress: () => this.store.conversation(chat.id)?.goalProgress,
+      goalCheckpoint: () => this.goalCheckpoint(chat.id),
       shouldYieldForInput: () => this.active.get(chat.id)?.supersededByUser || this.store.queuedInputs(chat.id).length > 0,
       goalSuspending: () => Boolean(this.active.get(chat.id)?.ownerPause || this.active.get(chat.id)?.watchYield),
       chatMoving: () => Boolean(this.active.get(chat.id)?.pendingMove),
@@ -2109,6 +2158,8 @@ export class Controller extends EventEmitter {
         provider: run.provider,
         model: run.model,
       });
+      if (run.provider === "cursor" && !this.cursorUsable())
+        throw new Error("Cursor is turned off in Connections");
       const result = await this.runners[run.provider](ctx);
       status = abort.signal.aborted
         ? "cancelled"

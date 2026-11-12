@@ -25,6 +25,12 @@ export function contextView(
   const compacting = reading?.state === "compacting";
   const percent =
     used !== null && window > 0 && !compacting ? (used / window) * 100 : null;
+  // Usage warnings follow the provider's compaction point when it reports one;
+  // a 1M window that compacts at 600k should warn before 600k, not 750k.
+  const compactAt = tokenCount(reading?.compactAtTokens),
+    limit = compactAt > 0 && (!window || compactAt < window) ? compactAt : window,
+    pressure =
+      used !== null && limit > 0 && !compacting ? (used / limit) * 100 : null;
   const waiting = active || !started;
   const label =
     !matches && snapshot
@@ -48,10 +54,11 @@ export function contextView(
     percent,
     fill: percent === null ? 0 : Math.min(100, percent),
     label,
-    level: percent >= 90 ? "high" : percent >= 75 ? "elevated" : "normal",
+    compactAt: limit !== window ? limit : null,
+    level: pressure >= 90 ? "high" : pressure >= 75 ? "elevated" : "normal",
     updating: active && !compacting,
     outdated: reading?.state === "outdated",
-    usageWarning: contextUsageWarning({ percent, compacting }),
+    usageWarning: contextUsageWarning({ percent: pressure, compacting }),
   };
 }
 
