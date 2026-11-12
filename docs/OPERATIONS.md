@@ -658,8 +658,9 @@ one Chrome on the host PC. Chats share that Chrome, so a page stays open
 between turns. It uses its own
 profile in `%LOCALAPPDATA%\AgenticHarness\browser\profile`, separate from your
 everyday Chrome: sign in to a site there once and the sign-in persists. Saved
-snapshots and screenshots go to `browser\output` beside it. The window is visible
-on the host PC; close it any time and the next browser action reopens it.
+snapshots and screenshots go to `browser\output` beside it. Chrome runs
+headless: you watch and use its pages in the Browser panel in the sidebar, and
+it never opens a window on your desktop.
 
 Reading the page (snapshot, screenshot, find, console and network listings,
 waiting) needs no prompt. Anything that can change a page or leave this PC
@@ -671,6 +672,26 @@ with the action and its target. Playwright's tool for running arbitrary code on
 the host is never offered. Chats share the browser, so their actions run one at
 a time; Chrome must be installed. If the browser cannot start, the turn goes on
 without it and the work log says why.
+
+### Taking over your computer needs your approval, once per task
+
+Agents browse only in that sidebar browser. They may not drive your own
+browser session or desktop apps, send keyboard or mouse input, or capture your
+screen unless you approve it. An agent that needs this calls
+`request_computer_control`, which always shows **wants to control your
+computer** with its reason and apps. Auto-review and Override never answer it.
+**Allow for this task** restarts the turn with control enabled until the task
+ends; the next message starts without it. **Keep it in the sidebar** declines. In
+Goal, an unanswered request declines after 60 seconds. Ask mode cannot request
+it.
+
+Codex's own Computer Use, unified Computer Use and Chrome-backed Browser plugins
+and its `node_repl` server are switched off for Harness chats unless that
+approval is active. Your Codex desktop app and `~/.codex/config.toml` are
+unchanged. For every agent, the automatic reviewer declines commands that open
+a browser, URL or GUI app, send input, or capture the screen without the
+approval. Override skips the reviewer, so there that rule is only an instruction
+to the agent; the Codex plugin switch still applies.
 
 ## History and changing agents
 

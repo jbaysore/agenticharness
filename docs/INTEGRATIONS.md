@@ -54,6 +54,16 @@ use a fixture key. No live inference or real account connection has been tested.
 
 ## Findings to preserve
 
+Harness's `codex app-server` inherits `~/.codex/config.toml`, where the Codex
+desktop app enables `computer-use@openai-bundled`,
+`unified-computer-use@openai-bundled`, `browser@openai-bundled` (Chrome
+backend) and `mcp_servers.node_repl`, which loads `@oai/sky`. Harness passes
+`-c plugins.<name>.enabled=false` and `-c mcp_servers.node_repl.enabled=false`
+unless the run holds a computer-control grant. Leave plugin keys unquoted:
+Codex 26.1106 keeps quotes in a `-c` key literally, so
+`plugins."computer-use@openai-bundled".enabled=false` adds a new key and
+disables nothing. `config/read` confirmed the unquoted form on 2026-11-12.
+
 Do not assume the user's quoted plan tier is current. Discover capabilities at
 connection time. Codex currently returns the raw plan code `prolite`; preserve
 that code without inventing a marketing-name mapping. Seven picker models and

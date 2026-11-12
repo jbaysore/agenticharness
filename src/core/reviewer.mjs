@@ -79,8 +79,24 @@ async function bounded(operation, signal, timeoutMs, onAbort = () => {}) {
 }
 
 export class ActionReviewer {
-  constructor({ controller, run, project, chat, text, signal }) {
-    Object.assign(this, { controller, run, project, chat, text, signal });
+  constructor({
+    controller,
+    run,
+    project,
+    chat,
+    text,
+    signal,
+    computerControl = false,
+  }) {
+    Object.assign(this, {
+      controller,
+      run,
+      project,
+      chat,
+      text,
+      signal,
+      computerControl,
+    });
     this.queue = Promise.resolve();
     this.unavailable = new Map();
     this.sessions = new Map();
@@ -245,6 +261,7 @@ export class ActionReviewer {
       ...(requestText.length > 2000 && { currentRequestTruncated: true }),
       userRefusals: this.userRefusals(),
       recentSteps: this.recentSteps(request),
+      computerControlApproved: Boolean(this.computerControl),
       proposedAction: request,
     };
     const initial = JSON.stringify({ ...action, policies });

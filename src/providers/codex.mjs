@@ -8,6 +8,7 @@ import { checkCodexBilling, publicCodexUsage } from "../security/billing.mjs";
 import { historyTools } from "../core/history.mjs";
 import { isBrowserTool } from "../core/browser.mjs";
 import { codexInput } from "./attachments.mjs";
+import { CODEX_COMPUTER_CONTROL_OVERRIDES } from "../core/computer-control.mjs";
 import { codexQuestionAnswers } from "../core/questions.mjs";
 import { proposalText } from "../core/plans.mjs";
 import {
@@ -35,7 +36,11 @@ export function checkCodexRoute(config) {
 // MXC runs each sandboxed command on the interactive desktop, so its console
 // takes focus. Elevated commands use a private desktop and stay hidden.
 // Unelevated isolation is weaker, and the private desktop stays on.
-export function codexServerArgs(platform = process.platform) {
+// Desktop control and the Chrome-backed browser stay off without a grant.
+export function codexServerArgs(
+  platform = process.platform,
+  { computerControl = false } = {},
+) {
   return [
     "app-server",
     "-c",
@@ -47,12 +52,24 @@ export function codexServerArgs(platform = process.platform) {
     ...(platform === "win32"
       ? ["-c", "features.prefer_mxc=false", "-c", 'windows.sandbox="elevated"']
       : []),
+    ...(computerControl
+      ? []
+      : CODEX_COMPUTER_CONTROL_OVERRIDES.flatMap((value) => ["-c", value])),
   ];
 }
 
 export async function openCodex(
   cwd,
-  { signal, dataDir, chatId, runId, purpose, progress, timing } = {},
+  {
+    signal,
+    dataDir,
+    chatId,
+    runId,
+    purpose,
+    progress,
+    timing,
+    computerControl = false,
+  } = {},
   {
     resolveExecutable = executable,
     environment = subscriptionEnvironment,
@@ -88,7 +105,11 @@ export async function openCodex(
     let env;
     try { env = environment(); environmentDone?.(); }
     catch (error) { environmentDone?.("failed"); throw error; }
-    rpc = createRpc(command, codexServerArgs(), { cwd, env });
+    rpc = createRpc(
+      command,
+      codexServerArgs(process.platform, { computerControl }),
+      { cwd, env },
+    );
     startup.attach(rpc, command);
     startup.record("initialize-sent", { timeoutMs });
     initializeDone = timing?.("provider-initialize");
@@ -285,6 +306,7 @@ export async function runCodex(ctx, { open = openCodex, setupTimeoutMs = 180_000
     purpose: "chat",
     progress,
     timing: ctx.timing,
+    computerControl: Boolean(ctx.computerControl),
   });
   ctx.attachClose?.(() => rpc.close());
   const setupLog = rpc.child ? new CodexStartupLog({ dataDir: ctx.dataDir, cwd: ctx.project.path, chatId: ctx.chat?.id, runId: ctx.runId, purpose: "session-setup" }) : null;

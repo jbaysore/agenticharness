@@ -216,6 +216,8 @@ test("the reviewer sees the agent's earlier actions this turn, but not its prose
   f.controller.event(f.chat.id, f.run.id, "text", { delta: "AGENT_PROSE" });
   assert.equal((await f.ctx.approve(action())).allow, true);
   const context = JSON.parse(f.jobs[0].task);
+  // Without the user's approval this run may not take over the computer.
+  assert.equal(context.computerControlApproved, false);
   assert.deepEqual(context.recentSteps, [
     {
       title: "`npm run build`",

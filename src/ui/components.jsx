@@ -278,7 +278,10 @@ export function Approval({ approval, onAnswer, review, onReview }) {
     [submitting, setSubmitting] = useState(false),
     [copied, setCopied] = useState(false),
     r = approval.request,
-    now = useClock(r.kind === "question" && Number.isFinite(r.deadline)),
+    now = useClock(
+      (r.kind === "question" || r.kind === "computer-control") &&
+        Number.isFinite(r.deadline),
+    ),
     remaining = secondsRemaining(r.deadline, now);
   const answers = Object.fromEntries(
     (r.questions ?? []).map((q) => [
@@ -315,7 +318,9 @@ export function Approval({ approval, onAnswer, review, onReview }) {
             ? `${providerName(approval.provider)} has a plan`
             : r.kind === "mode-change"
               ? `${providerName(approval.provider)} suggests a mode change`
-              : `${providerName(approval.provider)} needs you`}
+              : r.kind === "computer-control"
+                ? `${providerName(approval.provider)} wants to control your computer`
+                : `${providerName(approval.provider)} needs you`}
       </div>
       <h3>{r.title}</h3>
       {r.reviewReason && (
@@ -344,6 +349,27 @@ export function Approval({ approval, onAnswer, review, onReview }) {
             Your approval switches this chat to {r.mode} mode and continues the
             current task.
           </p>
+        </>
+      ) : r.kind === "computer-control" ? (
+        <>
+          <p>{r.reason}</p>
+          {r.apps?.length > 0 && (
+            <p>
+              <strong>Apps:</strong> {r.apps.join(", ")}
+            </p>
+          )}
+          <p className="muted small">
+            Allowing lets this agent see your screen and use your keyboard,
+            mouse, own browser and desktop apps until this task ends. It asks
+            again for any later task. Declining keeps it in the sidebar browser.
+          </p>
+          {remaining != null && (
+            <p className="muted small">
+              {remaining === 0
+                ? "Not approved."
+                : `Declines in ${remaining} ${remaining === 1 ? "second" : "seconds"} if you do not answer.`}
+            </p>
+          )}
         </>
       ) : r.kind === "question" ? (
         <>
@@ -421,7 +447,9 @@ export function Approval({ approval, onAnswer, review, onReview }) {
               : "Keep planning"
             : r.kind === "mode-change"
               ? "Keep current mode"
-              : "Decline"}
+              : r.kind === "computer-control"
+                ? "Keep it in the sidebar"
+                : "Decline"}
         </button>
         {r.kind === "plan" && onReview && !revisingPlan && (
           <button
@@ -497,7 +525,9 @@ export function Approval({ approval, onAnswer, review, onReview }) {
                 : "Confirm and build"
               : r.kind === "mode-change"
                 ? "Approve mode change"
-                : "Allow once"}
+                : r.kind === "computer-control"
+                  ? "Allow for this task"
+                  : "Allow once"}
         </button>
       </div>
     </section>

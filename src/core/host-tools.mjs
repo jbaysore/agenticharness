@@ -7,6 +7,7 @@ import { restartTool } from "./self-restart.mjs";
 import { watchTools } from "./watch-tools.mjs";
 import { ownerPauseTool } from "./owner-pause.mjs";
 import { goalProgressTool, completeGoalTool } from "./goal-progress.mjs";
+import { computerControlTool } from "./computer-control.mjs";
 
 // Harness's own tools, offered to every agent in every mode. A mode or a
 // chat's situation decides what a call may do when it is made, not which
@@ -21,6 +22,7 @@ export const hostTools = [
   restartTool,
   ...watchTools,
   ownerPauseTool,
+  computerControlTool,
   goalProgressTool,
   completeGoalTool,
 ];

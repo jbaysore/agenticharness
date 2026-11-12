@@ -341,6 +341,14 @@ export async function createHarness({
             200,
             controller.pauseForOwner(chatId, body.arguments ?? {}),
           );
+        if (body.name === "request_computer_control")
+          return json(
+            res,
+            200,
+            controller.bridgeComputerControl.has(token)
+              ? await controller.bridgeComputerControl.get(token)(body.arguments ?? {})
+              : { error: "This turn cannot request computer control." },
+          );
         if (body.name === "ask_user" && controller.bridgeQuestions.has(token))
           return json(
             res,

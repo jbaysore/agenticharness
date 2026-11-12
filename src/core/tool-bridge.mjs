@@ -3,7 +3,12 @@
 // the bridge must not time out while its permission request is still open.
 // Other calls stay bounded so a stuck tool cannot hold the agent open.
 export function toolBridgeTimeoutMs(name) {
-  if (name === "ask_user" || name === "suggest_mode" || name === "run_command")
+  if (
+    name === "ask_user" ||
+    name === "suggest_mode" ||
+    name === "run_command" ||
+    name === "request_computer_control"
+  )
     return null;
   if (/^(?:browser(?:_|$)|land_changes)$/.test(name ?? ""))
     return 15 * 60 * 1000;

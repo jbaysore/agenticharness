@@ -17,6 +17,10 @@ import { planRevisionRequest, proposalText } from "../core/plans.mjs";
 import { goalStopped } from "../core/goals.mjs";
 import { watchTools } from "../core/watch-tools.mjs";
 import { ownerPauseTool, OWNER_PAUSE_STATEMENT_MAX } from "../core/owner-pause.mjs";
+import {
+  computerControlTool,
+  COMPUTER_CONTROL_REASON_MAX,
+} from "../core/computer-control.mjs";
 import { executable } from "../core/executables.mjs";
 import { subscriptionEnvironment } from "../security/environment.mjs";
 import { claudeContent, claudeGoalContext, claudeGoalObjective } from "./attachments.mjs";
@@ -599,6 +603,26 @@ export async function runClaude(
               statement: z.string().min(1).max(OWNER_PAUSE_STATEMENT_MAX),
               expects: z.enum(["done", "text"]).optional(),
               prompt: z.string().min(1).max(120).optional(),
+            },
+            async (args) => ({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(await ctx.history(t.name, args)),
+                },
+              ],
+            }),
+          ),
+        ),
+      ...(ctx.tools ?? [])
+        .filter((t) => t.name === computerControlTool.name)
+        .map((t) =>
+          tool(
+            t.name,
+            t.description,
+            {
+              reason: z.string().min(1).max(COMPUTER_CONTROL_REASON_MAX),
+              apps: z.array(z.string().min(1).max(120)).max(10).optional(),
             },
             async (args) => ({
               content: [

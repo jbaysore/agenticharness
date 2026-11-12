@@ -67,6 +67,14 @@ import { executeCommand, prepareWatchedCommand } from "./command-tool.mjs";
 import { Reliability } from "./reliability-service.mjs";
 import { browserGateway, browserTitle } from "./browser.mjs";
 import { checkQuestions, QUESTION_INSTRUCTIONS } from "./questions.mjs";
+import {
+  checkComputerControl,
+  computerControlContinuation,
+  computerControlGrantInstructions,
+  COMPUTER_CONTROL_DECLINED,
+  COMPUTER_CONTROL_INSTRUCTIONS,
+  COMPUTER_CONTROL_STOP,
+} from "./computer-control.mjs";
 import { proposalText, taggedProposal, PLAN_INSTRUCTIONS } from "./plans.mjs";
 import {
   attachmentContext,
@@ -154,6 +162,7 @@ export class Controller extends EventEmitter {
     this.bridgeLand = new Map();
     this.bridgeModes = new Map();
     this.bridgeQuestions = new Map();
+    this.bridgeComputerControl = new Map();
     this.bridgeCommands = new Map();
     this.bridgeWatchedCommands = new Map();
     this.bridgeGoalProgress = new Map();
@@ -1284,6 +1293,11 @@ export class Controller extends EventEmitter {
     // Goal never waits on a permission, a plan, or a mode change. A question
     // waits 60 seconds, then the agent chooses and the goal continues.
     const goal = chat.mode === "goal";
+    // A computer-control grant lasts for this run only. grantedNow marks the
+    // restart that follows the user's approval.
+    const computerControl = activeEntry?.computerControl ?? null,
+      grantedNow = Boolean(activeEntry?.computerControlGranted);
+    if (activeEntry) activeEntry.computerControlGranted = false;
     const reviewer =
       permissions === "auto" || (goal && permissions === "manual")
         ? new ActionReviewer({
@@ -1293,6 +1307,7 @@ export class Controller extends EventEmitter {
             chat,
             text,
             signal: abort.signal,
+            computerControl: Boolean(computerControl),
           })
         : null;
     const review = async (request) => {
@@ -1369,7 +1384,9 @@ export class Controller extends EventEmitter {
         contextDone?.("failed");
         throw error;
       });
-    const continuationText = continuing
+    const continuationText = continuing && grantedNow
+      ? computerControlContinuation(computerControl, requestText)
+      : continuing
       ? [
           modeChange
             ? `The user approved changing the chat mode from ${modeChange.fromMode} to ${chat.mode}. Continue the current task from this session's saved progress in ${chat.mode} mode. This approval changes the mode only; it does not approve a proposed plan or expand the task scope.`
@@ -1723,6 +1740,60 @@ export class Controller extends EventEmitter {
         questions: checkQuestions(input),
       });
     this.bridgeQuestions.set(token, askUser);
+    // Only the user can grant computer control: never Auto-review or Override.
+    // Approval restarts this run with the grant; the next run starts without.
+    const requestComputerControl = async (input) => {
+      let grant;
+      try {
+        grant = checkComputerControl(input);
+      } catch (failure) {
+        return { error: failure.message };
+      }
+      const active = this.active.get(chat.id);
+      if (!active || active.cancelled || active.abort !== abort)
+        return { approved: false, reason: "Turn stopped." };
+      if (computerControl)
+        return {
+          approved: true,
+          note: "Computer control is already approved for this task.",
+        };
+      const answer = await this.waitApproval(
+        run,
+        {
+          kind: "computer-control",
+          title: "Allow the agent to control your computer?",
+          reason: grant.reason,
+          apps: grant.apps,
+          details: { tool: "request_computer_control", input: grant },
+        },
+        abort.signal,
+        { timeoutMs: goal ? 60_000 : 0 },
+      );
+      if (!answer.allow || abort.signal.aborted) {
+        emit("work", {
+          kind: "computer-control",
+          item: {
+            title: "Computer control not approved",
+            description: grant.reason,
+          },
+        });
+        return { approved: false, instruction: COMPUTER_CONTROL_DECLINED };
+      }
+      active.computerControl = grant;
+      active.computerControlGranted = true;
+      active.restart = true;
+      emit("work", {
+        kind: "computer-control",
+        item: {
+          title: "Computer control approved for this task",
+          description: grant.reason,
+        },
+      });
+      // Let the tool result reach the agent before its session is closed.
+      setTimeout(() => abort.abort(), 0);
+      return { approved: true, instruction: COMPUTER_CONTROL_STOP };
+    };
+    this.bridgeComputerControl.set(token, requestComputerControl);
     const command = (input) =>
       executeCommand(input, {
         project,
@@ -1762,6 +1833,8 @@ export class Controller extends EventEmitter {
     const prefix = [
       agentInstructions(project, chat),
       chat.mode === "ask" ? "" : commandInstructions(project),
+      COMPUTER_CONTROL_INSTRUCTIONS,
+      computerControl ? computerControlGrantInstructions(computerControl) : "",
       this.memoryWeb ? MEMORY_INSTRUCTIONS : "",
       QUESTION_INSTRUCTIONS,
       WATCH_INSTRUCTIONS,
@@ -1828,6 +1901,7 @@ export class Controller extends EventEmitter {
       effort,
       permissions,
       mode: chat.mode,
+      computerControl: Boolean(computerControl),
       continuing,
       startGoal,
       resumeGoal: resumeGoal || (chat.mode === "goal" && !replacementGoal && !startGoal),
@@ -1955,6 +2029,8 @@ export class Controller extends EventEmitter {
         if (name === "update_goal_progress") return reportGoalProgress(input);
         if (name === "complete_goal") return completeGoal(input);
         if (name === "pause_for_owner") return this.pauseForOwner(chat.id, input);
+        if (name === "request_computer_control")
+          return requestComputerControl(input);
         if (name === "run_command") return command(input);
         if (name === "watch_command") return watchedCommand(input);
         if (isWatchTool(name)) return this.watchers.handle(chat.id, name, input);
@@ -2059,6 +2135,7 @@ export class Controller extends EventEmitter {
       this.bridgeLand.delete(token);
       this.bridgeModes.delete(token);
       this.bridgeQuestions.delete(token);
+      this.bridgeComputerControl.delete(token);
       this.bridgeCommands.delete(token);
       this.bridgeWatchedCommands.delete(token);
       this.bridgeGoalProgress.delete(token);
@@ -2558,6 +2635,17 @@ export class Controller extends EventEmitter {
       });
       if (timeoutMs > 0)
         timer = setTimeout(() => {
+          // Silence never grants computer control.
+          if (request.kind === "computer-control") {
+            const declined = { allow: false, timedOut: true, answers: {} };
+            if (!this.store.resolveApproval(approval.id, declined)) return;
+            this.event(run.conversation_id, run.id, "approval-resolved", {
+              id: approval.id,
+              response: declined,
+            });
+            this.approvalWaiters.get(approval.id)?.resolve(declined);
+            return;
+          }
           const result = {
             allow: true,
             timedOut: true,
