@@ -8,7 +8,9 @@ import {
   processIdentity,
 } from "./process-identity.mjs";
 
-const runner = fileURLToPath(new URL("./command-watch-runner.mjs", import.meta.url));
+const runner = fileURLToPath(
+  new URL("./command-watch-runner.mjs", import.meta.url),
+);
 
 export async function startDetached({ statusDir, command, shell, cwd }) {
   await mkdir(statusDir, { recursive: true });
@@ -43,29 +45,54 @@ export async function startDetached({ statusDir, command, shell, cwd }) {
 export async function readCommandResult(watch) {
   const dir = watch.runner?.statusDir ?? watch.statusDir;
   if (!dir) return { done: false };
+  let result;
   try {
-    const result = JSON.parse(await readFile(join(dir, "result.json"), "utf8"));
-    const output = await readFile(join(dir, "output.txt"), "utf8").catch(() => "");
+    result = JSON.parse(await readFile(join(dir, "result.json"), "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return { done: false, ...(await readProgress(watch)) };
+    throw error;
+  }
+  if (!Number.isInteger(result.exitCode))
+    throw new Error("The command result has no valid exit code.");
+  const output = await readFile(join(dir, "output.txt"), "utf8").catch(
+    () => "",
+  );
+  return {
+    done: true,
+    exitCode: result.exitCode,
+    output,
+  };
+}
+
+// New runners publish bounded live output with their heartbeat. Old runners
+// only have `at`; both formats remain readable after a host update.
+export async function readProgress(watch) {
+  const dir = watch.runner?.statusDir ?? watch.statusDir;
+  if (!dir) return {};
+  try {
+    const data = JSON.parse(
+      await readFile(join(dir, "heartbeat.json"), "utf8"),
+    );
     return {
-      done: true,
-      exitCode: Number.isInteger(result.exitCode) ? result.exitCode : 1,
-      output,
+      heartbeatAt: Number.isFinite(data.at) ? data.at : null,
+      output:
+        typeof data.output === "string" ? data.output.slice(-8000) : undefined,
+      outputBytes: Number.isFinite(data.outputBytes)
+        ? data.outputBytes
+        : undefined,
+      lastOutputAt: Number.isFinite(data.lastOutputAt)
+        ? data.lastOutputAt
+        : undefined,
     };
-  } catch {
-    return { done: false };
+  } catch (error) {
+    if (error.code === "ENOENT") return {};
+    throw error;
   }
 }
 
-// The runner rewrites heartbeat.json every two seconds while it is alive.
 export async function readHeartbeat(watch) {
-  const dir = watch.runner?.statusDir ?? watch.statusDir;
-  if (!dir) return null;
-  try {
-    const { at } = JSON.parse(await readFile(join(dir, "heartbeat.json"), "utf8"));
-    return Number.isFinite(at) ? at : null;
-  } catch {
-    return null;
-  }
+  return (await readProgress(watch)).heartbeatAt ?? null;
 }
 
 export const commandControls = {

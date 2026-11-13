@@ -601,6 +601,13 @@ running without further monitoring. A command that ends while the host is not
 running, with no saved exit code, is an error rather than a success. A detached
 runner keeps going across a host restart.
 
+Command runners publish an atomic heartbeat and the latest 8,000 characters of
+output every two seconds. Cards and `list_watches` expose that preview, output
+activity and runner heartbeat separately. A heartbeat only proves the runner is
+alive. Shell exit allows up to two seconds to drain inherited output pipes;
+background descendants cannot hold the result open indefinitely. Commands are
+never automatically replayed when monitoring fails.
+
 `watch_pull_request` remembers the comments, reviews, and head commit present
 at the first read. Later it reports a merge, a close, a new approval, a request
 for changes, a new comment, or a new commit. Comments already on the pull
@@ -618,6 +625,21 @@ to the shared project if the worktree disappears. Older pending file watches
 without a saved directory recover it from their chat on startup, discarding
 any observations made against the old directory.
 
+Local watches poll every five seconds, independently of slow GitHub requests or
+other local checks. Each local check has a 15-second deadline; three consecutive
+check failures, retried five seconds apart, produce a monitoring error. Late
+responses cannot overwrite a timeout, cancellation or terminal outcome. File
+cards show whether the path exists, its size and last activity; pattern watches
+also show a bounded log preview.
+
+Armed command and file watches request an agent progress review after ten
+minutes without observed output/file activity. Continuously active watches are
+still reviewed hourly. The agent must inspect the actual producer, since noisy
+logs do not establish real progress, then yield to the same watch again to keep
+waiting. Reviews use separate durable receipts, do not consume the three result
+continuations, and never extend the original expiry. Old records gain the new
+timing without rearming revoked follow-up or replaying missed reviews.
+
 Notification only is the default. When the existing task authorizes follow-up,
 the agent sets `resumeOn` (`success`, `failure`, or `complete`) and a short
 continuation, then calls `yield_to_watch` with a checkpoint after other useful
@@ -626,6 +648,10 @@ confirmed stopped before its saved state becomes **waiting for CI**; its
 objective is retained, and Codex resumes its native budget instead of setting
 a new one. Confirmed waits do not block Harness updates. An unconfirmed stop
 keeps the existing Goal hold and downgrades CI to notification only.
+
+For command and file watches, `resumeOn: complete` includes monitoring errors
+and expiry, so the agent can diagnose an unresolved task. Explicit cancellation
+does not trigger a continuation. GitHub error/expiry semantics are unchanged.
 
 The host reads check runs, commit statuses and workflow runs, including
 pagination and current rerun attempts. Empty checks stay pending; completed
@@ -636,8 +662,9 @@ to two after ten minutes and five after an hour, and respects GitHub rate-limit
 headers. Expiry defaults to six hours, with a maximum of 24 hours.
 
 A watcher can start one follow-up, with three automatic continuations allowed
-per original user request and only one watcher-triggered agent running at a
-time. Further results offer **Continue with agent**. No provider switch or paid
+per original user request and only one agent running in each chat at a
+time. Different chats can resume independently. Further results offer
+**Continue with agent**. No provider switch or paid
 fallback occurs. Stop revokes wakeups; new user instructions or changed modes
 downgrade them to notifications. Archiving or moving the chat cancels watchers.
 Ask and Plan watchers only notify. Current permissions and provider usage gates
@@ -653,6 +680,12 @@ so the working indicator stays the one live pulse. Finished results still mark
 the chat unread independently of model turns. **Cancel watch** stops
 monitoring; **Continue with agent** explicitly starts a turn on the watcher's
 provider and model in the chat's current mode.
+
+Local cards refresh every five seconds without model calls and flag checks more
+than 30 seconds overdue. Follow-up cards show whether work is queued in the chat,
+waiting for its provider, running, completed, interrupted or failed. Failed
+continuations retain their error and can be continued manually; they are never
+automatically replayed after a restart.
 
 ## Browser for agents
 

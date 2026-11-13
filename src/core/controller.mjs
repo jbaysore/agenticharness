@@ -2320,6 +2320,7 @@ export class Controller extends EventEmitter {
         saveProposal(proposalText(reply));
     }
     this.store.setRun(run.id, status, null, error ?? null);
+    this.watchers.followupFinished(this.store.run(run.id));
     this.requeuePending(active);
     this.event(chat.id, run.id, "run", {
       status,

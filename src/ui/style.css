@@ -2006,6 +2006,8 @@ small {
 .watch-card.expired .watch-title strong { color: var(--text-3); }
 .watch-title code, .watch-times { color: var(--muted); font-size: 12px; }
 .watch-card p { margin: 7px 0; }
+.watch-output { margin: 8px 0; }
+.watch-output pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .watch-card ul { margin: 8px 0 0; padding-left: 20px; }
 .watch-actions { display: flex; gap: 8px; margin-top: 8px; }
 .watch-actions:empty { display: none; }

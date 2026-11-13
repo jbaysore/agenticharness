@@ -7,13 +7,29 @@ import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
 import { blockingGoals } from "../src/core/goals.mjs";
-import { fileReviewInterval } from "../src/core/watchers.mjs";
-import { claudeContent, claudeGoalContext } from "../src/providers/attachments.mjs";
+import {
+  quietReviewInterval,
+  activeReviewInterval,
+  Watchers,
+} from "../src/core/watchers.mjs";
+import {
+  claudeContent,
+  claudeGoalContext,
+} from "../src/providers/attachments.mjs";
 import { runClaude } from "../src/providers/claude.mjs";
-import { killIfMatched, processIdentity } from "../src/core/process-identity.mjs";
+import {
+  killIfMatched,
+  processIdentity,
+} from "../src/core/process-identity.mjs";
 
 const sha = "a".repeat(40);
-function fixture({ path = ":memory:", mode = "default", provider = "codex", projectPath = process.cwd(), commands } = {}) {
+function fixture({
+  path = ":memory:",
+  mode = "default",
+  provider = "codex",
+  projectPath = process.cwd(),
+  commands,
+} = {}) {
   let now = Date.now() + 1000,
     reads = 0;
   let result = {
@@ -26,7 +42,14 @@ function fixture({ path = ":memory:", mode = "default", provider = "codex", proj
   let pull = {
     status: "pending",
     reason: null,
-    cursor: { commentId: 1, reviewCommentId: 0, reviews: {}, head: sha, state: "open", merged: false },
+    cursor: {
+      commentId: 1,
+      reviewCommentId: 0,
+      reviews: {},
+      head: sha,
+      state: "open",
+      merged: false,
+    },
     items: [],
     sha,
     url: "https://github.com/owner/repo/pull/4",
@@ -139,6 +162,13 @@ const finishRuns = async (controller) => {
     [...controller.active.values()].map((a) => a.task).filter(Boolean),
   );
 };
+const startLocalCommand = (f, input = {}) =>
+  f.controller.watchers.startCommand(f.chat.id, input, {
+    command: "fixture command",
+    shell: "cmd",
+    shellName: "Command Prompt",
+    cwd: process.cwd(),
+  });
 const terminal = (status = "success", extra = {}) => ({
   status,
   identity: sha,
@@ -347,7 +377,9 @@ for (const provider of ["codex", "claude"])
             }),
             queryFn: ({ prompt }) => ({
               interrupt: async () => {},
-              close() { closes++; },
+              close() {
+                closes++;
+              },
               async *[Symbol.asyncIterator]() {
                 await prompt.next();
                 await yieldTurn();
@@ -394,7 +426,10 @@ for (const provider of ["codex", "claude"])
         assert.equal(prompt.split(followup.text).length - 1, 1);
         assert.match(prompt, /Outcome: failure/);
         assert.match(prompt, /Fix CI if needed and assess the saved goal/);
-        assert.match(claudeGoalContext(followup), /Full Harness Goal \(binding objective\):\nShip passing CI/);
+        assert.match(
+          claudeGoalContext(followup),
+          /Full Harness Goal \(binding objective\):\nShip passing CI/,
+        );
       }
       const trigger = f.store
         .messages(f.chat.id)
@@ -507,7 +542,10 @@ for (const provider of ["codex", "claude"])
       await finishRuns(f.controller);
       assert.equal(calls, 2);
       assert.equal(followup.resumeGoal, true);
-      assert.match(followup.text, /owner has not yet answered your pause request:\nRetry the six MLB rows/);
+      assert.match(
+        followup.text,
+        /owner has not yet answered your pause request:\nRetry the six MLB rows/,
+      );
     } finally {
       await f.close();
     }
@@ -517,9 +555,15 @@ test("a Goal resumed by hand can re-arm its still-running watcher with a yield o
   for (const how of ["yield", "owner"]) {
     const f = fixture({ mode: "goal" });
     try {
-      const watch = f.register({ resumeOn: ["complete"], continuation: "Assess goal." });
+      const watch = f.register({
+        resumeOn: ["complete"],
+        continuation: "Assess goal.",
+      });
       f.end();
-      f.controller.watchers.invalidate(f.chat.id, "New user instructions superseded automatic follow-up.");
+      f.controller.watchers.invalidate(
+        f.chat.id,
+        "New user instructions superseded automatic follow-up.",
+      );
       const run = f.store.createRun({
         conversationId: f.chat.id,
         actionId: randomUUID(),
@@ -530,12 +574,19 @@ test("a Goal resumed by hand can re-arm its still-running watcher with a yield o
       f.controller.active.set(f.chat.id, { run, abort: new AbortController() });
       if (how === "yield")
         assert.equal(
-          f.controller.watchers.yield(f.chat.id, { ids: [watch.id], checkpoint: "Still waiting" }).parked,
+          f.controller.watchers.yield(f.chat.id, {
+            ids: [watch.id],
+            checkpoint: "Still waiting",
+          }).parked,
           true,
         );
       else
         assert.deepEqual(
-          f.controller.watchers.armForOwner(f.chat.id, f.controller.active.get(f.chat.id), "Merge it."),
+          f.controller.watchers.armForOwner(
+            f.chat.id,
+            f.controller.active.get(f.chat.id),
+            "Merge it.",
+          ),
           [watch.id],
         );
       const saved = f.store.watchStore.get(watch.id);
@@ -561,8 +612,13 @@ test("pausing for the owner after yielding in the same turn is refused", async (
         resumeOn: ["complete"],
         continuation: "Assess goal.",
       });
-      await ctx.history("yield_to_watch", { ids: [watch.id], checkpoint: "Waiting" });
-      refused = await ctx.history("pause_for_owner", { statement: "Merge it." });
+      await ctx.history("yield_to_watch", {
+        ids: [watch.id],
+        checkpoint: "Waiting",
+      });
+      refused = await ctx.history("pause_for_owner", {
+        statement: "Merge it.",
+      });
       await new Promise((resolve) =>
         ctx.signal.addEventListener("abort", resolve, { once: true }),
       );
@@ -578,7 +634,10 @@ test("pausing for the owner after yielding in the same turn is refused", async (
     });
     await finishRuns(f.controller);
     assert.match(refused.error, /call only pause_for_owner/);
-    assert.equal(f.store.conversation(f.chat.id).sessions.codex.goal.status, "waiting");
+    assert.equal(
+      f.store.conversation(f.chat.id).sessions.codex.goal.status,
+      "waiting",
+    );
   } finally {
     await f.close();
   }
@@ -670,7 +729,7 @@ test("Stop, mode changes, queued user instructions and usage exhaustion override
   }
 });
 
-test("only one watcher-triggered agent runs globally and each request can wake at most three times", async () => {
+test("watcher-triggered agents run independently across chats and each request can wake at most three times", async () => {
   const f = fixture();
   const stop = Promise.withResolvers(),
     started = Promise.withResolvers();
@@ -678,7 +737,7 @@ test("only one watcher-triggered agent runs globally and each request can wake a
     let calls = 0;
     f.controller.runners.codex = async () => {
       calls++;
-      started.resolve();
+      if (calls === 2) started.resolve();
       await stop.promise;
       return { status: "completed" };
     };
@@ -699,9 +758,9 @@ test("only one watcher-triggered agent runs globally and each request can wake a
     f.advance();
     await f.controller.watchers.tick();
     await started.promise;
-    assert.equal(calls, 1);
+    assert.equal(calls, 2);
     await f.controller.watchers.tick();
-    assert.equal(calls, 1);
+    assert.equal(calls, 2);
     stop.resolve();
     await finishRuns(f.controller);
     await f.controller.watchers.tick();
@@ -858,48 +917,78 @@ function commandDouble(identity, read, kills) {
 test("command polling recognizes a live process using the real OS identity lookup", async () => {
   const self = await processIdentity(process.pid);
   assert.ok(self);
-  const f = fixture({ commands: {
-    start: async () => ({ ...self, statusDir: "unused" }),
-    read: async () => ({ done: false }),
-    identity: processIdentity,
-    killIfMatched: async () => assert.fail("This identity-only test must never kill a process"),
-  } });
+  const f = fixture({
+    commands: {
+      start: async () => ({ ...self, statusDir: "unused" }),
+      read: async () => ({ done: false }),
+      identity: processIdentity,
+      killIfMatched: async () =>
+        assert.fail("This identity-only test must never kill a process"),
+    },
+  });
   try {
     f.register();
-    const watch = await f.controller.watchers.startCommand(f.chat.id, {},
-      { command: "identity-only fixture", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() });
+    const watch = await f.controller.watchers.startCommand(
+      f.chat.id,
+      {},
+      {
+        command: "identity-only fixture",
+        shell: "cmd",
+        shellName: "Command Prompt",
+        cwd: process.cwd(),
+      },
+    );
     f.end();
     await f.controller.watchers.tick();
     const saved = f.store.watchStore.get(watch.id);
     assert.equal(saved.status, "pending");
     assert.equal(saved.runner.released, undefined);
     assert.ok(Number.isFinite(saved.lastCheckedAt));
-  } finally { await f.close(); }
+  } finally {
+    await f.close();
+  }
 });
 
 test("command expiry stops a matching process and leaves a reused process id alone", async () => {
   const kills = [];
   let live = { ...recorded };
   const f = fixture({
-    commands: commandDouble(async () => live, async () => ({ done: false }), kills),
+    commands: commandDouble(
+      async () => live,
+      async () => ({ done: false }),
+      kills,
+    ),
   });
   try {
     f.register();
     const matched = await f.controller.watchers.startCommand(
       f.chat.id,
       { expiryHours: 0.25 },
-      { command: "echo watched", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() },
+      {
+        command: "echo watched",
+        shell: "cmd",
+        shellName: "Command Prompt",
+        cwd: process.cwd(),
+      },
     );
     f.advance(15 * 60_000);
     await f.controller.watchers.tick();
     assert.deepEqual(kills, [42]);
-    assert.match(f.store.watchStore.get(matched.id).reason, /command was stopped/);
+    assert.match(
+      f.store.watchStore.get(matched.id).reason,
+      /command was stopped/,
+    );
     kills.length = 0;
     live = { pid: 42, createdAt: "2020-01-01T00:00:05.000Z" };
     const reused = await f.controller.watchers.startCommand(
       f.chat.id,
       { expiryHours: 0.25 },
-      { command: "echo again", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() },
+      {
+        command: "echo again",
+        shell: "cmd",
+        shellName: "Command Prompt",
+        cwd: process.cwd(),
+      },
     );
     f.controller.watchers.cancel(f.chat.id, reused.id);
     await Promise.all([...f.controller.watchers.pendingStops]);
@@ -923,7 +1012,12 @@ test("a command with no exit code is unknown and does not count as success", asy
     const watch = await f.controller.watchers.startCommand(
       f.chat.id,
       {},
-      { command: "echo missing", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() },
+      {
+        command: "echo missing",
+        shell: "cmd",
+        shellName: "Command Prompt",
+        cwd: process.cwd(),
+      },
     );
     f.end();
     await f.controller.watchers.tick();
@@ -940,7 +1034,11 @@ test("a failed process lookup keeps a command watched while its runner heartbeat
   let beat = Date.now();
   const f = fixture({
     commands: {
-      ...commandDouble(async () => null, async () => ({ done: false }), []),
+      ...commandDouble(
+        async () => null,
+        async () => ({ done: false }),
+        [],
+      ),
       heartbeat: async () => beat,
     },
   });
@@ -949,7 +1047,12 @@ test("a failed process lookup keeps a command watched while its runner heartbeat
     const watch = await f.controller.watchers.startCommand(
       f.chat.id,
       {},
-      { command: "echo slow lookup", shell: "cmd", shellName: "Command Prompt", cwd: process.cwd() },
+      {
+        command: "echo slow lookup",
+        shell: "cmd",
+        shellName: "Command Prompt",
+        cwd: process.cwd(),
+      },
     );
     f.end();
     await f.controller.watchers.tick();
@@ -958,6 +1061,381 @@ test("a failed process lookup keeps a command watched while its runner heartbeat
     f.advance();
     await f.controller.watchers.tick();
     assert.equal(f.store.watchStore.get(watch.id).status, "error");
+  } finally {
+    await f.close();
+  }
+});
+
+test("quiet command watches investigate after ten minutes, using heartbeat without process queries", async () => {
+  let f,
+    lookups = 0;
+  const texts = [];
+  f = fixture({
+    commands: {
+      ...commandDouble(
+        async () => {
+          lookups++;
+          return recorded;
+        },
+        async () => ({
+          done: false,
+          heartbeatAt: f.now,
+          output: "still waiting",
+          outputBytes: 13,
+          lastOutputAt: f.now - quietReviewInterval,
+        }),
+        [],
+      ),
+    },
+  });
+  try {
+    f.controller.runners.codex = async (ctx) => {
+      texts.push(ctx.text);
+      return { status: "completed" };
+    };
+    f.register();
+    const watch = await startLocalCommand(f, {
+      resumeOn: ["complete"],
+      continuation: "Inspect the actual job.",
+    });
+    f.arm(watch);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).excerpt, "still waiting");
+    f.advance(quietReviewInterval - 1);
+    await f.controller.watchers.tick();
+    assert.equal(texts.length, 0);
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    assert.equal(texts.length, 1);
+    assert.match(texts[0], /Scheduled progress review/);
+    assert.match(texts[0], /Inspect the actual job/);
+    assert.equal(lookups, 0);
+    f.advance(quietReviewInterval);
+    await f.controller.watchers.tick();
+    assert.equal(
+      texts.length,
+      1,
+      "a review must yield again to authorize more reviews",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("active command and log watches postpone quiet reviews but still investigate hourly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-active-watch-"));
+  let f,
+    outputBytes = 0;
+  f = fixture({
+    projectPath: root,
+    commands: commandDouble(
+      async () => recorded,
+      async () => ({
+        done: false,
+        output: "working",
+        outputBytes,
+        lastOutputAt: f.now,
+        heartbeatAt: f.now,
+      }),
+      [],
+    ),
+  });
+  try {
+    const texts = [];
+    f.controller.runners.codex = async (ctx) => {
+      texts.push(ctx.text);
+      return { status: "completed" };
+    };
+    f.register();
+    const command = await startLocalCommand(f, {
+      resumeOn: ["complete"],
+      continuation: "Inspect command progress.",
+    });
+    const file = await f.controller.watchers.createFile(f.chat.id, {
+      path: "progress.log",
+      until: "matches",
+      pattern: "DONE",
+      resumeOn: ["complete"],
+      continuation: "Inspect file progress.",
+    });
+    f.arm(command);
+    f.arm(file);
+    for (let step = 1; step <= 12; step++) {
+      f.advance(300_000);
+      outputBytes++;
+      await writeFile(join(root, "progress.log"), "working ".repeat(step));
+      await f.controller.watchers.tick();
+      await finishRuns(f.controller);
+      if (step < 12) assert.equal(texts.length, 0);
+    }
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    assert.equal(texts.length, 2);
+    assert.ok(f.store.watchStore.get(file.id).excerpt.includes("working"));
+    assert.equal(f.store.watchStore.get(file.id).fileObserved.exists, true);
+    assert.equal(f.now - command.reviewedAt, activeReviewInterval);
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const kind of ["command", "file"])
+  for (const outcome of ["error", "expired"]) {
+    test(`${kind} ${outcome} resumes armed complete follow-up once`, async () => {
+      const root = await mkdtemp(join(tmpdir(), "harness-terminal-watch-"));
+      const f = fixture({
+        projectPath: root,
+        commands: commandDouble(
+          async () => (outcome === "error" ? null : recorded),
+          async () => ({ done: false }),
+          [],
+        ),
+      });
+      try {
+        let calls = 0;
+        f.controller.runners.codex = async () => {
+          calls++;
+          return { status: "completed" };
+        };
+        f.register();
+        const input = {
+          expiryHours: 0.25,
+          resumeOn: ["complete"],
+          continuation: "Diagnose the outcome without replaying the command.",
+        };
+        const watch =
+          kind === "command"
+            ? await startLocalCommand(f, input)
+            : await f.controller.watchers.createFile(f.chat.id, {
+                ...input,
+                path: "done.txt",
+                until: "appears",
+              });
+        f.arm(watch);
+        if (kind === "file" && outcome === "error") {
+          const saved = f.store.watchStore.get(watch.id);
+          saved.root = join(root, "missing-worktree");
+          f.store.watchStore.save(saved);
+        }
+        if (outcome === "expired") f.advance(900_000);
+        await f.controller.watchers.tick();
+        await finishRuns(f.controller);
+        await f.controller.watchers.tick();
+        assert.equal(f.store.watchStore.get(watch.id).status, outcome);
+        assert.equal(calls, 1);
+        assert.equal(
+          f.store.watchStore.get(watch.id).followupStatus,
+          "completed",
+        );
+      } finally {
+        await f.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
+
+test("old local watches gain ten-minute reviews without rearming revoked follow-up", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-watch-upgrade-"));
+  const f = fixture({ projectPath: root });
+  try {
+    f.register();
+    const watch = await f.controller.watchers.createFile(f.chat.id, {
+      path: "old.done",
+      until: "appears",
+      resumeOn: ["complete"],
+      continuation: "Check the producer.",
+    });
+    f.arm(watch);
+    const old = f.store.watchStore.get(watch.id);
+    delete old.lastActivityAt;
+    delete old.reviewedAt;
+    old.reviewAt = f.now + activeReviewInterval;
+    f.store.watchStore.save(old);
+    await f.controller.watchers.close();
+    f.controller.watchers = new Watchers(f.controller, {
+      now: () => f.now,
+      github: f.controller.watchers.github,
+    });
+    assert.equal(
+      f.store.watchStore.get(watch.id).reviewAt,
+      f.now + quietReviewInterval,
+    );
+    assert.equal(f.store.watchStore.get(watch.id).armed, true);
+    const migrated = f.store.watchStore.get(watch.id);
+    migrated.armed = false;
+    migrated.delivery = "blocked";
+    f.store.watchStore.save(migrated);
+    await f.controller.watchers.close();
+    f.advance(quietReviewInterval * 3);
+    f.controller.watchers = new Watchers(f.controller, {
+      now: () => f.now,
+      github: f.controller.watchers.github,
+    });
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).armed, false);
+    assert.equal(f.store.watchStore.get(watch.id).reviews, undefined);
+  } finally {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("slow GitHub checks do not block new local checks or duplicate the outstanding request", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-isolated-watch-"));
+  const f = fixture({ projectPath: root });
+  const remote = Promise.withResolvers();
+  let pending;
+  try {
+    f.register();
+    let requests = 0;
+    f.controller.watchers.github.read = () => {
+      requests++;
+      return remote.promise;
+    };
+    pending = f.controller.watchers.tick();
+    await Promise.resolve();
+    const file = await f.controller.watchers.createFile(f.chat.id, {
+      path: "ready.txt",
+      until: "appears",
+    });
+    await writeFile(join(root, "ready.txt"), "ready");
+    await f.controller.watchers.tick();
+    f.advance(5_000);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(file.id).status, "success");
+    assert.equal(requests, 1);
+  } finally {
+    remote.resolve(f.result);
+    await pending;
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("timed-out local checks retry three times and cannot overwrite the terminal result later", async () => {
+  const late = Promise.withResolvers();
+  const f = fixture({
+    commands: commandDouble(
+      async () => recorded,
+      () => late.promise,
+      [],
+    ),
+  });
+  try {
+    f.controller.watchers.checkTimeoutMs = 15;
+    f.register();
+    const watch = await startLocalCommand(f);
+    f.end();
+    for (let check = 1; check <= 3; check++) {
+      await f.controller.watchers.tick();
+      assert.equal(
+        f.store.watchStore.get(watch.id).status,
+        check === 3 ? "error" : "retrying",
+      );
+      f.advance(5_000);
+    }
+    late.resolve({ done: true, exitCode: 0, output: "late success" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(f.store.watchStore.get(watch.id).status, "error");
+    assert.match(
+      f.store.watchStore.get(watch.id).reason,
+      /may still be running/,
+    );
+  } finally {
+    late.resolve({ done: false });
+    await f.close();
+  }
+});
+
+test("a final result written during process lookup is collected before reporting a lost runner", async () => {
+  let reads = 0;
+  const f = fixture({
+    commands: commandDouble(
+      async () => null,
+      async () =>
+        ++reads === 1
+          ? { done: false }
+          : { done: true, exitCode: 0, output: "finished" },
+      [],
+    ),
+  });
+  try {
+    f.register();
+    const watch = await startLocalCommand(f);
+    f.end();
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(watch.id).status, "success");
+  } finally {
+    await f.close();
+  }
+});
+
+test("cancel during command startup keeps the cancellation and stops the runner once available", async () => {
+  const startup = Promise.withResolvers(),
+    kills = [];
+  let reads = 0;
+  const f = fixture({
+    commands: {
+      ...commandDouble(
+        async () => recorded,
+        async () => {
+          reads++;
+          return { done: false };
+        },
+        kills,
+      ),
+      start: () => startup.promise,
+    },
+  });
+  try {
+    f.register();
+    const pending = startLocalCommand(f);
+    const watch = f.store.watchStore
+      .list(f.chat.id)
+      .find((w) => w.kind === "command");
+    await f.controller.watchers.tick();
+    assert.equal(reads, 0);
+    f.controller.watchers.cancel(f.chat.id, watch.id);
+    startup.resolve({ ...recorded });
+    await pending;
+    await Promise.all([...f.controller.watchers.pendingStops]);
+    assert.equal(f.store.watchStore.get(watch.id).status, "stopped");
+    assert.deepEqual(kills, [recorded.pid]);
+  } finally {
+    startup.resolve(recorded);
+    await f.close();
+  }
+});
+
+test("failed agent follow-up is recorded and is never automatically replayed", async () => {
+  let calls = 0;
+  const f = fixture({
+    commands: commandDouble(
+      async () => recorded,
+      async () => ({ done: true, exitCode: 0, output: "done" }),
+      [],
+    ),
+  });
+  try {
+    f.controller.runners.codex = async () => {
+      calls++;
+      return { status: "failed", error: "Simulated provider failure" };
+    };
+    f.register();
+    const watch = await startLocalCommand(f, {
+      resumeOn: ["complete"],
+      continuation: "Verify the result.",
+    });
+    f.arm(watch);
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    const saved = f.store.watchStore.get(watch.id);
+    assert.equal(saved.followupStatus, "failed");
+    assert.equal(saved.followupError, "Simulated provider failure");
+    await f.controller.watchers.tick();
+    assert.equal(calls, 1);
   } finally {
     await f.close();
   }
@@ -1003,7 +1481,8 @@ test("a file that does not exist yet can appear, and an escaping ancestor is rej
 
 test("file watches ignore shared-project files and resume once for their worktree sentinel", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-file-worktree-"));
-  const projectPath = join(root, "project"), worktreePath = join(root, "worktree");
+  const projectPath = join(root, "project"),
+    worktreePath = join(root, "worktree");
   await Promise.all([mkdir(projectPath), mkdir(worktreePath)]);
   const f = fixture({ projectPath });
   try {
@@ -1015,12 +1494,21 @@ test("file watches ignore shared-project files and resume once for their worktre
     };
     f.register();
     const input = {
-      path: "nested/job.done", until: "appears",
-      resumeOn: ["complete"], continuation: "Inspect the job result.",
+      path: "nested/job.done",
+      until: "appears",
+      resumeOn: ["complete"],
+      continuation: "Inspect the job result.",
     };
-    const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", input);
+    const watch = await f.controller.watchers.handle(
+      f.chat.id,
+      "watch_file",
+      input,
+    );
     assert.equal(watch.root, worktreePath);
-    assert.equal((await f.controller.watchers.handle(f.chat.id, "watch_file", input)).id, watch.id);
+    assert.equal(
+      (await f.controller.watchers.handle(f.chat.id, "watch_file", input)).id,
+      watch.id,
+    );
     f.arm(watch);
     await mkdir(join(projectPath, "nested"));
     await writeFile(join(projectPath, "nested", "job.done"), "wrong job");
@@ -1047,7 +1535,7 @@ test("file watches ignore shared-project files and resume once for their worktre
   }
 });
 
-test("armed file watches wake the agent hourly to review progress without spending result wakes", async () => {
+test("armed file watches wake the agent after ten quiet minutes to review progress without spending result wakes", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-file-review-"));
   const f = fixture({ projectPath: root });
   try {
@@ -1058,18 +1546,20 @@ test("armed file watches wake the agent hourly to review progress without spendi
     };
     f.register();
     const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
-      path: "frames.done", until: "appears",
-      resumeOn: ["complete"], continuation: "Verify the frame counts.",
+      path: "frames.done",
+      until: "appears",
+      resumeOn: ["complete"],
+      continuation: "Verify the frame counts.",
       expiryHours: 24,
     });
     f.arm(watch);
     await f.controller.watchers.tick();
-    f.advance(fileReviewInterval - 1);
+    f.advance(quietReviewInterval - 1);
     await f.controller.watchers.tick();
     assert.equal(texts.length, 0);
     // More reviews than the three result wakes a request gets.
     for (let review = 1; review <= 4; review++) {
-      f.advance(fileReviewInterval);
+      f.advance(quietReviewInterval);
       await f.controller.watchers.tick();
       await finishRuns(f.controller);
       assert.equal(texts.length, review);
@@ -1080,20 +1570,26 @@ test("armed file watches wake the agent hourly to review progress without spendi
       assert.equal(saved.status, "pending");
       assert.equal(saved.armed, false);
       // Without a new yield the watch only notifies; no further reviews.
-      f.advance(fileReviewInterval + 5_000);
+      f.advance(quietReviewInterval + 5_000);
       await f.controller.watchers.tick();
       await finishRuns(f.controller);
       assert.equal(texts.length, review);
       const run = f.store.createRun({
-        conversationId: f.chat.id, actionId: randomUUID(),
-        provider: "codex", model: "fixture", text: "Review",
+        conversationId: f.chat.id,
+        actionId: randomUUID(),
+        provider: "codex",
+        model: "fixture",
+        text: "Review",
       });
       // The review turn belongs to the same request as the watch.
       f.controller.active.set(f.chat.id, {
-        run, abort: new AbortController(), taskRootId: saved.rootId,
+        run,
+        abort: new AbortController(),
+        taskRootId: saved.rootId,
       });
       await f.controller.watchers.handle(f.chat.id, "yield_to_watch", {
-        ids: [watch.id], checkpoint: "Job still progressing.",
+        ids: [watch.id],
+        checkpoint: "Job still progressing.",
       });
       const active = f.controller.active.get(f.chat.id);
       clearTimeout(active.watchYield.timer);
@@ -1118,15 +1614,23 @@ test("armed file watches wake the agent hourly to review progress without spendi
 
 test("file watches keep their registered directory across restart and chat-folder changes", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-file-restart-"));
-  const projectPath = join(root, "project"), worktreePath = join(root, "worktree"),
-    otherPath = join(root, "other"), path = join(root, "workspace.sqlite");
-  await Promise.all([mkdir(projectPath), mkdir(worktreePath), mkdir(otherPath)]);
+  const projectPath = join(root, "project"),
+    worktreePath = join(root, "worktree"),
+    otherPath = join(root, "other"),
+    path = join(root, "workspace.sqlite");
+  await Promise.all([
+    mkdir(projectPath),
+    mkdir(worktreePath),
+    mkdir(otherPath),
+  ]);
   let f = fixture({ path, projectPath });
   try {
     f.store.updateConversation(f.chat.id, { worktree: { path: worktreePath } });
     f.register();
     const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
-      path: "job.done", until: "matches", pattern: "ready",
+      path: "job.done",
+      until: "matches",
+      pattern: "ready",
     });
     const chatId = f.chat.id;
     f.end();
@@ -1154,18 +1658,27 @@ test("file watches keep their registered directory across restart and chat-folde
 test("legacy file watches recover their chat directory and discard observations of the wrong folder", async () => {
   for (const ownWorktree of [true, false]) {
     const root = await mkdtemp(join(tmpdir(), "harness-file-legacy-"));
-    const projectPath = join(root, "project"), worktreePath = join(root, "worktree"),
+    const projectPath = join(root, "project"),
+      worktreePath = join(root, "worktree"),
       path = join(root, "workspace.sqlite");
     await Promise.all([mkdir(projectPath), mkdir(worktreePath)]);
     let f = fixture({ path, projectPath });
     try {
       if (ownWorktree)
-        f.store.updateConversation(f.chat.id, { worktree: { path: worktreePath } });
+        f.store.updateConversation(f.chat.id, {
+          worktree: { path: worktreePath },
+        });
       f.register();
-      const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
-        path: "job.done", until: "stable",
-        resumeOn: ["complete"], continuation: "Inspect the recovered job result.",
-      });
+      const watch = await f.controller.watchers.handle(
+        f.chat.id,
+        "watch_file",
+        {
+          path: "job.done",
+          until: "stable",
+          resumeOn: ["complete"],
+          continuation: "Inspect the recovered job result.",
+        },
+      );
       f.arm(watch);
       const legacy = f.store.watchStore.get(watch.id);
       delete legacy.root;
@@ -1199,7 +1712,8 @@ test("legacy file watches recover their chat directory and discard observations 
 
 test("worktree file watches reject escaping links at registration and on later polls", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-file-containment-"));
-  const projectPath = join(root, "project"), worktreePath = join(root, "worktree");
+  const projectPath = join(root, "project"),
+    worktreePath = join(root, "worktree");
   await Promise.all([mkdir(projectPath), mkdir(worktreePath)]);
   const f = fixture({ projectPath });
   try {
@@ -1207,17 +1721,25 @@ test("worktree file watches reject escaping links at registration and on later p
     f.register();
     await symlink(projectPath, join(worktreePath, "outside"), "junction");
     await assert.rejects(
-      () => f.controller.watchers.handle(f.chat.id, "watch_file", { path: "outside/job.done", until: "appears" }),
+      () =>
+        f.controller.watchers.handle(f.chat.id, "watch_file", {
+          path: "outside/job.done",
+          until: "appears",
+        }),
       /escapes the worktree/,
     );
     const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
-      path: "later/job.done", until: "appears",
+      path: "later/job.done",
+      until: "appears",
     });
     f.end();
     await symlink(projectPath, join(worktreePath, "later"), "junction");
     await f.controller.watchers.tick();
     assert.equal(f.store.watchStore.get(watch.id).status, "error");
-    assert.match(f.store.watchStore.get(watch.id).reason, /escapes the worktree/);
+    assert.match(
+      f.store.watchStore.get(watch.id).reason,
+      /escapes the worktree/,
+    );
   } finally {
     await f.close();
     await rm(root, { recursive: true, force: true });
@@ -1226,25 +1748,34 @@ test("worktree file watches reject escaping links at registration and on later p
 
 test("an unavailable worktree fails instead of watching the shared project", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-file-missing-root-"));
-  const projectPath = join(root, "project"), worktreePath = join(root, "worktree");
+  const projectPath = join(root, "project"),
+    worktreePath = join(root, "worktree");
   await Promise.all([mkdir(projectPath), mkdir(worktreePath)]);
   const f = fixture({ projectPath });
   try {
     f.store.updateConversation(f.chat.id, { worktree: { path: worktreePath } });
     f.register();
     const watch = await f.controller.watchers.handle(f.chat.id, "watch_file", {
-      path: "job.done", until: "appears",
+      path: "job.done",
+      until: "appears",
     });
     await rm(worktreePath, { recursive: true });
     await assert.rejects(
-      () => f.controller.watchers.handle(f.chat.id, "watch_file", { path: "other.done", until: "appears" }),
+      () =>
+        f.controller.watchers.handle(f.chat.id, "watch_file", {
+          path: "other.done",
+          until: "appears",
+        }),
       /worktree could not be resolved/,
     );
     f.end();
     await writeFile(join(projectPath, "job.done"), "wrong job");
     await f.controller.watchers.tick();
     assert.equal(f.store.watchStore.get(watch.id).status, "error");
-    assert.match(f.store.watchStore.get(watch.id).reason, /worktree could not be resolved/);
+    assert.match(
+      f.store.watchStore.get(watch.id).reason,
+      /worktree could not be resolved/,
+    );
   } finally {
     await f.close();
     await rm(root, { recursive: true, force: true });
@@ -1255,10 +1786,14 @@ test("an already-merged pull request settles, and a new comment does not fire fr
   const f = fixture();
   try {
     f.register();
-    const merged = await f.controller.watchers.handle(f.chat.id, "watch_pull_request", {
-      repository: "owner/repo",
-      pr: 4,
-    });
+    const merged = await f.controller.watchers.handle(
+      f.chat.id,
+      "watch_pull_request",
+      {
+        repository: "owner/repo",
+        pr: 4,
+      },
+    );
     f.pull = {
       status: "success",
       reason: "Pull request merged.",
@@ -1277,15 +1812,26 @@ test("an already-merged pull request settles, and a new comment does not fire fr
     f.pull = {
       status: "pending",
       reason: null,
-      cursor: { commentId: 9, reviewCommentId: 0, reviews: {}, head: sha, state: "open", merged: false },
+      cursor: {
+        commentId: 9,
+        reviewCommentId: 0,
+        reviews: {},
+        head: sha,
+        state: "open",
+        merged: false,
+      },
       items: [],
       sha,
       url: "https://github.com/owner/repo/pull/4",
     };
-    const quiet = await f.controller.watchers.handle(f.chat.id, "watch_pull_request", {
-      repository: "owner/repo",
-      pr: 8,
-    });
+    const quiet = await f.controller.watchers.handle(
+      f.chat.id,
+      "watch_pull_request",
+      {
+        repository: "owner/repo",
+        pr: 8,
+      },
+    );
     f.end();
     await f.controller.watchers.tick();
     f.advance();

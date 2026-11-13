@@ -21,6 +21,7 @@ const kindLabels = {
   command: {
     registering: "Starting command",
     pending: "Waiting for command",
+    retrying: "Retrying command monitoring",
     success: "Command finished",
     failure: "Command failed",
     expired: "Command watch expired",
@@ -42,6 +43,7 @@ const kindLabels = {
   file: {
     registering: "Checking file",
     pending: "Waiting for file",
+    retrying: "Retrying file monitoring",
     success: "File condition met",
     expired: "Watch expired",
     error: "File watch needs attention",
@@ -75,16 +77,29 @@ const time = (at) =>
 // Cards render inline with their turn, so the chat polls once for all of them.
 export function useWatchPolling(chat, reload, report) {
   const ongoing = (chat?.watches ?? []).some(pending);
+  const local = (chat?.watches ?? []).some(
+    (w) => pending(w) && ["command", "file"].includes(w.kind),
+  );
   useEffect(() => {
     if (!ongoing) return;
     // Read host bookkeeping, never force another GitHub check or model turn.
-    const timer = setInterval(() => reload(chat.id).catch(report), 60_000);
+    const timer = setInterval(
+      () => reload(chat.id).catch(report),
+      local ? 5_000 : 60_000,
+    );
     return () => clearInterval(timer);
-  }, [chat?.id, ongoing, reload, report]);
+  }, [chat?.id, ongoing, local, reload, report]);
 }
 
 export function WatchCards({ chat, watches = [], reload, refresh, report }) {
   const [busy, setBusy] = useState(null);
+  const [now, setNow] = useState(Date.now);
+  const ongoing = watches.some(pending);
+  useEffect(() => {
+    if (!ongoing) return;
+    const timer = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, [ongoing]);
   if (!watches.length) return null;
   const act = async (watch, continuation) => {
     setBusy(watch.id);
@@ -106,6 +121,10 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
     <section className="watch-cards" aria-label="Background watchers">
       {watches.map((watch) => {
         const live = pending(watch) && !chat.activeRun;
+        const overdue =
+          pending(watch) &&
+          watch.nextCheckAt &&
+          now - watch.nextCheckAt > 30_000;
         return (
           <article
             className={[
@@ -159,11 +178,54 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
               </div>
             )}
             {watch.reason && <p>{watch.reason}</p>}
-            {!pending(watch) && watch.delivery === "pending" && (
-              <p>Follow-up is queued behind current work.</p>
+            {overdue && (
+              <p role="status">
+                Monitoring check overdue. Last host check:{" "}
+                {time(watch.lastCheckedAt)}.
+              </p>
             )}
+            {["command", "file"].includes(watch.kind) && (
+              <p className="watch-times">
+                Last activity: {time(watch.lastActivityAt)}
+                {watch.kind === "command" &&
+                  ` · Runner heartbeat: ${time(watch.lastHeartbeatAt)}`}
+                {watch.kind === "file" &&
+                  watch.fileObserved &&
+                  (watch.fileObserved.exists
+                    ? ` · File present (${watch.fileObserved.size.toLocaleString()} bytes)`
+                    : " · File not present yet")}
+              </p>
+            )}
+            {watch.excerpt && (
+              <details className="watch-output">
+                <summary>
+                  {watch.kind === "command"
+                    ? "Latest command output"
+                    : "Latest file output"}
+                </summary>
+                <pre>{watch.excerpt}</pre>
+              </details>
+            )}
+            {watch.delivery === "pending" && (
+              <p>{watch.deliveryReason ?? "Follow-up is queued."}</p>
+            )}
+            {watch.delivery === "blocked" &&
+              watch.deliveryReason &&
+              watch.deliveryReason !== watch.reason && (
+                <p>{watch.deliveryReason}</p>
+              )}
             {watch.delivery === "delivered" && (
-              <p>Follow-up sent to the agent.</p>
+              <p>
+                {watch.followupStatus === "failed"
+                  ? `Agent follow-up failed: ${watch.followupError ?? "Unknown error"}`
+                  : ["cancelled", "interrupted"].includes(watch.followupStatus)
+                    ? "Agent follow-up was interrupted."
+                    : watch.followupStatus === "completed"
+                      ? "Agent follow-up completed."
+                      : watch.followupRunId
+                        ? "Agent follow-up is running."
+                        : "Follow-up sent to the agent."}
+              </p>
             )}
             {watch.items?.length > 0 && (
               <ul aria-label="Watch results">
@@ -192,11 +254,16 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
               )}
               {!pending(watch) &&
                 watch.status !== "stopped" &&
-                watch.delivery !== "delivered" &&
+                (watch.delivery !== "delivered" ||
+                  ["failed", "cancelled", "interrupted"].includes(
+                    watch.followupStatus,
+                  )) &&
                 watch.delivery !== "pending" && (
                   <button
                     disabled={
-                      busy === watch.id || !!chat.activeRun || !!chat.archived_at
+                      busy === watch.id ||
+                      !!chat.activeRun ||
+                      !!chat.archived_at
                     }
                     title={`Continue with ${watch.provider} / ${watch.model}`}
                     onClick={() => act(watch, true)}

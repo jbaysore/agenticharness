@@ -15,6 +15,8 @@ let now = Date.now(),
   watch,
   mode = "notify",
   state = "pending";
+let commandDone = true,
+  failFollowup = false;
 const sha = "a".repeat(40);
 const app = await createHarness({
   dataDir,
@@ -55,7 +57,14 @@ const app = await createHarness({
         createdAt: "2020-01-01T00:00:00.000Z",
         statusDir: join(dataDir, "command"),
       }),
-      read: async () => ({ done: true, exitCode: 0, output: "watched" }),
+      read: async () => ({
+        done: commandDone,
+        exitCode: 0,
+        output: "Build progress: 10 of 100\n" + "x".repeat(5000),
+        outputBytes: 5026,
+        heartbeatAt: now,
+        lastOutputAt: now,
+      }),
       identity: async () => ({ pid: 7, createdAt: "2020-01-01T00:00:00.000Z" }),
       killIfMatched: async () => ({ killed: false }),
     },
@@ -77,10 +86,13 @@ app.controller.runners.codex = async (ctx) => {
   if (ctx.text === "Register CI") {
     if (mode === "goal") {
       ctx.goalState("active", "Make CI pass");
-      ctx.emit("work", { kind: "plan", plan: [
-        { step: "Push the fix", status: "completed" },
-        { step: "Check CI", status: "inProgress" },
-      ] });
+      ctx.emit("work", {
+        kind: "plan",
+        plan: [
+          { step: "Push the fix", status: "completed" },
+          { step: "Check CI", status: "inProgress" },
+        ],
+      });
     }
     watch = await ctx.history("watch_github_ci", {
       repository: "owner/repo",
@@ -108,15 +120,48 @@ app.controller.runners.codex = async (ctx) => {
       return { status: "cancelled" };
     }
   } else if (ctx.text === "Register local watches") {
-    await ctx.history("watch_command", { command: "echo watched", shell: "cmd" });
-    await ctx.history("watch_pull_request", { repository: "owner/repo", pr: 4 });
+    await ctx.history("watch_command", {
+      command: "echo watched",
+      shell: "cmd",
+    });
+    await ctx.history("watch_pull_request", {
+      repository: "owner/repo",
+      pr: 4,
+    });
     await writeFile(join(projectPath, "ready.txt"), "hello");
     await ctx.history("watch_file", { path: "ready.txt", until: "appears" });
     ctx.emit("text", {
       nativeId: randomUUID(),
       text: "Local watches registered.",
     });
+  } else if (ctx.text === "Register live command") {
+    watch = await ctx.history("watch_command", {
+      command: "echo progress",
+      shell: "cmd",
+      resumeOn: ["complete"],
+      continuation: "Verify the build result.",
+    });
+    await writeFile(join(projectPath, "progress.log"), "10 of 100 processed\n");
+    await ctx.history("watch_file", {
+      path: "progress.log",
+      until: "matches",
+      pattern: "DONE",
+    });
+    await ctx.history("yield_to_watch", {
+      ids: [watch.id],
+      checkpoint: "The build is running.",
+    });
+    await new Promise((resolve) =>
+      ctx.signal.addEventListener("abort", resolve, { once: true }),
+    );
+    ctx.watchParked();
+    return { status: "cancelled" };
   } else {
+    if (failFollowup)
+      return {
+        status: "failed",
+        error: "Simulated provider connection failure",
+      };
     ctx.emit("text", {
       nativeId: randomUUID(),
       text: "Watcher follow-up reviewed.",
@@ -207,7 +252,7 @@ try {
   await expect(
     page.getByText("Watcher follow-up reviewed.", { exact: true }),
   ).toBeVisible();
-  await expect(cards).toContainText("Follow-up sent to the agent");
+  await expect(cards).toContainText("Agent follow-up completed");
   expect(modelCalls).toBe(2);
 
   state = "pending";
@@ -227,7 +272,10 @@ try {
     page.getByText("Goal waiting for CI.", { exact: true }),
   ).toHaveCount(0);
   await expect(cards).toContainText("Authorized follow-up is armed");
-  const progress = page.getByRole("region", { name: "Goal progress", exact: true });
+  const progress = page.getByRole("region", {
+    name: "Goal progress",
+    exact: true,
+  });
   await expect(progress).toContainText("1 of 2 phases complete");
   await expect(progress).toContainText("Waiting for CI");
   await expect(
@@ -286,10 +334,77 @@ try {
   await expect(cards).toContainText("Command finished");
   await expect(cards).toContainText("Waiting for pull request");
   await expect(cards).toContainText("File condition met");
-  await expect(cards.getByRole("img", { name: "Watching pull request" })).toBeVisible();
+  await expect(
+    cards.getByRole("img", { name: "Watching pull request" }),
+  ).toBeVisible();
+  commandDone = false;
+  const live = app.store.createConversation({
+    projectId: project.id,
+    title: "Live watch progress",
+    provider: "codex",
+    model: "fixture",
+    permissions: "override",
+  });
+  app.controller.send(live.id, {
+    actionId: randomUUID(),
+    text: "Register live command",
+    provider: "codex",
+    model: "fixture",
+  });
+  await app.controller.active.get(live.id).task;
+  await app.controller.watchers.tick();
+  await page.goto(`${app.runtime.origin}/?chat=${live.id}`);
+  await expect(cards).toContainText("Last activity:");
+  await expect(cards).toContainText("Runner heartbeat:");
+  await expect(cards).toContainText("Agent review:");
+  await expect(cards).toContainText("File present");
+  await cards.getByText("Latest command output", { exact: true }).click();
+  await cards.getByText("Latest file output", { exact: true }).click();
+  await expect(
+    cards.locator("pre").filter({ hasText: "Build progress: 10 of 100" }),
+  ).toBeVisible();
+  await expect(
+    cards.locator("pre").filter({ hasText: "10 of 100 processed" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(cards).toContainText("Latest command output");
+  // Freeze only the fixture's host clock to verify that the browser warns
+  // about an overdue check even when the watcher produces no new events.
+  app.controller.watchers.started = false;
+  clearTimeout(app.controller.watchers.timer);
+  const overdue = app.store.watchStore.get(watch.id);
+  overdue.nextCheckAt = Date.now() - 60_000;
+  overdue.lastCheckedAt = Date.now() - 65_000;
+  app.controller.watchers.save(overdue);
+  await expect(cards).toContainText("Monitoring check overdue");
+  overdue.nextCheckAt = now;
+  app.controller.watchers.save(overdue);
+  app.controller.watchers.started = true;
+  failFollowup = true;
+  commandDone = true;
+  now += 5_000;
+  await app.controller.watchers.tick();
+  await Promise.all([...app.controller.active.values()].map((a) => a.task));
+  await expect(cards.filter({ hasText: "echo progress" })).toContainText(
+    "Agent follow-up failed: Simulated provider connection failure",
+  );
+  await expect(
+    cards.getByRole("button", { name: "Continue with agent", exact: true }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await cards.getByText("Latest command output", { exact: true }).click();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: ".local/screenshots/watchers-progress-mobile.png",
+    fullPage: true,
+  });
   expect(errors).toEqual([]);
   console.log(
-    `Watcher acceptance passed: ${reads} host polls, notification-only completion, unread results, reload, manual continuation, cancellation, Goal suspension/resumption and mobile layout. Providers and CI were simulated.`,
+    `Watcher acceptance passed: ${reads} host polls, notification-only completion, unread results, reload, manual continuation, cancellation, Goal suspension/resumption, live command and file progress, failed follow-up and mobile layout. Providers and CI were simulated.`,
   );
 } finally {
   await browser?.close();
