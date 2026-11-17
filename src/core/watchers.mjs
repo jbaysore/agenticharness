@@ -387,6 +387,12 @@ export class Watchers {
         parked: false,
         results: watches.filter((w) => !watching(w)).map(publicWatch),
       };
+    // An open pull request in a Goal waits on the owner to merge it. The
+    // owner pause shows the action card and keeps this watch armed.
+    if (chat.mode === "goal" && watches.every((w) => w.kind === "pr"))
+      throw new Error(
+        "A pull request waits on the owner. Call pause_for_owner with the pull request link and a one-line action to merge it. This request's pull request watch stays armed and still resumes the Goal on merge.",
+      );
     if (
       chat.mode === "goal" &&
       watches.some((w) => !w.resumeOn.includes("complete"))

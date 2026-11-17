@@ -148,6 +148,9 @@ request or running a command on a machine the agent cannot reach, it calls
 saved as **waiting on you**, with its objective kept and no further model
 calls. The card leads with the action you need to take as a headline. Under it
 is the exact command, URL, or steps, rendered so a command can be copied.
+A Goal cannot park on a pull request watch alone: that would show the blue
+watching mark instead of this card, so the host refuses the yield and the agent
+uses `pause_for_owner`, which keeps the watch armed.
 A file link can add context; it is not a substitute for the command. When the agent needs you to finish an action
 and report that it is done, **I've done this** resumes the Goal. When the
 agent needs a specific value, such as a code or a URL, the card shows a field

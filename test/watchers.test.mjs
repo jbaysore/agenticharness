@@ -1853,3 +1853,56 @@ test("an already-merged pull request settles, and a new comment does not fire fr
     await f.close();
   }
 });
+
+test("a Goal cannot yield only to a pull request; the owner pause keeps it armed", async () => {
+  const f = fixture({ mode: "goal" });
+  try {
+    f.register();
+    const pr = f.controller.watchers.createPull(f.chat.id, {
+      repository: "owner/repo",
+      pr: 4,
+      resumeOn: ["complete"],
+      continuation: "Assess goal.",
+    });
+    assert.throws(
+      () =>
+        f.controller.watchers.yield(f.chat.id, {
+          ids: [pr.id],
+          checkpoint: "Waiting for merge",
+        }),
+      /pause_for_owner/,
+    );
+    assert.deepEqual(
+      f.controller.watchers.armForOwner(
+        f.chat.id,
+        f.controller.active.get(f.chat.id),
+        "Merge #4.",
+      ),
+      [pr.id],
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("outside a Goal a pull request watch can still be yielded to", async () => {
+  const f = fixture();
+  try {
+    f.register();
+    const pr = f.controller.watchers.createPull(f.chat.id, {
+      repository: "owner/repo",
+      pr: 4,
+      resumeOn: ["complete"],
+      continuation: "Check it.",
+    });
+    assert.equal(
+      f.controller.watchers.yield(f.chat.id, {
+        ids: [pr.id],
+        checkpoint: "Waiting",
+      }).parked,
+      true,
+    );
+  } finally {
+    await f.close();
+  }
+});
