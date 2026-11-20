@@ -3,6 +3,7 @@ import { realpath, lstat, unlink } from "node:fs/promises";
 import { resolve, relative, isAbsolute, sep, join, dirname } from "node:path";
 import { commandShell } from "./command-shells.mjs";
 import { workspaceFingerprint } from "./repository.mjs";
+import { validateReviewTiming } from "./watch-tools.mjs";
 
 const installCommand =
   /^\s*(?:&\s+)?(?:npm|pnpm|yarn)(?:\.cmd)?\s+(?:ci|install|add|remove|uninstall|update|upgrade)\b/i;
@@ -66,6 +67,7 @@ export async function prepareWatchedCommand(
   { project, approve, signal },
 ) {
   const fields = commandFields(input);
+  validateReviewTiming(input);
   const { root, cwd } = await commandDirectory(project, input.cwd);
   if (signal.aborted) return { cancelled: true };
   const answer = await approve({

@@ -594,6 +594,7 @@ export async function runClaude(
       ...(ctx.tools ?? []).filter((t) => watchTools.some((w) => w.name === t.name)).map((t) =>
         tool(t.name, t.description, {
           watch_github_ci: {
+            reviewAfterMinutes: z.number().int().min(1).max(1440).optional(),
             repository: z.string(), commit: z.string().optional(), pr: z.number().int().positive().optional(),
             resumeOn: z.array(z.enum(["success", "failure", "complete"])).max(3).optional(),
             continuation: z.string().max(2000).optional(), expiryHours: z.number().min(0.25).max(24).optional(),
@@ -607,6 +608,7 @@ export async function runClaude(
             continuation: z.string().max(2000).optional(), expiryHours: z.number().min(0.25).max(24).optional(),
           },
           watch_command: {
+            reviewAfterMinutes: z.number().int().min(1).max(1440).optional(),
             command: z.string().min(1).max(8000),
             shell: z.enum(["powershell", "cmd", "bash"]).optional(),
             cwd: z.string().optional(), isolateDependencies: z.boolean().optional(),
@@ -614,6 +616,7 @@ export async function runClaude(
             continuation: z.string().max(2000).optional(), expiryHours: z.number().min(0.25).max(24).optional(),
           },
           watch_file: {
+            reviewAfterMinutes: z.number().int().min(1).max(1440).optional(),
             path: z.string().min(1).max(1000), until: z.enum(["appears", "stable", "matches"]),
             pattern: z.string().min(1).max(200).optional(),
             resumeOn: z.array(z.enum(["success", "failure", "complete"])).max(3).optional(),

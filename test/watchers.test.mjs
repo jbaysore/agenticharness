@@ -1287,6 +1287,151 @@ test("active command and log watches postpone quiet reviews but still investigat
   }
 });
 
+test("custom command and CI reviews run at their own deadlines", async () => {
+  let f;
+  f = fixture({
+    commands: commandDouble(
+      async () => recorded,
+      async () => ({
+        done: false,
+        output: "working",
+        outputBytes: f.now,
+        lastOutputAt: f.now,
+      }),
+      [],
+    ),
+  });
+  try {
+    const texts = [];
+    f.controller.runners.codex = async (ctx) => {
+      texts.push(ctx.text);
+      return { status: "completed" };
+    };
+    f.result = {
+      ...f.result,
+      pollInterval: 900_000,
+      items: [{ name: "Build", state: "pending" }],
+    };
+    const followup = {
+      resumeOn: ["complete"],
+      continuation: "Check the actual progress.",
+      reviewAfterMinutes: 6,
+    };
+    const ci = f.register(followup);
+    const duplicate = f.register({ ...followup, reviewAfterMinutes: 30 });
+    assert.equal(duplicate.id, ci.id);
+    assert.equal(duplicate.reviewAfterMinutes, 6);
+    const command = await startLocalCommand(f, followup);
+    await f.controller.watchers.tick();
+    f.advance(60_000);
+    f.arm(ci);
+    f.arm(command);
+    f.controller.watchers.parked(f.chat.id, [ci.id, command.id]);
+    const deadline = f.now + 360_000;
+    assert.equal(f.store.watchStore.get(ci.id).reviewAt, deadline);
+    assert.equal(f.store.watchStore.get(command.id).reviewAt, deadline);
+
+    const { github, commands } = f.controller.watchers;
+    async function restartWatchers() {
+      await f.controller.watchers.close();
+      f.controller.watchers = new Watchers(f.controller, {
+        now: () => f.now,
+        github,
+        commands,
+      });
+    }
+    f.advance(359_999);
+    await restartWatchers();
+    assert.equal(f.store.watchStore.get(ci.id).reviewAt, deadline);
+    await f.controller.watchers.tick();
+    assert.deepEqual(texts, []);
+    f.advance(1);
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    assert.equal(texts.length, 2);
+    assert.match(
+      texts.find((message) => message.includes(ci.id)),
+      /Build: pending/,
+    );
+    assert.match(
+      texts.find((message) => message.includes(command.id)),
+      /6-minute review interval/,
+    );
+    assert.equal(f.reads, 1);
+
+    await restartWatchers();
+    f.advance(360_000);
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    assert.equal(texts.length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("custom review rejects invalid intervals and requires armed follow-up", async () => {
+  const f = fixture();
+  try {
+    for (const reviewAfterMinutes of [0, 1.5, 1441, "6", null]) {
+      assert.throws(
+        () => f.register({ reviewAfterMinutes }),
+        /whole number from 1 to 1440/,
+      );
+    }
+    assert.throws(
+      () => f.register({ reviewAfterMinutes: 6 }),
+      /requires authorized follow-up/,
+    );
+    const ci = f.register({
+      reviewAfterMinutes: 6,
+      resumeOn: ["complete"],
+      continuation: "Check progress.",
+    });
+    f.end();
+    f.advance(360_000);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(ci.id).reviews, undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const outcome of ["success", "expired"]) {
+  test(`a CI watch that is ${outcome} at the review deadline skips progress review`, async () => {
+    const f = fixture();
+    try {
+      const texts = [];
+      f.controller.runners.codex = async (ctx) => {
+        texts.push(ctx.text);
+        return { status: "completed" };
+      };
+      if (outcome === "success") f.result = { ...f.result, status: "success" };
+      const watch = f.register({
+        reviewAfterMinutes: outcome === "success" ? 1 : 15,
+        expiryHours: 0.25,
+        resumeOn: ["complete"],
+        continuation: "Check progress.",
+      });
+      f.arm(watch);
+      f.controller.watchers.parked(f.chat.id, [watch.id]);
+      await f.controller.watchers.tick();
+      f.advance(outcome === "success" ? 60_000 : 900_000);
+      await f.controller.watchers.tick();
+      await finishRuns(f.controller);
+      const saved = f.store.watchStore.get(watch.id);
+      assert.equal(saved.status, outcome);
+      assert.equal(saved.reviews, undefined);
+      assert.equal(saved.reviewAt, null);
+      assert.equal(texts.length, outcome === "success" ? 1 : 0);
+      if (outcome === "success") assert.match(texts[0], /Background CI result/);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
 for (const kind of ["command", "file"])
   for (const outcome of ["error", "expired"]) {
     test(`${kind} ${outcome} resumes armed complete follow-up once`, async () => {
@@ -1641,7 +1786,7 @@ test("file watches ignore shared-project files and resume once for their worktre
   }
 });
 
-test("armed file watches wake the agent after ten quiet minutes to review progress without spending result wakes", async () => {
+test("a 12-hour file watch reviews every 30 minutes when rearmed without spending result wakes", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-file-review-"));
   const f = fixture({ projectPath: root });
   try {
@@ -1656,16 +1801,21 @@ test("armed file watches wake the agent after ten quiet minutes to review progre
       until: "appears",
       resumeOn: ["complete"],
       continuation: "Verify the frame counts.",
-      expiryHours: 24,
+      expiryHours: 12,
+      reviewAfterMinutes: 30,
     });
     f.arm(watch);
+    f.controller.watchers.parked(f.chat.id, [watch.id]);
     await f.controller.watchers.tick();
-    f.advance(quietReviewInterval - 1);
+    const reviewInterval = 30 * 60_000;
+    assert.equal(watch.expiresAt, f.now + 12 * 3_600_000);
+    f.advance(reviewInterval - 1);
     await f.controller.watchers.tick();
     assert.equal(texts.length, 0);
+    f.advance(1);
     // More reviews than the three result wakes a request gets.
     for (let review = 1; review <= 4; review++) {
-      f.advance(quietReviewInterval);
+      if (review > 1) f.advance(reviewInterval);
       await f.controller.watchers.tick();
       await finishRuns(f.controller);
       assert.equal(texts.length, review);
@@ -1676,7 +1826,7 @@ test("armed file watches wake the agent after ten quiet minutes to review progre
       assert.equal(saved.status, "pending");
       assert.equal(saved.armed, false);
       // Without a new yield the watch only notifies; no further reviews.
-      f.advance(quietReviewInterval + 5_000);
+      f.advance(reviewInterval + 5_000);
       await f.controller.watchers.tick();
       await finishRuns(f.controller);
       assert.equal(texts.length, review);
@@ -1699,9 +1849,14 @@ test("armed file watches wake the agent after ten quiet minutes to review progre
       });
       const active = f.controller.active.get(f.chat.id);
       clearTimeout(active.watchYield.timer);
+      assert.equal(f.store.watchStore.get(watch.id).parked, false);
       f.end();
       f.controller.watchers.parked(f.chat.id, [watch.id]);
       assert.equal(f.store.watchStore.get(watch.id).delivery, "none");
+      assert.equal(
+        f.store.watchStore.get(watch.id).reviewAt,
+        f.now + reviewInterval,
+      );
     }
     await writeFile(join(root, "frames.done"), "done");
     f.advance(5_000);

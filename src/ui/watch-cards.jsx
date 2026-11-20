@@ -161,7 +161,7 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
             </div>
             {pending(watch) ? (
               <p className="watch-times">
-                Monitoring uses no model calls.
+                Host checks use no model calls.
                 {watch.armed
                   ? " Authorized follow-up is armed."
                   : " Notification only."}{" "}

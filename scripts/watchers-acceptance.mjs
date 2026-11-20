@@ -140,6 +140,7 @@ app.controller.runners.codex = async (ctx) => {
       shell: "cmd",
       resumeOn: ["complete"],
       continuation: "Verify the build result.",
+      reviewAfterMinutes: 6,
     });
     await writeFile(join(projectPath, "progress.log"), "10 of 100 processed\n");
     await ctx.history("watch_file", {
@@ -353,6 +354,8 @@ try {
   });
   await app.controller.active.get(live.id).task;
   await app.controller.watchers.tick();
+  const liveCommand = app.store.watchStore.get(watch.id);
+  expect(liveCommand.reviewAt).toBe(liveCommand.reviewedAt + 360_000);
   await page.goto(`${app.runtime.origin}/?chat=${live.id}`);
   await expect(cards).toContainText("Last activity:");
   await expect(cards).toContainText("Runner heartbeat:");
