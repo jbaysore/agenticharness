@@ -34,15 +34,31 @@ const chats = Array.from({ length: 4 }, () =>
 const insert = app.store.db.prepare(
   "INSERT INTO events(conversation_id,run_id,type,payload,created_at) VALUES(?,?,'work',?,?)",
 );
+const archivedOutput = JSON.stringify({
+  kind: "command-output",
+  delta: "archived fixture output ".repeat(40),
+});
 for (const chat of chats) {
-  const run = app.store.createRun({
-    conversationId: chat.id,
-    actionId: crypto.randomUUID(),
-    provider: "codex",
-    model: "fixture",
-    text: "Fixture archive",
-  });
+  const createRun = () =>
+    app.store.createRun({
+      conversationId: chat.id,
+      actionId: crypto.randomUUID(),
+      provider: "codex",
+      model: "fixture",
+      text: "Fixture archive",
+    });
+  const oldest = createRun();
+  app.store.setRun(oldest.id, "completed");
+  const archivedAt = "2020-01-01T00:00:00.000Z";
+  app.store.db
+    .prepare("UPDATE runs SET created_at=? WHERE id=?")
+    .run(archivedAt, oldest.id);
+  for (let n = 0; n < 29; n++)
+    app.store.setRun(createRun().id, "completed");
+  const run = createRun();
   app.store.db.exec("BEGIN");
+  for (let n = 0; n < 40_000; n++)
+    insert.run(chat.id, oldest.id, archivedOutput, archivedAt);
   for (let n = 0; n < 8000; n++)
     insert.run(
       chat.id,

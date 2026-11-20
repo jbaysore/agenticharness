@@ -17,39 +17,60 @@ import {
 } from "../src/core/performance.mjs";
 import { runCodex } from "../src/providers/codex.mjs";
 
-test("saved steps use the conversation index even with a large unrelated archive", (t) => {
+test("saved steps use run and type lookups to skip older chat history", (t) => {
   const store = new Store(":memory:");
   t.after(() => store.close());
   const project = store.addProject("Fixture", process.cwd());
   const chat = store.createConversation({ projectId: project.id });
   const other = store.createConversation({ projectId: project.id });
-  const run = store.createRun({
-    conversationId: chat.id,
-    actionId: "steps",
-    provider: "codex",
-    model: "fixture",
-    text: "Inspect",
-  });
+  const createRun = (actionId) =>
+    store.createRun({
+      conversationId: chat.id,
+      actionId,
+      provider: "codex",
+      model: "fixture",
+      text: "Inspect",
+    });
+  const oldest = createRun("oldest");
+  store.setRun(oldest.id, "completed");
+  store.db
+    .prepare("UPDATE runs SET created_at=? WHERE id=?")
+    .run("2020-01-01T00:00:00.000Z", oldest.id);
+  for (let n = 0; n < 29; n++)
+    store.setRun(createRun(`newer-${n}`).id, "completed");
+  const run = createRun("steps");
   store.appendEvent(chat.id, run.id, "text", {
     messageId: "reply",
     delta: "Inspecting",
   });
-  store.appendEvent(chat.id, run.id, "work", {
+  store.appendEvent(chat.id, run.id, "text", {
+    messageId: "follow-up",
+    delta: "Reporting",
+  });
+  store.appendEvent(chat.id, run.id, "text", {
+    messageId: "reply",
+    delta: "Older reply update",
+  });
+  const command = {
     kind: "host-command",
     id: "command",
     command: "node --version",
     status: "ok",
-  });
+  };
+  store.appendEvent(chat.id, run.id, "work", command);
+  assert.equal(store.steps(chat.id)[run.id][0].after, "follow-up");
   const expected = store.steps(chat.id);
+  store.appendEvent(chat.id, oldest.id, "work", command);
+  store.appendEvent(other.id, run.id, "work", { ...command, id: "wrong-chat" });
   store.db.exec("BEGIN");
   const insert = store.db.prepare(
     "INSERT INTO events(conversation_id,run_id,type,payload,created_at) VALUES(?,?,'work',?,?)",
   );
   for (let n = 0; n < 30_000; n++)
     insert.run(
-      other.id,
-      "other-run",
-      '{"kind":"command-output","delta":"unrelated"}',
+      chat.id,
+      oldest.id,
+      '{"kind":"command-output","delta":"older output"}',
       store.now(),
     );
   store.db.exec("COMMIT");
@@ -64,13 +85,13 @@ test("saved steps use the conversation index even with a large unrelated archive
   assert.deepEqual(store.steps(chat.id), expected);
   const plan = prepare
     .call(store.db, "EXPLAIN QUERY PLAN " + query)
-    .all(chat.id, chat.id, chat.id, chat.id);
-  assert.ok(
-    plan.some((row) =>
-      /SEARCH e USING INDEX events_conversation/.test(row.detail),
-    ),
+    .all(chat.id, chat.id, chat.id);
+  assert.equal(
+    plan.filter((row) =>
+      row.detail.includes("SEARCH e USING INDEX events_run_type_time (run_id=? AND type=?)"),
+    ).length,
+    2,
   );
-  assert.ok(!plan.some((row) => /SCAN e$/.test(row.detail)));
   store.runProgress(run.id);
   const controlPlan = prepare
     .call(store.db, "EXPLAIN QUERY PLAN " + controlQuery)

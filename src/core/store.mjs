@@ -1272,16 +1272,26 @@ export class Store {
     const byRun = {};
     for (const e of this.db
       .prepare(
+        // Drive both lookups from recent runs to skip older event payloads.
         // A reply's first text event is enough to place the steps after it.
-        `SELECT e.id, e.run_id, e.type, e.payload, r.status FROM events e JOIN runs r ON r.id=e.run_id
-        WHERE e.conversation_id=? AND e.run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
-        AND ((e.type='work' AND json_extract(e.payload,'$.kind') NOT IN ('command-output','token-usage'))
-          OR e.id IN (SELECT MIN(id) FROM events WHERE conversation_id=? AND type='text'
-            AND run_id IN (SELECT id FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30)
-            GROUP BY json_extract(payload,'$.messageId')))
-        ORDER BY e.id`,
+        `WITH recent AS MATERIALIZED (
+          SELECT id, status FROM runs WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30
+        ), first_text AS (
+          SELECT MIN(e.id) AS id
+          FROM recent r CROSS JOIN events e INDEXED BY events_run_type_time
+          WHERE e.run_id=r.id AND e.type='text' AND e.conversation_id=?
+          GROUP BY json_extract(e.payload,'$.messageId')
+        )
+        SELECT e.id AS id, e.run_id, e.type, e.payload, r.status
+        FROM recent r CROSS JOIN events e INDEXED BY events_run_type_time
+        WHERE e.run_id=r.id AND e.type='work' AND e.conversation_id=?
+          AND json_extract(e.payload,'$.kind') NOT IN ('command-output','token-usage')
+        UNION ALL
+        SELECT e.id, e.run_id, e.type, e.payload, r.status
+        FROM first_text f JOIN events e ON e.id=f.id JOIN recent r ON r.id=e.run_id
+        ORDER BY id`,
       )
-      .all(conversationId, conversationId, conversationId, conversationId)) {
+      .all(conversationId, conversationId, conversationId)) {
       const run = (byRun[e.run_id] ??= { status: e.status, payloads: [] });
       run.payloads.push({ id: e.id, type: e.type, payload: JSON.parse(e.payload) });
     }
