@@ -5,7 +5,7 @@ const followup = {
     items: { type: "string", enum: ["success", "failure", "complete"] },
     maxItems: 3,
     description:
-      "complete includes cancelled or skipped CI, a pull request update, and command/file monitoring errors or expiry. GitHub setup errors, expiry and superseded revisions only notify.",
+      "complete includes cancelled or skipped CI, a pull request update, and command/file monitoring errors or expiry. A superseded PR CI watch can also resume a Goal so the agent can verify the intended revision. GitHub setup errors and expiry only notify.",
   },
   continuation: {
     type: "string",
@@ -25,7 +25,7 @@ export const watchTools = [
   {
     name: "watch_github_ci",
     description:
-      "Register a durable GitHub CI watcher for an exact commit SHA or a PR snapshot. The Harness host checks without model calls while running, including between turns and across restarts. Returns a registration ID; do not promise monitoring before registration succeeds. Notification only by default. Set resumeOn and continuation only for follow-up already authorized by the task, then call yield_to_watch when no useful work remains to arm it. Missing checks are pending, not success. Ask and Plan are notification only.",
+      "Register a durable GitHub CI watcher for an exact commit SHA or a PR snapshot. Prefer the full SHA when the task only needs that commit's checks. An armed Goal watch using resumeOn complete can resume if its PR snapshot is superseded, so the agent can verify which revision to watch. The Harness host checks without model calls while running, including between turns and across restarts. Returns a registration ID; do not promise monitoring before registration succeeds. Notification only by default. Set resumeOn and continuation only for follow-up already authorized by the task, then call yield_to_watch when no useful work remains to arm it. Missing checks are pending, not success. Ask and Plan are notification only.",
     inputSchema: {
       type: "object",
       properties: {

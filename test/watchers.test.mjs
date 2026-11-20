@@ -243,7 +243,7 @@ test("identical targets share polling across chats; duplicate registration retur
 });
 
 test("late CI changes reset settling; a PR revision change supersedes the saved snapshot", async () => {
-  const f = fixture();
+  const f = fixture({ mode: "goal" });
   try {
     const w = f.register({ commit: undefined, pr: 12 });
     f.end();
@@ -262,8 +262,114 @@ test("late CI changes reset settling; a PR revision change supersedes the saved 
     await f.controller.watchers.tick();
     assert.equal(f.store.watchStore.get(w.id).status, "superseded");
     assert.equal(f.store.watchStore.get(w.id).delivery, "none");
+    assert.equal(f.store.runForAction(`watch-${w.id}`), undefined);
   } finally {
     await f.close();
+  }
+});
+
+test("a superseded PR CI watch resumes the waiting Goal once", async () => {
+  const f = fixture({ mode: "goal" });
+  try {
+    let followup;
+    f.controller.runners.codex = async (ctx) => {
+      assert.equal(followup, undefined);
+      followup = ctx;
+      return { status: "completed" };
+    };
+    const w = f.register({
+      commit: undefined,
+      pr: 12,
+      resumeOn: ["complete"],
+      continuation: "Assess CI for the Goal.",
+    });
+    const origin = f.controller.active.get(f.chat.id).run;
+    f.store.setGoalState(
+      f.chat.id,
+      "codex",
+      origin.id,
+      "waiting",
+      "Ship passing CI",
+    );
+    f.arm(w);
+    const url = "https://github.com/owner/repo/pull/12";
+    f.result = terminal("failure", {
+      url,
+      items: [{ id: "stale", name: "Stale CI failure", state: "failure" }],
+    });
+    await f.controller.watchers.tick();
+    assert.equal(f.store.watchStore.get(w.id).status, "settling");
+    f.advance();
+    const nextSha = "b".repeat(40);
+    f.result = terminal("pending", { identity: nextSha, sha: nextSha, url });
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    assert.equal(f.store.watchStore.get(w.id).status, "superseded");
+    assert.equal(f.store.watchStore.get(w.id).delivery, "delivered");
+    assert.equal(followup.resumeGoal, true);
+    assert.equal(followup.goalObjective, "Ship passing CI");
+    assert.match(followup.text, /https:\/\/github\.com\/owner\/repo\/pull\/12/);
+    assert.match(followup.text, /Verify the intended PR revision/);
+    assert.match(followup.text, /The change was pushed/);
+    assert.doesNotMatch(followup.text, /Stale CI failure/);
+    const run = f.store.runForAction(`watch-${w.id}`);
+    assert.ok(run);
+    await f.controller.watchers.tick();
+    assert.equal(f.store.runForAction(`watch-${w.id}`).id, run.id);
+  } finally {
+    await f.close();
+  }
+});
+
+test("PR CI supersession before Goal suspension waits for acknowledgment and survives restart", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "harness-watch-"));
+  const path = join(directory, "workspace.sqlite");
+  let f = fixture({ path, mode: "goal" });
+  try {
+    const w = f.register({
+      commit: undefined,
+      pr: 12,
+      resumeOn: ["complete"],
+      continuation: "Assess CI for the Goal.",
+    });
+    const { id: chatId } = f.chat;
+    const origin = f.controller.active.get(chatId).run;
+    f.store.setGoalState(chatId, "codex", origin.id, "active", "Ship passing CI");
+    await f.controller.watchers.tick();
+    assert.equal(
+      f.controller.watchers.yield(chatId, {
+        ids: [w.id],
+        checkpoint: "Waiting for CI.",
+      }).parked,
+      true,
+    );
+    f.advance();
+    f.result = terminal("pending", { identity: "b".repeat(40) });
+    await f.controller.watchers.tick();
+    const superseded = f.store.watchStore.get(w.id);
+    assert.equal(superseded.status, "superseded");
+    assert.equal(superseded.armed, true);
+    assert.equal(superseded.delivery, "none");
+    assert.equal(f.store.runForAction(`watch-${w.id}`), undefined);
+    f.store.setGoalState(chatId, "codex", origin.id, "waiting");
+    f.end();
+    f.controller.watchers.parked(chatId, [w.id]);
+    assert.equal(f.store.watchStore.get(w.id).delivery, "pending");
+    await f.close();
+    f = fixture({ path });
+    let calls = 0;
+    f.controller.runners.codex = async () => {
+      calls++;
+      return { status: "completed" };
+    };
+    await f.controller.watchers.tick();
+    await finishRuns(f.controller);
+    await f.controller.watchers.tick();
+    assert.equal(calls, 1);
+    assert.equal(f.store.watchStore.get(w.id).delivery, "delivered");
+  } finally {
+    await f.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

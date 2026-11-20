@@ -9,12 +9,15 @@ import { identitiesMatch } from "./process-identity.mjs";
 export const watching = (watch) =>
   ["registering", "pending", "settling", "retrying"].includes(watch.status);
 const ciComplete = new Set(["success", "failure", "cancelled", "skipped"]);
+const goalPrCiComplete = new Set([...ciComplete, "superseded"]);
 const completes = (watch) =>
   ["command", "file"].includes(watch.kind)
     ? new Set(["success", "failure", "error", "expired"])
     : (watch.kind ?? "ci") === "pr"
       ? new Set([...ciComplete, "updated"])
-      : ciComplete;
+      : watch.pr && watch.mode === "goal"
+        ? goalPrCiComplete
+        : ciComplete;
 const matches = (watch) =>
   watch.resumeOn.includes(watch.status) ||
   (watch.resumeOn.includes("complete") && completes(watch).has(watch.status));
@@ -1177,6 +1180,7 @@ ${(watch.excerpt ?? "").slice(-1600)}`;
   }
   prompt(watch) {
     const kind = watch.kind ?? "ci";
+    const superseded = kind === "ci" && watch.status === "superseded";
     const evidence =
       kind === "command"
         ? `Command: ${watch.command.slice(0, 1200)}\nExit code: ${watch.exitCode ?? "unknown"}\n\nOutput excerpt:\n${(watch.excerpt ?? "").slice(-2400)}`
@@ -1184,7 +1188,9 @@ ${(watch.excerpt ?? "").slice(-1600)}`;
           ? `Directory: ${watch.root}\nPath: ${watch.path}\nCondition: ${watch.until}\n`
           : kind === "pr"
             ? `Pull request: ${watch.repository}#${watch.pr}\n${watch.url}\n\nActivity:\n${(watch.items ?? []).map((item) => `${item.name}: ${item.state} ${item.excerpt ?? ""}`).join("\n")}`
-            : `Repository: ${watch.repository}\nRevision: ${watch.sha ?? watch.commit ?? watch.identity}\n${watch.url}\n\nChecks:\n${(watch.items ?? []).map((item) => `${item.name}: ${item.state} ${item.url ?? ""}`).join("\n")}`;
+            : superseded
+              ? `Pull request: ${watch.repository}#${watch.pr}\n${watch.url}\nWatched revision: ${watch.sha}\n\nVerify the intended PR revision before registering a fresh CI watch if CI is still needed. Use checks for that revision before acting on a CI result.`
+              : `Repository: ${watch.repository}\nRevision: ${watch.sha ?? watch.commit ?? watch.identity}\n${watch.url}\n\nChecks:\n${(watch.items ?? []).map((item) => `${item.name}: ${item.state} ${item.url ?? ""}`).join("\n")}`;
     const heading =
       kind === "command"
         ? "Background command result"
@@ -1214,6 +1220,8 @@ ${(watch.excerpt ?? "").slice(-1600)}`;
       return `File watch ${watch.status} for ${watch.path}. Continuing the task.`;
     if (kind === "pr")
       return `Pull request ${watch.status} for ${watch.repository}#${watch.pr}. Continuing the task.`;
+    if (watch.status === "superseded")
+      return `The PR revision changed for ${watch.repository}#${watch.pr}. Rechecking what CI to watch.`;
     return `CI ${watch.status} for ${watch.repository} at ${(watch.sha ?? watch.commit ?? watch.identity ?? "").slice(0, 8)}. Continuing the task.`;
   }
   continue(chatId, id, input) {

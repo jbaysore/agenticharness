@@ -659,10 +659,13 @@ does not trigger a continuation. GitHub error/expiry semantics are unchanged.
 The host reads check runs, commit statuses and workflow runs, including
 pagination and current rerun attempts. Empty checks stay pending; completed
 results need two matching observations at least a minute apart. A changed PR
-revision supersedes its watcher. Polls share identical targets, use conditional
-requests and serialize GitHub access. The interval starts at one minute, grows
-to two after ten minutes and five after an hour, and respects GitHub rate-limit
-headers. Expiry defaults to six hours, with a maximum of 24 hours.
+revision supersedes its watcher. An armed Goal CI watcher with
+`resumeOn: complete` resumes the Goal on supersession so the agent can verify
+the intended revision and register a fresh watch if needed. Polls share
+identical targets, use conditional requests and serialize GitHub access.
+The interval starts at one minute, grows to two after ten minutes and five
+after an hour, and respects GitHub rate-limit headers. Expiry defaults to six
+hours, with a maximum of 24 hours.
 
 A watcher can start one follow-up, with three automatic continuations allowed
 per original user request and only one agent running in each chat at a
