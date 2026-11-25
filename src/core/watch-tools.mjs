@@ -7,12 +7,25 @@ const reviewAfterMinutes = {
     "Minutes after confirmed suspension to review a still-pending watch. Requires resumeOn and authorized continuation. Yield again to start another interval. Review deadlines must fall before expiry. Host polling is independent.",
 };
 
-export function validateReviewTiming({ reviewAfterMinutes: minutes, resumeOn }) {
+export const defaultWatchExpiryHours = 6;
+
+export function validateReviewTiming({
+  reviewAfterMinutes: minutes,
+  resumeOn,
+  expiryHours,
+}) {
   if (minutes === undefined) return;
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)
     throw new Error("reviewAfterMinutes must be a whole number from 1 to 1440.");
   if (!Array.isArray(resumeOn) || !resumeOn.length)
-    throw new Error("reviewAfterMinutes requires authorized follow-up with resumeOn.");
+    throw new Error(
+      "reviewAfterMinutes requires authorized follow-up with resumeOn.",
+    );
+  const hours = expiryHours ?? defaultWatchExpiryHours;
+  if (Number.isFinite(hours) && minutes >= hours * 60)
+    throw new Error(
+      `reviewAfterMinutes must be shorter than the ${hours * 60}-minute watcher lifetime. Choose a shorter interval or a later expiry.`,
+    );
 }
 const followup = {
   resumeOn: {
@@ -163,6 +176,11 @@ export const watchTools = [
       properties: {
         ids: { type: "array", items: id, minItems: 1, maxItems: 10 },
         checkpoint: { type: "string", minLength: 1, maxLength: 2000 },
+        allowResultOnly: {
+          type: "boolean",
+          description:
+            "Allow a yield for result follow-up when a selected watch has too little time left for its next progress review. Omit unless Harness reports that a review cannot fit.",
+        },
       },
       required: ["ids", "checkpoint"],
       additionalProperties: false,

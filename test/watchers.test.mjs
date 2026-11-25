@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/core/store.mjs";
 import { Controller } from "../src/core/controller.mjs";
+import { prepareWatchedCommand } from "../src/core/command-tool.mjs";
 import { blockingGoals } from "../src/core/goals.mjs";
 import {
   quietReviewInterval,
@@ -1398,6 +1399,157 @@ test("custom review rejects invalid intervals and requires armed follow-up", asy
   }
 });
 
+test("review intervals must fit before expiry at registration", async () => {
+  const f = fixture({
+    commands: { start: async () => assert.fail("Invalid command was launched") },
+  });
+  const input = {
+    reviewAfterMinutes: 1440,
+    expiryHours: 24,
+    resumeOn: ["complete"],
+    continuation: "Check progress.",
+  };
+  const invalid = /must be shorter than the .* watcher lifetime/;
+  try {
+    await assert.rejects(
+      prepareWatchedCommand(
+        { ...input, command: "echo fixture" },
+        {
+          project: { path: process.cwd() },
+          approve: () => assert.fail("Invalid command reached approval"),
+          signal: new AbortController().signal,
+        },
+      ),
+      invalid,
+    );
+    assert.throws(
+      () =>
+        f.register({ ...input, expiryHours: undefined, reviewAfterMinutes: 360 }),
+      invalid,
+    );
+    await assert.rejects(startLocalCommand(f, input), invalid);
+    await assert.rejects(
+      f.controller.watchers.createFile(f.chat.id, {
+        ...input,
+        path: "done.txt",
+        until: "appears",
+      }),
+      invalid,
+    );
+    assert.deepEqual(f.store.watchStore.list(f.chat.id), []);
+    const ci = f.register({
+      ...input,
+      expiryHours: undefined,
+      reviewAfterMinutes: 359,
+    });
+    assert.equal(ci.reviewAfterMinutes, 359);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const phase of ["first yield", "repeat yield", "suspension confirmation"]) {
+  test(`a command review can run out of time at ${phase}`, async () => {
+    const f = fixture({
+      commands: commandDouble(
+        async () => ({ ...recorded }),
+        async () => ({ done: false }),
+        [],
+      ),
+    });
+    try {
+      const texts = [];
+      f.controller.runners.codex = async (ctx) => {
+        texts.push(ctx.text);
+        return { status: "completed" };
+      };
+      const followup = {
+        resumeOn: ["complete"],
+        continuation: "Check progress.",
+      };
+      const ci = f.register({ ...followup, reviewAfterMinutes: 1 });
+      const command = await startLocalCommand(f, {
+        ...followup,
+        reviewAfterMinutes: phase === "repeat yield" ? 8 : 14,
+        expiryHours: 0.25,
+      });
+      const watchers = f.controller.watchers;
+      const yieldInput = {
+        ids: [command.id, ci.id],
+        checkpoint: "Waiting for results.",
+      };
+      const yieldTurn = (input) => watchers.yield(f.chat.id, input);
+      const confirmPark = (ids) => {
+        clearTimeout(f.controller.active.get(f.chat.id).watchYield.timer);
+        f.end();
+        watchers.parked(f.chat.id, ids);
+      };
+
+      if (phase === "repeat yield") {
+        const first = yieldTurn({ ...yieldInput, ids: [command.id] });
+        assert.equal(first.parked, true);
+        confirmPark(first.ids);
+        assert.equal(
+          f.store.watchStore.get(command.id).reviewAt,
+          f.now + 480_000,
+        );
+        f.advance(480_000);
+        await watchers.tick();
+        await finishRuns(f.controller);
+        assert.match(texts[0], /Scheduled progress review/);
+        const run = f.store.createRun({
+          conversationId: f.chat.id,
+          actionId: randomUUID(),
+          provider: "codex",
+          model: "fixture",
+          text: "Review",
+        });
+        f.controller.active.set(f.chat.id, {
+          run,
+          abort: new AbortController(),
+          taskRootId: f.store.watchStore.get(command.id).rootId,
+        });
+      } else {
+        f.advance(phase === "first yield" ? 60_000 : 59_999);
+      }
+
+      if (phase !== "suspension confirmation") {
+        const before = f.store.watchStore.list(f.chat.id);
+        const rejected = yieldTurn(yieldInput);
+        assert.equal(rejected.parked, false);
+        assert.deepEqual(rejected.reviewUnavailableIds, [command.id]);
+        assert.equal(f.controller.active.get(f.chat.id).watchYield, undefined);
+        assert.deepEqual(f.store.watchStore.list(f.chat.id), before);
+      }
+      const accepted = yieldTurn({
+        ...yieldInput,
+        allowResultOnly: phase !== "suspension confirmation",
+      });
+      assert.equal(accepted.parked, true);
+      if (phase === "suspension confirmation") f.advance(1);
+      confirmPark(accepted.ids);
+      const saved = f.store.watchStore.get(command.id);
+      assert.equal(saved.reviewAt, null);
+      assert.match(saved.reviewWarning, /falls at or after expiry/);
+      assert.equal(saved.armed, true);
+      assert.equal(f.store.watchStore.get(ci.id).reviewAt, f.now + 60_000);
+
+      f.advance(command.expiresAt - f.now);
+      await watchers.tick();
+      await finishRuns(f.controller);
+      await watchers.tick();
+      await finishRuns(f.controller);
+      assert.equal(f.store.watchStore.get(command.id).status, "expired");
+      assert.equal(
+        f.store.watchStore.get(command.id).followupStatus,
+        "completed",
+      );
+    } finally {
+      await f.close();
+    }
+  });
+}
+
 for (const outcome of ["success", "expired"]) {
   test(`a CI watch that is ${outcome} at the review deadline skips progress review`, async () => {
     const f = fixture();
@@ -1409,15 +1561,16 @@ for (const outcome of ["success", "expired"]) {
       };
       if (outcome === "success") f.result = { ...f.result, status: "success" };
       const watch = f.register({
-        reviewAfterMinutes: outcome === "success" ? 1 : 15,
+        reviewAfterMinutes: outcome === "success" ? 1 : 14,
         expiryHours: 0.25,
         resumeOn: ["complete"],
         continuation: "Check progress.",
       });
       f.arm(watch);
+      if (outcome === "expired") f.advance(60_000);
       f.controller.watchers.parked(f.chat.id, [watch.id]);
       await f.controller.watchers.tick();
-      f.advance(outcome === "success" ? 60_000 : 900_000);
+      f.advance(outcome === "success" ? 60_000 : 840_000);
       await f.controller.watchers.tick();
       await finishRuns(f.controller);
       const saved = f.store.watchStore.get(watch.id);

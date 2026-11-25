@@ -178,6 +178,9 @@ export function WatchCards({ chat, watches = [], reload, refresh, report }) {
               </div>
             )}
             {watch.reason && <p>{watch.reason}</p>}
+            {pending(watch) && watch.armed && watch.reviewWarning && (
+              <p>{watch.reviewWarning}</p>
+            )}
             {overdue && (
               <p role="status">
                 Monitoring check overdue. Last host check:{" "}

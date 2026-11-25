@@ -5,7 +5,7 @@ import { GitHubCI } from "./github-ci.mjs";
 import { commandControls } from "./command-watch.mjs";
 import { inspectFile, tailFile } from "./file-watch.mjs";
 import { identitiesMatch } from "./process-identity.mjs";
-import { validateReviewTiming } from "./watch-tools.mjs";
+import { defaultWatchExpiryHours, validateReviewTiming } from "./watch-tools.mjs";
 
 export const watching = (watch) =>
   ["registering", "pending", "settling", "retrying"].includes(watch.status);
@@ -38,6 +38,8 @@ export const activeReviewInterval = 3_600_000;
 const localWatch = (watch) => ["command", "file"].includes(watch.kind);
 const hasReviewSchedule = (watch) =>
   localWatch(watch) || watch.reviewAfterMinutes !== undefined;
+const explicitReviewDeadline = (watch, start) =>
+  start + watch.reviewAfterMinutes * 60_000;
 const reviewing = (watch) => watching(watch) && watch.delivery === "pending";
 const fileKey = (watch) =>
   `file:${JSON.stringify([
@@ -284,7 +286,7 @@ export class Watchers {
       throw new Error("Give either a full commit SHA or a positive PR number.");
     const resumeOn = input.resumeOn ?? [],
       continuation = input.continuation ?? "",
-      hours = input.expiryHours ?? 6;
+      hours = input.expiryHours ?? defaultWatchExpiryHours;
     if (
       !Array.isArray(resumeOn) ||
       resumeOn.length > 3 ||
@@ -364,7 +366,7 @@ export class Watchers {
         "Registration saved. Initial GitHub lookup is pending. Monitoring requires the Harness host to be running.",
     };
   }
-  yield(chatId, { ids, checkpoint }) {
+  yield(chatId, { ids, checkpoint, allowResultOnly = false }) {
     const chat = this.store.conversation(chatId),
       active = this.controller.active.get(chatId);
     if (["ask", "plan"].includes(chat.mode))
@@ -424,6 +426,21 @@ export class Watchers {
         instruction:
           "Stop task work. This turn is already pausing for the owner, and this request's pending watchers stay armed.",
       };
+    const now = this.now();
+    const reviewUnavailableIds = watches
+      .filter(
+        (watch) =>
+          watch.reviewAfterMinutes !== undefined &&
+          explicitReviewDeadline(watch, now) >= watch.expiresAt,
+      )
+      .map((watch) => watch.id);
+    if (reviewUnavailableIds.length && allowResultOnly !== true)
+      return {
+        parked: false,
+        reviewUnavailableIds,
+        instruction:
+          "The next progress review falls at or after expiry for the listed watchers. Yield again with allowResultOnly: true to wait for their results without a progress review.",
+      };
     for (const watch of watches) {
       watch.rootId = root;
       // A review already delivered leaves the still-running watch re-armable.
@@ -434,6 +451,7 @@ export class Watchers {
         watch.reviewAt = null;
       }
       watch.reason = null;
+      delete watch.reviewWarning;
       watch.armed = watch.resumeOn.length > 0;
       watch.checkpoint = checkpoint.trim();
       this.save(watch);
@@ -551,7 +569,7 @@ export class Watchers {
       );
     const resumeOn = input.resumeOn ?? [],
       continuation = input.continuation ?? "",
-      hours = input.expiryHours ?? 6;
+      hours = input.expiryHours ?? defaultWatchExpiryHours;
     if (
       !Array.isArray(resumeOn) ||
       resumeOn.length > 3 ||
@@ -954,8 +972,12 @@ export class Watchers {
   reviewDeadline(watch) {
     const reviewed = watch.reviewedAt ?? this.now();
     if (watch.reviewAfterMinutes !== undefined) {
-      const deadline = reviewed + watch.reviewAfterMinutes * 60_000;
+      const deadline = explicitReviewDeadline(watch, reviewed);
       watch.reviewAt = deadline < watch.expiresAt ? deadline : null;
+      if (watch.reviewAt === null)
+        watch.reviewWarning =
+          "The next progress review falls at or after expiry. Result follow-up is still armed.";
+      else delete watch.reviewWarning;
       return;
     }
     watch.reviewAt = Math.min(
