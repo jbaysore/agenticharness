@@ -14,3 +14,6 @@ test-results/
 # Personal writing samples stay local
 skills/*/samples/*
 !skills/*/samples/.gitkeep
+
+# The personal writing-style skill stays local
+skills/my-voice/

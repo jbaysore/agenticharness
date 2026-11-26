@@ -188,3 +188,7 @@ blue, Claude Code orange, Cursor violet), onto a dark tile. Its editable
 source is `src/ui/icons/harness.svg`; `npm run build:icons` regenerates the committed
 PNG and multi-size Windows ICO assets using local Edge. Normal builds copy those
 assets for the browser, home-screen icon and installed desktop shortcut.
+
+## Rights
+
+The source is published for viewing. All rights reserved; no license is granted to copy, modify, or redistribute it.
